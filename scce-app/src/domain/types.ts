@@ -77,3 +77,15 @@ export type LocalCatalogEntry = {
 };
 
 export type LocalCatalog = LocalCatalogEntry[];
+
+export type AuditLogEntry = {
+  eventId: string;
+  type: string;
+  at: string;
+  actor: string;
+  role: string;
+  caseId: string | null;
+  summary: string;
+  prevHash: string;
+  hash: string;
+};

@@ -1,5 +1,15 @@
 import React, { useState, useMemo, useEffect } from "react";
-import type { CaseItem, LocalCatalog, LocalCatalogEntry, CaseStatus, Criticality, RegionCode, CommuneCode } from "./domain/types";
+import type { CaseItem, LocalCatalog, LocalCatalogEntry, CaseStatus, Criticality, RegionCode, CommuneCode, AuditLogEntry } from "./domain/types";
+import { calcCompleteness } from "./domain/caseMetrics";
+import { findActiveLocal } from "./domain/catalog";
+import { validateCaseSchema } from "./domain/caseValidation";
+import { fmtDate, timeDiff, nowISO, uuidSimple, tsISO } from "./domain/date";
+import { checkLocalDivergence } from "./domain/localDivergence";
+import { SLA_MINUTES, isSlaVencido, type SlaLevel } from "./domain/caseSla";
+import { getRecommendation } from "./domain/recommendation";
+import { recColor } from "./domain/theme";
+import { chainHash } from "./domain/hash";
+import { appendEvent, verifyChain } from "./domain/audit";
 
 const APP_VERSION = "1.9";
 const MIN_ELECTION_YEAR = 2026;
@@ -46,7 +56,6 @@ const POLICIES = {
   DIRECTOR_REGIONAL: {create:true, update:true, assign:true, close:true, bypass:true, viewAll:true, comment:true, instruct:false,recepcionar:true, export:true, validateBypass:true, manageCatalog:false},
   NIVEL_CENTRAL:     {create:false,update:false,assign:false,close:false,bypass:false,viewAll:true, comment:true, instruct:true, recepcionar:false,export:true, validateBypass:false,manageCatalog:true},
 } as const;
-const SLA_MINUTES: Record<string, number> = { CRITICA: 5, ALTA: 15, MEDIA: 60, BAJA: 120 };
 
 // =====================
 // Tipado mínimo SCCE (Enterprise)
@@ -88,8 +97,6 @@ function canDo(action: PolicyAction, user: User | null, caseObj?: CaseItem | nul
 }
 
 // Tipos mínimos para eliminar TS7006/TS7034 sin reescribir la app
-type SlaLevel = "CRITICA" | "ALTA" | "MEDIA" | "BAJA";
-
 type LncDraft = {
   region?: string;
   commune?: string;
@@ -97,19 +104,6 @@ type LncDraft = {
   origin?: { channel?: string; detectedAt?: string };
   summary?: string;
   [key: string]: unknown;
-};
-
-// Tipos mínimos para log de auditoría (evita TS7022/TS7006 en appendEvent/buildSeedLog/verifyChain)
-type AuditLogEntry = {
-  eventId: string;
-  type: string;
-  at: string;
-  actor: string;
-  role: string;
-  caseId: string | null;
-  summary: string;
-  prevHash: string;
-  hash: string;
 };
 
 // ─── CATÁLOGO ────────────────────────────────────────────────────────────────
@@ -158,35 +152,6 @@ function getActiveLocals(
   );
 }
 
-function findActiveLocal(
-  catalog: LocalCatalog,
-  region: RegionCode,
-  commune: CommuneCode,
-  nombre: string
-): LocalCatalogEntry | null {
-  return (
-    catalog.find(
-      (l: LocalCatalogEntry) =>
-        l.region === region &&
-        l.commune === commune &&
-        l.nombre === nombre &&
-        l.activoGlobal &&
-        l.activoEnEleccionActual
-    ) || null
-  );
-}
-
-// v1.9: detectar si el local snapshot de un caso diverge del catálogo actual
-function checkLocalDivergence(caseObj: { localSnapshot?: { idLocal: string; nombre: string } | null }, catalog: LocalCatalog): { type: string; msg: string } | null {
-  if(!caseObj.localSnapshot)return null;
-  const cur=catalog.find(l=>l.idLocal===caseObj.localSnapshot!.idLocal);
-  if(!cur)return{type:"deleted",msg:"Local eliminado del catálogo tras creación"};
-  if(!cur.activoGlobal)return{type:"deactivated",msg:`Local desactivado (SD) el ${fmtDate(cur.fechaDesactivacion)}`};
-  if(!cur.activoEnEleccionActual)return{type:"election_off",msg:"Local desactivado para la elección actual"};
-  if(cur.nombre!==caseObj.localSnapshot.nombre)return{type:"renamed",msg:`Local renombrado a "${cur.nombre}"`};
-  return null;
-}
-
 function catalogSelfCheck(catalog: LocalCatalog): string[] {
   const v: string[] = [];
   catalog.forEach((l: LocalCatalogEntry) => {
@@ -197,47 +162,9 @@ function catalogSelfCheck(catalog: LocalCatalog): string[] {
 }
 
 // ─── UTILIDADES ──────────────────────────────────────────────────────────────
-const nowISO=()=>new Date().toISOString();
-const tsISO=(m=0)=>new Date(Date.now()-m*60000).toISOString();
-function fmtDate(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  return d.toLocaleDateString("es-CL") + " " + d.toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" });
-}
-function timeDiff(a: string | null | undefined, b: string | null | undefined): number | null {
-  if (!a || !b) return null;
-  const ta = new Date(a).getTime();
-  const tb = new Date(b).getTime();
-  return Math.round((tb - ta) / 60000);
-}
-function getElapsed(c: { createdAt?: string }): number {
-  return Math.round((Date.now() - new Date(c.createdAt ?? 0).getTime()) / 60000);
-}
-function isSlaVencido(c: { createdAt?: string; status?: string; criticality?: string }): boolean {
-  if(!c.createdAt||["Resuelto","Cerrado"].includes(c.status||""))return false;
-  const slaKey: SlaLevel = (c?.criticality as SlaLevel) ?? "MEDIA";
-  const slaMin = (SLA_MINUTES as Record<SlaLevel, number>)[slaKey] ?? 120;
-  return getElapsed(c) > slaMin;
-}
-function getRecommendation(c: { status?: string; criticality?: string; createdAt?: string }){
-  const el=getElapsed(c);
-  const slaKey: SlaLevel = (c?.criticality as SlaLevel) ?? "MEDIA";
-  const sla = (SLA_MINUTES as Record<SlaLevel, number>)[slaKey] ?? 120;
-  const br=el>sla;
-  if(c.status==="Cerrado")          return{level:"low",  label:"Cerrado",  icon:"✅",text:"Sin acciones",            reason:"Estado Cerrado."};
-  if(c.criticality==="CRITICA"&&br) return{level:"high", label:"Escalar",  icon:"🚨",text:"Escalar a Nivel Central", reason:`CRÍTICA+SLA vencido (${el}>${sla} min).`};
-  if(c.criticality==="CRITICA")     return{level:"medium",label:"Acción",  icon:"⚠️",text:"Registrar acción inmediata",reason:`CRÍTICA (SLA ${el}/${sla} min).`};
-  if(br)                            return{level:"medium",label:"Acción",  icon:"⏱️",text:"Registrar acción formal", reason:`SLA vencido (${el}>${sla} min).`};
-  return                                  {level:"low",  label:"Monitoreo",icon:"👁️",text:"Mantener monitoreo",      reason:`SLA dentro de margen (${el}/${sla} min).`};
-}
-function recColor(l: RecLevel): string {
-  const map = { high:"#ef4444", medium:"#f97316", low:"#94a3b8" } as const;
-  return map[l] ?? "#94a3b8";
-}
 function genId(region: RegionCode, commune: CommuneCode, seq: number): string {
   return `${region}-${new Date().getFullYear()}-${commune}-${String(seq).padStart(3, "0")}`;
 }
-function uuidSimple(){return"ev-"+Math.random().toString(36).slice(2,10)+"-"+Date.now().toString(36);}
 function calcCriticality(ev: Record<string, number> | null | undefined) {
   const vals = Object.values(ev ?? {}) as number[];
   const max = vals.length ? Math.max(...vals) : 0;
@@ -264,64 +191,6 @@ function statusColor(s: CaseStatus): string {
   } as const;
   return map[s] ?? "#6b7280";
 }
-function calcCompleteness(c: CaseItem){
-  let f=0;
-  if(c.summary)f++;if(c.detail)f++;if(c.evidence?.length)f++;
-  if(c.evaluation&&Object.keys(c.evaluation).length===5)f++;
-  if(c.assignedTo)f++;if(c.actions?.length)f++;if(c.decisions?.length)f++;
-  if((c.timeline?.length ?? 0)>=3)f++;
-  return Math.round(f/8*100);
-}
-function validateCaseSchema(c: { summary?: string; commune?: string; region?: string; local?: string; origin?: { detectedAt?: string } }, catalog: LocalCatalog = []){
-  const e=[];
-  if(!c.summary?.trim())e.push("Resumen obligatorio.");
-  if(!c.commune)e.push("Comuna obligatoria.");
-  if(!c.region)e.push("Región obligatoria.");
-  if(!c.local?.trim())e.push("Local de votación obligatorio.");
-  if(!c.origin?.detectedAt)e.push("Hora de detección obligatoria.");
-  if(c.local?.trim()&&catalog.length>0){
-    if(!findActiveLocal(catalog,c.region ?? "",c.commune ?? "",c.local ?? ""))
-      e.push(`Local "${c.local}" no está activo en el catálogo.`);
-  }
-  return e;
-}
-function simpleHash(str: string): string {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < str.length; i++) {
-    h ^= str.charCodeAt(i);
-    h = (h * 0x01000193) >>> 0;
-  }
-  return h.toString(16).padStart(8, "0");
-}
-
-function chainHash(prev: string, ev: { eventId?: string; type?: string; at?: string; actor?: string; caseId?: string | null; summary?: string }): string {
-  return simpleHash(prev + (ev.eventId || "") + (ev.type || "") + (ev.at || "") + (ev.actor || "") + (ev.caseId ?? "") + (ev.summary || ""));
-}
-
-function appendEvent(
-  log: AuditLogEntry[],
-  type: string,
-  actor: string,
-  role: string,
-  caseId: string | null,
-  summary: string
-): AuditLogEntry[] {
-  const prevHash: string = log.length ? log[log.length - 1].hash : "00000000";
-  const ev: AuditLogEntry = {
-    eventId: uuidSimple(),
-    type,
-    at: nowISO(),
-    actor,
-    role,
-    caseId,
-    summary,
-    prevHash,
-    hash: "",
-  };
-  ev.hash = chainHash(prevHash, ev);
-  return [...log, ev];
-}
-
 type SeedEventInput = { type: string; at: string; actor: string; role: string; caseId?: string | null; summary: string };
 
 function buildSeedLog(events: SeedEventInput[]): AuditLogEntry[] {
@@ -339,16 +208,6 @@ function buildSeedLog(events: SeedEventInput[]): AuditLogEntry[] {
     log.push(ev);
   }
   return log;
-}
-
-function verifyChain(events: AuditLogEntry[]): { ok: boolean; failIndex: number } {
-  let prev = "00000000";
-  for (let i = 0; i < events.length; i++) {
-    const e = events[i];
-    if (e.hash !== chainHash(e.prevHash !== undefined ? e.prevHash : prev, e)) return { ok: false, failIndex: i };
-    prev = e.hash;
-  }
-  return { ok: true, failIndex: -1 };
 }
 
 const SIM_SCENARIOS=[
@@ -639,7 +498,7 @@ export default function App(){
       const commune=communes[i%communes.length];
       const activos=getActiveLocals(localCatalog,"TRP",commune);
       const le=activos.length?activos[0]:null;
-      return{id:genId("TRP",commune,100+i),region:"TRP",commune,local:le?le.nombre:"Escuela Simulación",localSnapshot:le?{idLocal:le.idLocal,nombre:le.nombre,region:"TRP",commune,snapshotAt:tsISO(30-i*2)}:null,origin:{actor:"Simulación",channel:"Teams",detectedAt:tsISO(30-i*2)},summary:s.summary,detail:"[SIM] "+s.summary,evidence:[],bypass:false,bypassFlagged:false,evaluation:s.ev,evaluationLocked:true,evaluationHistory:[],criticality:result.criticality,criticalityScore:result.score,status:"Nuevo" as CaseStatus,assignedTo:null,slaMinutes:SLA_MINUTES[result.criticality]||60,closingMotivo:null,bypassValidated:null,timeline:[{type:"DETECTED",at:tsISO(30-i*2),actor:"SIM",note:"Simulación"}],actions:[],decisions:[],completeness:40,reportedAt:tsISO(28-i*2),firstActionAt:null,escalatedAt:null,mitigatedAt:null,resolvedAt:null,closedAt:null,createdBy:"SIM",createdAt:tsISO(30-i*2),updatedAt:tsISO(30-i*2),isSim:true};
+      return{id:genId("TRP",commune,100+i),region:"TRP",commune,local:le?le.nombre:"Escuela Simulación",localSnapshot:le?{idLocal:le.idLocal,nombre:le.nombre,region:"TRP",commune,snapshotAt:tsISO(30-i*2)}:null,origin:{actor:"Simulación",channel:"Teams",detectedAt:tsISO(30-i*2)},summary:s.summary,detail:"[SIM] "+s.summary,evidence:[],bypass:false,bypassFlagged:false,evaluation:s.ev,evaluationLocked:true,evaluationHistory:[],criticality:result.criticality,criticalityScore:result.score,status:"Nuevo" as CaseStatus,assignedTo:null,slaMinutes:SLA_MINUTES[result.criticality as SlaLevel]||60,closingMotivo:null,bypassValidated:null,timeline:[{type:"DETECTED",at:tsISO(30-i*2),actor:"SIM",note:"Simulación"}],actions:[],decisions:[],completeness:40,reportedAt:tsISO(28-i*2),firstActionAt:null,escalatedAt:null,mitigatedAt:null,resolvedAt:null,closedAt:null,createdBy:"SIM",createdAt:tsISO(30-i*2),updatedAt:tsISO(30-i*2),isSim:true};
     });
     setSimCases(sc as CaseItem[]);
     setSimReport({total:sc.length,critica:sc.filter(c=>c.criticality==="CRITICA").length,alta:sc.filter(c=>c.criticality==="ALTA").length,avgScore:Number((sc.reduce((s,c)=>s+(c.criticalityScore ?? 0),0)/sc.length).toFixed(1))});
