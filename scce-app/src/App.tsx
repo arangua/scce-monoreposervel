@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from "react";
+import type { CaseItem, LocalCatalog, LocalCatalogEntry, CaseStatus, Criticality, RegionCode, CommuneCode } from "./domain/types";
 
 const APP_VERSION = "1.9";
 const MIN_ELECTION_YEAR = 2026;
@@ -53,18 +54,7 @@ const SLA_MINUTES: Record<string, number> = { CRITICA: 5, ALTA: 15, MEDIA: 60, B
 type Role = keyof typeof POLICIES;
 type PolicyAction = keyof (typeof POLICIES)[Role];
 
-type Criticality = "CRITICA" | "ALTA" | "MEDIA" | "BAJA";
-
 type RecLevel = "high" | "medium" | "low";
-
-type CaseStatus =
-  | "Nuevo"
-  | "Recepcionado por DR"
-  | "En gestión"
-  | "Escalado"
-  | "Mitigado"
-  | "Resuelto"
-  | "Cerrado";
 
 type Notification = { msg: string; type: string } | null;
 
@@ -76,54 +66,6 @@ type User = {
   username?: string;
   password?: string;
   commune?: string;
-};
-
-type CaseEvent = {
-  type: string;
-  at: string;
-  actor: string;
-  note?: string;
-};
-
-type CaseItem = {
-  id: string;
-  region: string;
-  commune: string;
-  status: CaseStatus;
-  criticality: Criticality;
-  summary: string;
-  local?: string;
-  localSnapshot?: { idLocal: string; nombre: string; region: string; commune: string; snapshotAt: string } | null;
-  origin?: { actor: string; channel: string; detectedAt: string };
-  timeline?: CaseEvent[];
-  evaluation?: Record<string, number>;
-  criticalityScore?: number;
-  detail?: string;
-  evidence?: string[];
-  actions?: unknown[];
-  decisions?: unknown[];
-  assignedTo?: string | null;
-  closingMotivo?: string | null;
-  bypass?: boolean;
-  bypassMotivo?: string;
-  bypassActor?: string | null;
-  bypassFlagged?: boolean;
-  peseInoperante?: boolean;
-  evaluationLocked?: boolean;
-  evaluationHistory?: unknown[];
-  slaMinutes?: number;
-  bypassValidated?: string | null;
-  completeness?: number;
-  reportedAt?: string | null;
-  firstActionAt?: string | null;
-  escalatedAt?: string | null;
-  mitigatedAt?: string | null;
-  resolvedAt?: string | null;
-  closedAt?: string | null;
-  createdBy?: string;
-  createdAt?: string;
-  updatedAt?: string;
-  isSim?: boolean;
 };
 
 type SimReport = {
@@ -146,9 +88,6 @@ function canDo(action: PolicyAction, user: User | null, caseObj?: CaseItem | nul
 }
 
 // Tipos mínimos para eliminar TS7006/TS7034 sin reescribir la app
-type RegionCode = string;
-type CommuneCode = string;
-
 type SlaLevel = "CRITICA" | "ALTA" | "MEDIA" | "BAJA";
 
 type LncDraft = {
@@ -159,20 +98,6 @@ type LncDraft = {
   summary?: string;
   [key: string]: unknown;
 };
-
-type LocalCatalogEntry = {
-  idLocal: string;
-  nombre: string;
-  region: RegionCode;
-  commune: CommuneCode;
-  activoGlobal: boolean;
-  activoEnEleccionActual: boolean;
-  fechaCreacion: string; // ISO
-  fechaDesactivacion: string | null; // ISO o null
-  origenSeed: boolean;
-};
-
-type LocalCatalog = LocalCatalogEntry[];
 
 // Tipos mínimos para log de auditoría (evita TS7022/TS7006 en appendEvent/buildSeedLog/verifyChain)
 type AuditLogEntry = {
