@@ -522,8 +522,31 @@ export default function App(){
   }
   function exportJSON(){
     if (!currentUser) return;
+    const metadata={exportedAt:nowISO(),scceVersion:APP_VERSION,election:electionConfig,chainIntegrity:chainResult.ok?"INTEGRA":"COMPROMETIDA"};
+
+    // Guardrail mínimo (Fase 6.1-2): forma del payload
+    if (!Array.isArray(cases)){
+      alert("Export JSON bloqueado: 'cases' no es un array.");
+      return;
+    }
+    if (!metadata||typeof metadata!=="object"||Array.isArray(metadata)){
+      alert("Export JSON bloqueado: 'metadata' no es un objeto válido.");
+      return;
+    }
+
+    const payload={metadata,cases};
+    const json=JSON.stringify(payload,null,2);
+
+    // Guardrail mínimo (Fase 6.1-1): límite de tamaño del export
+    const approxBytes=new TextEncoder().encode(json).length;
+    const MAX_BYTES=5*1024*1024; // 5 MB
+    if (approxBytes>MAX_BYTES){
+      alert(`Export JSON bloqueado: ${(approxBytes/(1024*1024)).toFixed(2)} MB excede el máximo de ${(MAX_BYTES/(1024*1024)).toFixed(0)} MB.`);
+      return;
+    }
+
     const a=document.createElement("a");
-    a.href=URL.createObjectURL(new Blob([JSON.stringify({metadata:{exportedAt:nowISO(),scceVersion:APP_VERSION,election:electionConfig,chainIntegrity:chainResult.ok?"INTEGRA":"COMPROMETIDA"},cases},null,2)],{type:"application/json"}));
+    a.href=URL.createObjectURL(new Blob([json],{type:"application/json"}));
     a.download="SCCE_casos.json";a.click();
     setAuditLog(prev=>appendEvent(prev,"EXPORT_DONE",currentUser.id,currentUser.role,null,"Export JSON"));
     notify("JSON exportado");
