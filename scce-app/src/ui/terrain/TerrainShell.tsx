@@ -98,8 +98,13 @@ export function TerrainShell({
   setSelectedCaseId,
   children,
 }: Props) {
+  const [filterPendingOnly, setFilterPendingOnly] = React.useState(false);
+
   const activeCasesRaw = cases.filter((c) => c.status !== "Cerrado");
-  const activeCases = sortCasesForTerrain(activeCasesRaw, currentUser);
+  let activeCases = sortCasesForTerrain(activeCasesRaw, currentUser);
+  if (filterPendingOnly) {
+    activeCases = activeCases.filter((c) => pendingInstructionsCountForUser(c, currentUser) > 0);
+  }
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "340px 1fr", gap: 12, padding: 12, minHeight: "100vh", background: "#0f172a" }}>
@@ -110,6 +115,37 @@ export function TerrainShell({
         <div style={{ fontWeight: 700, marginBottom: 8, color: "#94a3b8", fontSize: 14 }}>
           Casos activos ({activeCases.length})
         </div>
+
+        {filterPendingOnly && (
+          <div style={{
+            marginBottom: 12,
+            padding: "6px 10px",
+            background: "#7f1d1d",
+            color: "white",
+            borderRadius: 6,
+            fontSize: 13,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}>
+            <span>Filtro activo: solo casos con pendientes</span>
+            <button
+              type="button"
+              onClick={() => setFilterPendingOnly(false)}
+              style={{
+                background: "#991b1b",
+                border: "none",
+                color: "white",
+                padding: "4px 8px",
+                borderRadius: 4,
+                cursor: "pointer",
+                fontSize: 12,
+              }}
+            >
+              Quitar filtro
+            </button>
+          </div>
+        )}
 
         {activeCases.map((c) => {
           const pending = pendingInstructionsCountForUser(c, currentUser);
@@ -131,12 +167,18 @@ export function TerrainShell({
               <div style={{ fontWeight: 600, color: "#e2e8f0", fontSize: 12 }}>{c.summary}</div>
               <div style={{ fontSize: 11, color: "#94a3b8" }}>{c.commune}</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 6 }}>
-                <Chip
-                  tone={pending > 0 ? "danger" : "neutral"}
-                  title="Instrucciones con acuse requerido pendientes para ti"
+                <span
+                  role="button"
+                  tabIndex={0}
+                  title="Filtrar solo casos con pendientes"
+                  onClick={(e) => { e.stopPropagation(); setFilterPendingOnly(true); }}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setFilterPendingOnly(true); } }}
+                  style={{ cursor: "pointer", display: "inline-flex" }}
                 >
-                  Pendientes: {pending}
-                </Chip>
+                  <Chip tone={pending > 0 ? "danger" : "neutral"} title="Filtrar solo casos con pendientes">
+                    Pendientes: {pending}
+                  </Chip>
+                </span>
                 <Chip tone={sev.tone} title="Severidad (criticalityScore o fallback criticality)">
                   Severidad: {sev.label}
                 </Chip>
