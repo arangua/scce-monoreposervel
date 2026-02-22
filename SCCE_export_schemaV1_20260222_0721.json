@@ -1,0 +1,295 @@
+{
+  "metadata": {
+    "schemaVersion": 1,
+    "exportedAt": "2026-02-22T10:21:16.311Z",
+    "scceVersion": "1.9",
+    "election": {
+      "name": "Elecciones Generales 2026",
+      "date": "2026-11-15",
+      "year": 2026
+    },
+    "chainIntegrity": "INTEGRA"
+  },
+  "cases": [
+    {
+      "id": "TRP-2026-IQQ-001",
+      "region": "TRP",
+      "commune": "IQQ",
+      "local": "Liceo Arturo Pérez Canto",
+      "localSnapshot": {
+        "idLocal": "LOC-0005",
+        "nombre": "Liceo Arturo Pérez Canto",
+        "region": "TRP",
+        "commune": "IQQ",
+        "snapshotAt": "2026-02-22T08:43:22.271Z"
+      },
+      "origin": {
+        "actor": "PESE Local",
+        "channel": "Teams",
+        "detectedAt": "2026-02-22T08:43:22.271Z"
+      },
+      "summary": "Urna sellada de forma incorrecta — sello roto en mesa 12",
+      "detail": "El vocal de mesa reporta precinto roto.",
+      "evidence": [],
+      "bypass": false,
+      "bypassFlagged": false,
+      "peseInoperante": false,
+      "evaluationLocked": true,
+      "evaluationHistory": [],
+      "evaluation": {
+        "continuidad": 1,
+        "integridad": 2,
+        "seguridad": 0,
+        "exposicion": 1,
+        "capacidadLocal": 2
+      },
+      "criticality": "MEDIA",
+      "criticalityScore": 6,
+      "status": "En gestión",
+      "assignedTo": "u4",
+      "slaMinutes": 60,
+      "closingMotivo": null,
+      "bypassValidated": null,
+      "timeline": [
+        {
+          "type": "DETECTED",
+          "at": "2026-02-22T08:43:22.271Z",
+          "actor": "u1",
+          "note": "Detectado por PESE"
+        },
+        {
+          "type": "REPORTED",
+          "at": "2026-02-22T08:48:22.271Z",
+          "actor": "u1",
+          "note": "Reportado vía Teams"
+        },
+        {
+          "type": "RECEPCIONADO",
+          "at": "2026-02-22T08:50:22.271Z",
+          "actor": "u4",
+          "note": "Recepcionado"
+        },
+        {
+          "type": "FIRST_ACTION",
+          "at": "2026-02-22T08:53:22.271Z",
+          "actor": "u4",
+          "note": "Registro SCCE toma el caso"
+        }
+      ],
+      "actions": [
+        {
+          "id": "a1",
+          "action": "Instruir a vocal: fotografiar precinto.",
+          "responsible": "u4",
+          "at": "2026-02-22T08:53:22.271Z",
+          "result": "Confirmado"
+        }
+      ],
+      "decisions": [
+        {
+          "who": "u4",
+          "at": "2026-02-22T08:54:22.271Z",
+          "fundament": "Protocolo: urna con precinto dañado → preservar y fotografiar."
+        }
+      ],
+      "completeness": 90,
+      "reportedAt": "2026-02-22T08:48:22.271Z",
+      "firstActionAt": "2026-02-22T08:53:22.271Z",
+      "escalatedAt": null,
+      "mitigatedAt": null,
+      "resolvedAt": null,
+      "closedAt": null,
+      "createdBy": "u1",
+      "createdAt": "2026-02-22T08:43:22.271Z",
+      "updatedAt": "2026-02-22T08:53:22.271Z"
+    },
+    {
+      "id": "TRP-2026-IQQ-002",
+      "region": "TRP",
+      "commune": "IQQ",
+      "local": "Escuela Alemania",
+      "localSnapshot": {
+        "idLocal": "LOC-0006",
+        "nombre": "Escuela Alemania",
+        "region": "TRP",
+        "commune": "IQQ",
+        "snapshotAt": "2026-02-22T08:43:22.271Z"
+      },
+      "origin": {
+        "actor": "Delegado JE",
+        "channel": "WhatsApp",
+        "detectedAt": "2026-02-22T08:08:22.271Z"
+      },
+      "summary": "Vocal de mesa no se presenta — 40 min tras apertura",
+      "detail": "Mesa 5 abre con solo 2 vocales.",
+      "evidence": [],
+      "bypass": false,
+      "bypassFlagged": false,
+      "peseInoperante": false,
+      "evaluationLocked": true,
+      "evaluationHistory": [],
+      "evaluation": {
+        "continuidad": 2,
+        "integridad": 1,
+        "seguridad": 0,
+        "exposicion": 1,
+        "capacidadLocal": 1
+      },
+      "criticality": "ALTA",
+      "criticalityScore": 5,
+      "status": "Resuelto",
+      "assignedTo": "u5",
+      "slaMinutes": 30,
+      "closingMotivo": null,
+      "bypassValidated": null,
+      "timeline": [
+        {
+          "type": "DETECTED",
+          "at": "2026-02-22T08:08:22.271Z",
+          "actor": "u2",
+          "note": ""
+        },
+        {
+          "type": "REPORTED",
+          "at": "2026-02-22T08:10:22.271Z",
+          "actor": "u2",
+          "note": ""
+        },
+        {
+          "type": "RECEPCIONADO",
+          "at": "2026-02-22T08:13:22.271Z",
+          "actor": "u4",
+          "note": ""
+        },
+        {
+          "type": "FIRST_ACTION",
+          "at": "2026-02-22T08:18:22.271Z",
+          "actor": "u5",
+          "note": ""
+        },
+        {
+          "type": "RESOLVED",
+          "at": "2026-02-22T08:58:22.271Z",
+          "actor": "u5",
+          "note": "Vocal reemplazante juramentado"
+        }
+      ],
+      "actions": [
+        {
+          "id": "a2",
+          "action": "Contactar nómina de reemplazantes",
+          "responsible": "u5",
+          "at": "2026-02-22T08:18:22.271Z",
+          "result": "Vocal se presenta"
+        }
+      ],
+      "decisions": [
+        {
+          "who": "u7",
+          "at": "2026-02-22T08:19:22.271Z",
+          "fundament": "LOC: vocal ausente → llamar reemplazante."
+        }
+      ],
+      "completeness": 100,
+      "reportedAt": "2026-02-22T08:10:22.271Z",
+      "firstActionAt": "2026-02-22T08:18:22.271Z",
+      "escalatedAt": null,
+      "mitigatedAt": null,
+      "resolvedAt": "2026-02-22T08:58:22.271Z",
+      "closedAt": null,
+      "createdBy": "u2",
+      "createdAt": "2026-02-22T08:08:22.271Z",
+      "updatedAt": "2026-02-22T08:58:22.271Z"
+    },
+    {
+      "id": "TRP-2026-ALH-003",
+      "region": "TRP",
+      "commune": "ALH",
+      "local": "Liceo Altiplano",
+      "localSnapshot": {
+        "idLocal": "LOC-0009",
+        "nombre": "Liceo Altiplano",
+        "region": "TRP",
+        "commune": "ALH",
+        "snapshotAt": "2026-02-22T08:43:22.271Z"
+      },
+      "origin": {
+        "actor": "DR Eventual",
+        "channel": "Teléfono",
+        "detectedAt": "2026-02-22T06:58:22.271Z"
+      },
+      "summary": "CRÍTICO: Corte de luz total en local de votación",
+      "detail": "8 mesas afectadas.",
+      "evidence": [
+        "Foto confirmada"
+      ],
+      "bypass": true,
+      "bypassMotivo": "Riesgo inminente — continuidad=3",
+      "bypassActor": "u7",
+      "bypassFlagged": false,
+      "peseInoperante": false,
+      "evaluationLocked": true,
+      "evaluationHistory": [],
+      "evaluation": {
+        "continuidad": 3,
+        "integridad": 1,
+        "seguridad": 2,
+        "exposicion": 2,
+        "capacidadLocal": 0
+      },
+      "criticality": "CRITICA",
+      "criticalityScore": 8,
+      "status": "Escalado",
+      "assignedTo": "u7",
+      "slaMinutes": 15,
+      "closingMotivo": null,
+      "bypassValidated": null,
+      "timeline": [
+        {
+          "type": "DETECTED",
+          "at": "2026-02-22T06:58:22.271Z",
+          "actor": "u3",
+          "note": ""
+        },
+        {
+          "type": "BYPASS",
+          "at": "2026-02-22T07:00:22.271Z",
+          "actor": "u7",
+          "note": "Bypass: continuidad=3"
+        },
+        {
+          "type": "ESCALATED",
+          "at": "2026-02-22T07:03:22.271Z",
+          "actor": "u7",
+          "note": "Escalado a Nivel Central"
+        }
+      ],
+      "actions": [
+        {
+          "id": "a3",
+          "action": "Contactar empresa eléctrica. Solicitar grupo electrógeno.",
+          "responsible": "u7",
+          "at": "2026-02-22T07:03:22.271Z",
+          "result": "En gestión"
+        }
+      ],
+      "decisions": [
+        {
+          "who": "u7",
+          "at": "2026-02-22T07:02:22.271Z",
+          "fundament": "Nivel 3 en continuidad → escalar inmediatamente."
+        }
+      ],
+      "completeness": 80,
+      "reportedAt": "2026-02-22T07:00:22.271Z",
+      "firstActionAt": "2026-02-22T07:03:22.271Z",
+      "escalatedAt": "2026-02-22T07:03:22.271Z",
+      "mitigatedAt": null,
+      "resolvedAt": null,
+      "closedAt": null,
+      "createdBy": "u3",
+      "createdAt": "2026-02-22T06:58:22.271Z",
+      "updatedAt": "2026-02-22T07:03:22.271Z"
+    }
+  ]
+}

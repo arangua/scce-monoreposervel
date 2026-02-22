@@ -1,5 +1,5 @@
-import React, { useState, useMemo, useEffect } from "react";
-import type { CaseItem, LocalCatalog, LocalCatalogEntry, CaseStatus, Criticality, RegionCode, CommuneCode, AuditLogEntry } from "./domain/types";
+import React, { useState, useMemo, useEffect, useRef } from "react";
+import type { CaseItem, InstructionItem, LocalCatalog, LocalCatalogEntry, CaseStatus, Criticality, RegionCode, CommuneCode, AuditLogEntry } from "./domain/types";
 import { calcCompleteness } from "./domain/caseMetrics";
 import { findActiveLocal } from "./domain/catalog";
 import { validateCaseSchema } from "./domain/caseValidation";
@@ -10,9 +10,91 @@ import { getRecommendation } from "./domain/recommendation";
 import { recColor } from "./domain/theme";
 import { chainHash } from "./domain/hash";
 import { appendEvent, verifyChain } from "./domain/audit";
+import { migrateLegacyInstructionsInCases } from "./domain/migrations/migrateLegacyInstructions";
+import { HelpDrawer } from "./components/HelpDrawer";
+import { helpByView, type ViewKey } from "./helpContent";
+import { UI_TEXT } from "./config/uiTextStandard";
 
 const APP_VERSION = "1.9";
 const MIN_ELECTION_YEAR = 2026;
+
+// 6.3-2 hardening
+const MAX_CASES = 5000;
+const MAX_ID = 80;
+const MAX_SHORT = 200;
+const MAX_MED = 500;
+const MAX_LONG = 2000;
+// 6.3-3 hardening (arrays y timeline)
+const MAX_UNKNOWN_ARRAY = 200;
+const MAX_TIMELINE = 500;
+const MAX_EVENT_NOTE = 500;
+const MAX_EVIDENCE_ITEMS = 50;
+const MAX_TOTAL_PAYLOAD_BYTES = 5 * 1024 * 1024; // 5 MB post-parse
+// 6.3-4 fechas soft (forma + largo, sin parsear)
+const MAX_DATE_STR = 35;
+const ISO_SOFT_RE = /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})?)?$/;
+const ID_RE = /^[A-Za-z0-9_-]+$/;
+
+function importFail(msg: string): never {
+  throw new Error(msg);
+}
+
+function assertImportString(name: string, v: unknown): string {
+  if (typeof v !== "string") importFail(`Import fail-closed: "${name}" debe ser string.`);
+  const s = v.trim();
+  if (!s) importFail(`Import fail-closed: "${name}" no puede ser vacío.`);
+  return s;
+}
+
+function assertStringMax(name: string, v: unknown, max: number, optional = false): string | undefined {
+  if (v === undefined || v === null) return optional ? undefined : importFail(`Import fail-closed: "${name}" es requerido.`);
+  const s = assertImportString(name, v);
+  if (s.length > max) importFail(`Import fail-closed: "${name}" excede máximo (${max}).`);
+  return s;
+}
+
+function assertIdStable(v: unknown): string {
+  const id = assertStringMax("case.id", v, MAX_ID, false)!;
+  if (!ID_RE.test(id)) importFail(`Import fail-closed: "case.id" contiene caracteres no permitidos. Use solo A-Z a-z 0-9 _ -`);
+  return id;
+}
+
+function assertArrayMax(name: string, v: unknown, max: number, optional = false): unknown[] | undefined {
+  if (v === undefined || v === null) return optional ? undefined : importFail(`Import fail-closed: "${name}" es requerido.`);
+  if (!Array.isArray(v)) importFail(`Import fail-closed: "${name}" debe ser arreglo.`);
+  if (v.length > max) importFail(`Import fail-closed: "${name}" excede máximo (${max}).`);
+  return v;
+}
+
+function assertPlainObject(name: string, v: unknown): Record<string, unknown> {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) importFail(`Import fail-closed: "${name}" debe ser objeto.`);
+  return v as Record<string, unknown>;
+}
+
+function assertUnknownItemKind(name: string, v: unknown): void {
+  if (typeof v === "string") {
+    if (v.trim().length > MAX_LONG) importFail(`Import fail-closed: "${name}" string excede máximo (${MAX_LONG}).`);
+    return;
+  }
+  if (typeof v === "object" && v !== null && !Array.isArray(v)) return;
+  importFail(`Import fail-closed: "${name}" debe ser string u objeto.`);
+}
+
+function assertCaseEvent(name: string, v: unknown): void {
+  const o = assertPlainObject(name, v);
+  assertStringMax(`${name}.type`, o.type, MAX_SHORT, false);
+  assertStringMax(`${name}.at`, o.at, MAX_SHORT, false);
+  assertStringMax(`${name}.actor`, o.actor, MAX_MED, false);
+  assertStringMax(`${name}.note`, o.note, MAX_EVENT_NOTE, true);
+}
+
+function assertIsoSoft(name: string, v: unknown, optional = false): string | undefined {
+  if (v === undefined || v === null) return optional ? undefined : importFail(`Import fail-closed: "${name}" es requerido.`);
+  const s = assertImportString(name, v);
+  if (s.length > MAX_DATE_STR) importFail(`Import fail-closed: "${name}" excede máximo (${MAX_DATE_STR}).`);
+  if (!ISO_SOFT_RE.test(s)) importFail(`Import fail-closed: "${name}" no tiene forma ISO válida (soft).`);
+  return s;
+}
 
 const CONFIG = {
   regions: {
@@ -85,6 +167,9 @@ type SimReport = {
   byStatus?: Partial<Record<CaseStatus, number>>;
   byCriticality?: Partial<Record<Criticality, number>>;
 } | null;
+
+type BypassCause = "" | "system_down" | "risk_imminent" | "critical_level_3" | "other";
+type BypassFormState = { active: boolean; motivo: string; cause: BypassCause; confirmed: boolean };
 
 function canDo(action: PolicyAction, user: User | null, caseObj?: CaseItem | null): boolean {
   if (!user) return false;
@@ -273,7 +358,8 @@ export default function App(){
     return makeSeedCases(cat);
   });
   const [auditLog, setAuditLog] = useState<AuditLogEntry[]>(() => makeSeedAudit());
-  const [view,setView]=useState("dashboard");
+  const importJsonInputRef = useRef<HTMLInputElement | null>(null);
+  const [view,setView]=useState<ViewKey>("dashboard");
   const [selectedCase, setSelectedCase] = useState<CaseItem | null>(null);
   const [crisisMode,setCrisisMode]=useState(false);
   const [filterState,setFilterState]=useState({criticality:"",status:"",commune:"",search:""});
@@ -285,8 +371,44 @@ export default function App(){
   const [loginErr,setLoginErr]=useState("");
   const [newCase, setNewCase] = useState<CaseItem | null>(null);
   const [evalForm,setEvalForm]=useState({continuidad:0,integridad:0,seguridad:0,exposicion:0,capacidadLocal:0});
-  const [bypassForm,setBypassForm]=useState({active:false,motivo:"",peseInoperante:false,confirmed:false});
+  const [bypassForm,setBypassForm]=useState<BypassFormState>({active:false,motivo:"",cause:"",confirmed:false});
   const [step,setStep]=useState(1);
+  const [helpOpen,setHelpOpen]=useState(false);
+  const [actionsOpen,setActionsOpen]=useState(false);
+
+  const goToSection=(nextView: ViewKey,sectionId: string)=>{
+    setView(nextView);
+    setActionsOpen(false);
+    window.setTimeout(()=>{
+      const el=document.getElementById(sectionId);
+      el?.scrollIntoView({behavior:"smooth",block:"start"});
+    },60);
+  };
+  useEffect(()=>{
+    if (!actionsOpen) return;
+    const onDown=(e: MouseEvent)=>{
+      const t=e.target as HTMLElement|null;
+      if (!t) return;
+      if (t.closest?.("[data-actions-menu]")) return;
+      setActionsOpen(false);
+    };
+    window.addEventListener("mousedown",onDown);
+    return ()=>window.removeEventListener("mousedown",onDown);
+  },[actionsOpen]);
+  useEffect(()=>{setHelpOpen(false);},[view]);
+  useEffect(()=>{
+    const onKey=(e: KeyboardEvent)=>{
+      const isCtrl=e.ctrlKey||e.metaKey;
+      if (!isCtrl) return;
+      const tag=(e.target as HTMLElement|null)?.tagName?.toLowerCase();
+      if (tag==="input"||tag==="textarea") return;
+      if (e.key.toLowerCase()==="e"){e.preventDefault();goToSection("reports","reports-export");}
+      if (e.key.toLowerCase()==="i"){e.preventDefault();goToSection("reports","reports-export");}
+      if (e.shiftKey&&e.key.toLowerCase()==="r"){e.preventDefault();goToSection("config","config-reset");}
+    };
+    window.addEventListener("keydown",onKey);
+    return ()=>window.removeEventListener("keydown",onKey);
+  },[]);
 
   const chainResult=useMemo(()=>verifyChain(auditLog),[auditLog]);
 
@@ -332,7 +454,7 @@ export default function App(){
     if (!currentUser) return;
     setNewCase({region:currentUser.region||activeRegion,commune:"",local:"",origin:{actor:currentUser.name,channel:"Teams",detectedAt:nowISO()},summary:"",detail:"",evidence:[],id:"",status:"Nuevo",criticality:"MEDIA"} as CaseItem);
     setEvalForm({continuidad:0,integridad:0,seguridad:0,exposicion:0,capacidadLocal:0});
-    setBypassForm({active:false,motivo:"",peseInoperante:false,confirmed:false});
+    setBypassForm({active:false,motivo:"",cause:"",confirmed:false});
     setStep(1);setView("new_case");
   }
 
@@ -342,30 +464,30 @@ export default function App(){
     if(se.length)return notify("⚠️ "+se[0],"error");
     const result=calcCriticality(evalForm);
     const maxVar=Math.max(...Object.values(evalForm));
-    const bypassTechOk=maxVar>=3||bypassForm.peseInoperante;
+    const bypassTechOk=maxVar>=3||bypassForm.cause==="system_down";
     const bypassFlagged=bypassForm.active&&!bypassTechOk;
     const rCases=cases.filter(c=>c.region===newCase.region&&c.commune===newCase.commune);
     const id=genId(newCase.region,newCase.commune,rCases.length+1);
     const now_=nowISO();
     const localEntry=findActiveLocal(localCatalog,newCase.region,newCase.commune,newCase.local ?? "");
     const localSnapshot=localEntry?{idLocal:localEntry.idLocal,nombre:localEntry.nombre,region:localEntry.region,commune:localEntry.commune,snapshotAt:now_}:null;
-    const c={...newCase,id,localSnapshot,evaluation:evalForm,evaluationLocked:true,evaluationHistory:[],criticality:result.criticality,criticalityScore:result.score,status:bypassForm.active?"En gestión":"Nuevo",assignedTo:null,slaMinutes:(SLA_MINUTES as Record<SlaLevel, number>)[result.criticality as SlaLevel]||60,closingMotivo:null,bypassValidated:null,timeline:[{type:"DETECTED",at:newCase.origin!.detectedAt,actor:currentUser.id,note:"Detectado"},{type:"REPORTED",at:now_,actor:currentUser.id,note:"Reportado en SCCE"}],actions:[],decisions:[],bypass:bypassForm.active,bypassMotivo:bypassForm.motivo,bypassFlagged,bypassActor:bypassForm.active?currentUser.id:null,peseInoperante:bypassForm.peseInoperante,completeness:0,reportedAt:now_,firstActionAt:null,escalatedAt:null,mitigatedAt:null,resolvedAt:null,closedAt:null,createdBy:currentUser.id,createdAt:now_,updatedAt:now_};
+    const c={...newCase,id,localSnapshot,evaluation:evalForm,evaluationLocked:true,evaluationHistory:[],criticality:result.criticality,criticalityScore:result.score,status:bypassForm.active?"En gestión":"Nuevo",assignedTo:null,slaMinutes:(SLA_MINUTES as Record<SlaLevel, number>)[result.criticality as SlaLevel]||60,closingMotivo:null,bypassValidated:null,timeline:[{type:"DETECTED",at:newCase.origin!.detectedAt,actor:currentUser.id,note:"Detectado"},{type:"REPORTED",at:now_,actor:currentUser.id,note:"Reportado en SCCE"}],actions:[],decisions:[],bypass:bypassForm.active,bypassMotivo:bypassForm.motivo,bypassFlagged,bypassActor:bypassForm.active?currentUser.id:null,peseInoperante:bypassForm.cause==="system_down",completeness:0,reportedAt:now_,firstActionAt:null,escalatedAt:null,mitigatedAt:null,resolvedAt:null,closedAt:null,createdBy:currentUser.id,createdAt:now_,updatedAt:now_};
     c.completeness=calcCompleteness(c as CaseItem);
     setCases(prev=>[c as CaseItem,...prev]);
     setAuditLog(prev=>{
       let log=appendEvent(prev,"CASE_CREATED",currentUser.id,currentUser.role,id,`Caso: ${c.summary.slice(0,60)}`);
       if(bypassForm.active)log=appendEvent(log,"BYPASS_USED",currentUser.id,currentUser.role,id,`Bypass: ${bypassForm.motivo}`);
-      if(bypassFlagged)    log=appendEvent(log,"BYPASS_FLAGGED",currentUser.id,currentUser.role,id,"Bypass sin justificación técnica");
+      if(bypassFlagged)    log=appendEvent(log,"BYPASS_FLAGGED",currentUser.id,currentUser.role,id,UI_TEXT.errors.excepcionRequiereValidacion);
       return log;
     });
-    notify(`Caso ${id} — ${result.criticality}${bypassFlagged?" ⚠️ BYPASS FLAGGED":""}`,result.criticality==="CRITICA"?"error":"success");
+    notify(`Caso ${id} — ${result.criticality}${bypassFlagged?" ⚠️ "+UI_TEXT.states.flagged:""}`,result.criticality==="CRITICA"?"error":"success");
     setView("dashboard");
   }
 
   function recepcionar(caseId: string){
     if (!currentUser) return;
     const c=cases.find(x=>x.id===caseId);
-    if(!c||!canDo("recepcionar",currentUser,c))return notify("Sin permiso","error");
+    if(!c||!canDo("recepcionar",currentUser,c))return notify(UI_TEXT.errors.unauthorized,"error");
     setCases(prev=>prev.map(x=>x.id!==caseId?x:{...x,status:"Recepcionado por DR",updatedAt:nowISO(),timeline:[...(x.timeline ?? []),{type:"RECEPCIONADO",at:nowISO(),actor:currentUser.id,note:`Recepcionado por ${currentUser.name}`}]} as CaseItem));
     setAuditLog(prev=>appendEvent(prev,"STATUS_CHANGED",currentUser.id,currentUser.role,caseId,"Estado → Recepcionado por DR"));
     notify("Caso recepcionado","success");
@@ -375,14 +497,14 @@ export default function App(){
     if (!currentUser) return;
     const c=cases.find(x=>x.id===caseId);
     if(!c)return;
-    if(!canDo("update",currentUser,c)&&!canDo("close",currentUser,c))return notify("Sin permiso","error");
-    if(newStatus==="En gestión"&&c.status==="Nuevo"&&!c.bypass)return notify("❌ Recepcionar el caso primero.","error");
+    if(!canDo("update",currentUser,c)&&!canDo("close",currentUser,c))return notify(UI_TEXT.errors.unauthorized,"error");
+    if(newStatus==="En gestión"&&c.status==="Nuevo"&&!c.bypass)return notify("❌ "+UI_TEXT.errors.recepcionarPrimero,"error");
     if(newStatus==="Cerrado"){
-      if(c.bypassFlagged&&!c.bypassValidated)return notify("❌ Bypass flagged sin validación.","error");
-      if(!c.actions?.length)return notify("❌ Se requiere al menos 1 acción.","error");
-      if(!c.decisions?.length)return notify("❌ Se requiere al menos 1 decisión.","error");
-      if(c.status!=="Resuelto")return notify("❌ El caso debe estar en 'Resuelto' antes de cerrar.","error");
-      if(!c.closingMotivo)return notify("❌ Ingresa el motivo de cierre.","error");
+      if(c.bypassFlagged&&!c.bypassValidated)return notify("❌ "+UI_TEXT.errors.excepcionRequiereValidacion,"error");
+      if(!c.actions?.length)return notify("❌ "+UI_TEXT.errors.alMenosUnaAccion,"error");
+      if(!c.decisions?.length)return notify("❌ "+UI_TEXT.errors.alMenosUnaDecision,"error");
+      if(c.status!=="Resuelto")return notify("❌ "+UI_TEXT.errors.casoDebeEstarResuelto,"error");
+      if(!c.closingMotivo)return notify("❌ "+UI_TEXT.errors.ingresaMotivoCierre,"error");
     }
     const tlMap: Record<CaseStatus, string> = {Escalado:"ESCALATED",Mitigado:"MITIGATED",Resuelto:"RESOLVED",Cerrado:"CLOSED","En gestión":"IN_MANAGEMENT","Recepcionado por DR":"RECEPCIONADO",Nuevo:"DETECTED"};
     const tsMap: Partial<Record<CaseStatus, string>> = {Escalado:"escalatedAt",Mitigado:"mitigatedAt",Resuelto:"resolvedAt",Cerrado:"closedAt"};
@@ -396,8 +518,8 @@ export default function App(){
 
   function validateBypass(caseId: string, decision: string, fundament: string){
     if(!currentUser) return;
-    if(!canDo("validateBypass",currentUser))return notify("Solo el Director Regional puede validar bypass","error");
-    if(!fundament)return notify("Se requiere fundamento","error");
+    if(!canDo("validateBypass",currentUser))return notify(UI_TEXT.errors.soloDirectorValida,"error");
+    if(!fundament)return notify(UI_TEXT.errors.fundamentoRequerido,"error");
     const validated=decision==="VALIDATED";
     setCases(prev=>prev.map(x=>{
       if(x.id!==caseId)return x;
@@ -406,13 +528,13 @@ export default function App(){
       return{...x,bypassValidated:decision,decisions:nd,timeline:tl,updatedAt:nowISO()} as CaseItem;
     }));
     setAuditLog(prev=>appendEvent(prev,validated?"BYPASS_VALIDATED":"BYPASS_REVOKED",currentUser.id,currentUser.role,caseId,fundament.slice(0,80)));
-    notify(`Bypass ${validated?"validado":"revocado"}`,"success");
+    notify(`Excepción ${validated?"validada":"revocada"}`,"success");
   }
 
   function requestReassessment(caseId: string, newEval: Record<string, number>, justification: string){
     if(!currentUser) return;
     const c=cases.find(x=>x.id===caseId);
-    if(!c||!canDo("update",currentUser,c))return notify("Sin permiso","error");
+    if(!c||!canDo("update",currentUser,c))return notify(UI_TEXT.errors.unauthorized,"error");
     const nr=calcCriticality(newEval);
     const snap={previousEval:c.evaluation,at:nowISO(),by:currentUser.id,justification};
     setCases(prev=>prev.map(x=>{
@@ -428,7 +550,7 @@ export default function App(){
   function addAction(caseId: string, action: string, responsible: string, result_: string){
     if(!currentUser) return;
     const c=cases.find(x=>x.id===caseId);
-    if(!c||!canDo("update",currentUser,c))return notify("Sin permiso","error");
+    if(!c||!canDo("update",currentUser,c))return notify(UI_TEXT.errors.unauthorized,"error");
     setCases(prev=>prev.map(x=>{
       if(x.id!==caseId)return x;
       const na={id:"a"+Date.now(),action,responsible,at:nowISO(),result:result_};
@@ -443,7 +565,7 @@ export default function App(){
   function addDecision(caseId: string, fundament: string){
     if(!currentUser) return;
     const c=cases.find(x=>x.id===caseId);
-    if(!c||(!canDo("update",currentUser,c)&&!canDo("close",currentUser,c)))return notify("Sin permiso","error");
+    if(!c||(!canDo("update",currentUser,c)&&!canDo("close",currentUser,c)))return notify(UI_TEXT.errors.unauthorized,"error");
     setCases(prev=>prev.map(x=>{
       if(x.id!==caseId)return x;
       const upd={...x,decisions:[...(x.decisions ?? []),{who:currentUser.id,at:nowISO(),fundament}],updatedAt:nowISO()} as CaseItem;
@@ -458,9 +580,68 @@ export default function App(){
     setAuditLog(prev=>appendEvent(prev,"COMMENT_ADDED",currentUser.id,currentUser.role,caseId,comment.slice(0,80)));
   }
 
+  function isInstructionAckedByUser(ins: InstructionItem, userId: string): boolean {
+    return (ins.acks ?? []).some((a) => a.userId === userId);
+  }
+  function lastAck(ins: InstructionItem): { userId: string; role: string; at: string } | null {
+    const acks = ins.acks ?? [];
+    return acks.length > 0 ? acks[acks.length - 1] : null;
+  }
+  function createInstruction(caseId: string, scope: string, audience: string, summary: string, details: string){
+    if(!currentUser?.id) return;
+    if(!summary?.trim()) return notify(UI_TEXT.errors.instructionSummaryRequired, "error");
+    const newIns: InstructionItem = {
+      id: uuidSimple(),
+      caseId,
+      scope: scope || "LOCAL",
+      audience: audience || "AMBOS",
+      summary: summary.trim(),
+      details: details?.trim() || null,
+      createdAt: nowISO(),
+      createdBy: currentUser.id,
+      status: "PENDIENTE",
+      ackRequired: true,
+      acks: [],
+      evidence: [],
+    };
+    setCases((prev) =>
+      prev.map((x) =>
+        x.id !== caseId
+          ? x
+          : { ...x, instructions: [...(x.instructions ?? []), newIns], updatedAt: nowISO() } as CaseItem
+      )
+    );
+    setAuditLog((prev) =>
+      appendEvent(prev, "COMMENT_ADDED", currentUser.id, currentUser.role, caseId, `Instrucción: ${summary.slice(0, 60)}`)
+    );
+    notify("Instrucción creada", "success");
+  }
+  function ackInstruction(caseId: string, instructionId: string){
+    if(!currentUser?.id) return;
+    const role = currentUser?.role ?? "unknown";
+    setCases((prev) =>
+      prev.map((x) => {
+        if (x.id !== caseId) return x;
+        const instructions = (x.instructions ?? []).map((ins) =>
+          ins.id !== instructionId
+            ? ins
+            : {
+                ...ins,
+                acks: [...(ins.acks ?? []), { userId: currentUser.id, role, at: nowISO() }],
+              }
+        );
+        return { ...x, instructions, updatedAt: nowISO() } as CaseItem;
+      })
+    );
+    setAuditLog((prev) =>
+      appendEvent(prev, "COMMENT_ADDED", currentUser.id, currentUser.role, caseId, `Acuse instrucción ${instructionId}`)
+    );
+    notify(UI_TEXT.buttons.ackConfirmReceipt, "success");
+  }
+
   function catalogAddLocal(nombre: string, region: string, commune: string, actor: User){
-    if(!nombre?.trim())return notify("Nombre obligatorio","error");
-    if(!commune)return notify("Seleccione una comuna","error");
+    if(!nombre?.trim())return notify(UI_TEXT.errors.nombreObligatorio,"error");
+    if(!commune)return notify(UI_TEXT.errors.seleccioneComuna,"error");
     if(localCatalog.find(l=>l.nombre===nombre&&l.region===region&&l.commune===commune))return notify(`Ya existe "${nombre}" en esa comarca`,"error");
     const entry={idLocal:newLocalId(),nombre:nombre.trim(),region,commune,activoGlobal:true,activoEnEleccionActual:true,fechaCreacion:nowISO(),fechaDesactivacion:null,origenSeed:false};
     setLocalCatalog(prev=>[...prev,entry]);
@@ -513,8 +694,8 @@ export default function App(){
 
   function exportCSV(){
     if (!currentUser) return;
-    const rows=[["ID","Región","Comuna","Local","Criticidad","Estado","Bypass","Flagged","SnapshotID","Creado","Completitud"]];
-    cases.forEach(c=>rows.push([c.id,c.region,c.commune,c.local||"—",c.criticality,c.status,c.bypass?"SÍ":"No",c.bypassFlagged?"FLAGGED":"—",c.localSnapshot?.idLocal||"—",fmtDate(c.createdAt),(c.completeness ?? 0)+"%"]));
+    const rows=[[ "ID","Región","Comuna","Local","Criticidad","Estado",UI_TEXT.labels.bypassColumn,UI_TEXT.labels.flaggedColumn,"SnapshotID","Creado","Completitud"]];
+    cases.forEach(c=>rows.push([c.id,c.region,c.commune,c.local||"—",c.criticality,c.status,c.bypass?"SÍ":"No",c.bypassFlagged?UI_TEXT.states.flaggedShort:"—",c.localSnapshot?.idLocal||"—",fmtDate(c.createdAt),(c.completeness ?? 0)+"%"]));
     const csv=rows.map(r=>r.map(x=>`"${String(x).replace(/"/g,'""')}"`).join(",")).join("\n");
     const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download="SCCE_casos.csv";a.click();
     setAuditLog(prev=>appendEvent(prev,"EXPORT_DONE",currentUser.id,currentUser.role,null,"Export CSV"));
@@ -522,7 +703,7 @@ export default function App(){
   }
   function exportJSON(){
     if (!currentUser) return;
-    const metadata={exportedAt:nowISO(),scceVersion:APP_VERSION,election:electionConfig,chainIntegrity:chainResult.ok?"INTEGRA":"COMPROMETIDA"};
+    const metadata={schemaVersion:1,exportedAt:nowISO(),scceVersion:APP_VERSION,election:electionConfig,chainIntegrity:chainResult.ok?"INTEGRA":"COMPROMETIDA"};
 
     // Guardrail mínimo (Fase 6.1-2): forma del payload
     if (!Array.isArray(cases)){
@@ -551,6 +732,150 @@ export default function App(){
     setAuditLog(prev=>appendEvent(prev,"EXPORT_DONE",currentUser.id,currentUser.role,null,"Export JSON"));
     notify("JSON exportado");
   }
+  function importJSONClick(){
+    if (!currentUser) return;
+    importJsonInputRef.current?.click();
+  }
+  function importJSONSelected(e: React.ChangeEvent<HTMLInputElement>){
+    if (!currentUser) return;
+    const file=e.target.files?.[0]??null;
+    e.target.value="";
+    if (!file) return;
+    const MAX_BYTES=5*1024*1024; // 5 MB
+    if (file.size>MAX_BYTES){
+      alert(`Import JSON bloqueado: ${(file.size/(1024*1024)).toFixed(2)} MB excede el máximo de ${(MAX_BYTES/(1024*1024)).toFixed(0)} MB.`);
+      return;
+    }
+    const reader=new FileReader();
+    reader.onerror=()=>{alert("Import JSON falló: no se pudo leer el archivo.");};
+    reader.onload=()=>{
+      try {
+        const text=typeof reader.result==="string"?reader.result:"";
+        const parsed=JSON.parse(text) as unknown;
+        if (!parsed||typeof parsed!=="object"||Array.isArray(parsed)){
+          alert("Import JSON bloqueado: estructura inválida (se esperaba objeto raíz).");
+          return;
+        }
+        const root=parsed as Record<string, unknown>;
+        const metadata=root["metadata"];
+        const casesIn=root["cases"];
+        if (!metadata||typeof metadata!=="object"||Array.isArray(metadata)){
+          alert("Import JSON bloqueado: 'metadata' no es un objeto válido.");
+          return;
+        }
+        const meta=metadata as Record<string, unknown>;
+        if (meta.schemaVersion!==1) importFail("Import fail-closed: metadata.schemaVersion debe ser 1.");
+        if (!Array.isArray(casesIn)){
+          alert("Import JSON bloqueado: 'cases' no es un array.");
+          return;
+        }
+        if (casesIn.length>MAX_CASES){
+          alert(`Import JSON bloqueado: 'cases' excede el máximo de ${MAX_CASES}.`);
+          return;
+        }
+        const totalSize=JSON.stringify(casesIn).length;
+        if (totalSize>MAX_TOTAL_PAYLOAD_BYTES) importFail(`Import fail-closed: tamaño total de payload excede máximo (${MAX_TOTAL_PAYLOAD_BYTES} bytes).`);
+        const seen=new Set<string>();
+        for (let i=0;i<casesIn.length;i++){
+          const c=casesIn[i] as Record<string, unknown>;
+          const id=assertIdStable(c?.id);
+          if (seen.has(id)) importFail(`Import fail-closed: case.id duplicado "${id}".`);
+          seen.add(id);
+          assertStringMax(`cases[${i}].region`,c?.region,MAX_SHORT,false);
+          assertStringMax(`cases[${i}].commune`,c?.commune,MAX_SHORT,false);
+          assertStringMax(`cases[${i}].summary`,c?.summary,MAX_LONG,false);
+          assertStringMax(`cases[${i}].local`,c?.local,MAX_MED,true);
+          assertStringMax(`cases[${i}].detail`,c?.detail,MAX_LONG,true);
+          assertStringMax(`cases[${i}].assignedTo`,c?.assignedTo,MAX_MED,true);
+          assertStringMax(`cases[${i}].closingMotivo`,c?.closingMotivo,MAX_LONG,true);
+          assertStringMax(`cases[${i}].bypassMotivo`,c?.bypassMotivo,MAX_LONG,true);
+          assertStringMax(`cases[${i}].bypassActor`,c?.bypassActor,MAX_MED,true);
+          assertStringMax(`cases[${i}].createdBy`,c?.createdBy,MAX_MED,true);
+          if (c?.evidence!==undefined&&c?.evidence!==null){
+            if (!Array.isArray(c.evidence)) importFail(`Import fail-closed: cases[${i}].evidence debe ser arreglo.`);
+            if ((c.evidence as unknown[]).length>MAX_EVIDENCE_ITEMS) importFail(`Import fail-closed: cases[${i}].evidence excede máximo (${MAX_EVIDENCE_ITEMS}).`);
+            for (let j=0;j<(c.evidence as unknown[]).length;j++){
+              assertStringMax(`cases[${i}].evidence[${j}]`,(c.evidence as unknown[])[j],MAX_LONG,false);
+            }
+          }
+          const orig=c?.origin as Record<string, unknown>|undefined;
+          if (orig){
+            assertStringMax(`cases[${i}].origin.actor`,orig.actor,MAX_MED,true);
+            assertStringMax(`cases[${i}].origin.channel`,orig.channel,MAX_MED,true);
+            assertStringMax(`cases[${i}].origin.detectedAt`,orig.detectedAt,MAX_SHORT,true);
+            assertIsoSoft(`cases[${i}].origin.detectedAt`,orig.detectedAt,true);
+          }
+          const snap=c?.localSnapshot as Record<string, unknown>|undefined;
+          if (snap){
+            assertStringMax(`cases[${i}].localSnapshot.idLocal`,snap.idLocal,MAX_ID,true);
+            assertStringMax(`cases[${i}].localSnapshot.nombre`,snap.nombre,MAX_LONG,true);
+            assertStringMax(`cases[${i}].localSnapshot.region`,snap.region,MAX_SHORT,true);
+            assertStringMax(`cases[${i}].localSnapshot.commune`,snap.commune,MAX_SHORT,true);
+            assertStringMax(`cases[${i}].localSnapshot.snapshotAt`,snap.snapshotAt,MAX_SHORT,true);
+            assertIsoSoft(`cases[${i}].localSnapshot.snapshotAt`,snap.snapshotAt,true);
+          }
+          const tl=assertArrayMax(`cases[${i}].timeline`,c?.timeline,MAX_TIMELINE,true);
+          if (tl){ for (let j=0;j<tl.length;j++){ assertCaseEvent(`cases[${i}].timeline[${j}]`,tl[j]); assertIsoSoft(`cases[${i}].timeline[${j}].at`,(tl[j] as Record<string, unknown>).at,false); } }
+          const acts=assertArrayMax(`cases[${i}].actions`,c?.actions,MAX_UNKNOWN_ARRAY,true);
+          if (acts){ for (let j=0;j<acts.length;j++) assertUnknownItemKind(`cases[${i}].actions[${j}]`,acts[j]); }
+          const decs=assertArrayMax(`cases[${i}].decisions`,c?.decisions,MAX_UNKNOWN_ARRAY,true);
+          if (decs){ for (let j=0;j<decs.length;j++) assertUnknownItemKind(`cases[${i}].decisions[${j}]`,decs[j]); }
+          const eh=assertArrayMax(`cases[${i}].evaluationHistory`,c?.evaluationHistory,MAX_UNKNOWN_ARRAY,true);
+          if (eh){ for (let j=0;j<eh.length;j++) assertUnknownItemKind(`cases[${i}].evaluationHistory[${j}]`,eh[j]); }
+          const insArr=assertArrayMax(`cases[${i}].instructions`,(c as Record<string, unknown>)?.instructions,MAX_TIMELINE,true);
+          if (insArr){
+            for (let j=0;j<insArr.length;j++){
+              const ins=insArr[j] as Record<string, unknown>;
+              assertStringMax(`cases[${i}].instructions[${j}].id`,ins?.id,MAX_ID,true);
+              assertStringMax(`cases[${i}].instructions[${j}].caseId`,ins?.caseId,MAX_ID,true);
+              assertStringMax(`cases[${i}].instructions[${j}].scope`,ins?.scope,MAX_SHORT,false);
+              assertStringMax(`cases[${i}].instructions[${j}].audience`,ins?.audience,MAX_SHORT,false);
+              assertStringMax(`cases[${i}].instructions[${j}].summary`,ins?.summary,MAX_LONG,false);
+              assertStringMax(`cases[${i}].instructions[${j}].details`,ins?.details,MAX_LONG,true);
+              assertStringMax(`cases[${i}].instructions[${j}].createdAt`,ins?.createdAt,MAX_SHORT,false);
+              assertIsoSoft(`cases[${i}].instructions[${j}].createdAt`,ins?.createdAt,false);
+              assertStringMax(`cases[${i}].instructions[${j}].createdBy`,ins?.createdBy,MAX_MED,false);
+              assertStringMax(`cases[${i}].instructions[${j}].status`,ins?.status,MAX_SHORT,false);
+              if (ins?.ackRequired!==true) importFail(`Import fail-closed: cases[${i}].instructions[${j}].ackRequired debe ser true.`);
+              const acks=assertArrayMax(`cases[${i}].instructions[${j}].acks`,ins?.acks,MAX_TIMELINE,false);
+              if (!acks) importFail(`Import fail-closed: cases[${i}].instructions[${j}].acks debe ser arreglo.`);
+              for (let k=0;k<acks.length;k++){
+                const ack=acks[k] as Record<string, unknown>;
+                assertStringMax(`cases[${i}].instructions[${j}].acks[${k}].userId`,ack?.userId,MAX_MED,false);
+                assertStringMax(`cases[${i}].instructions[${j}].acks[${k}].role`,ack?.role,MAX_SHORT,false);
+                assertStringMax(`cases[${i}].instructions[${j}].acks[${k}].at`,ack?.at,MAX_SHORT,false);
+                assertIsoSoft(`cases[${i}].instructions[${j}].acks[${k}].at`,ack?.at,false);
+              }
+              const ev=assertArrayMax(`cases[${i}].instructions[${j}].evidence`,ins?.evidence,MAX_EVIDENCE_ITEMS,true);
+              if (ev){ for (let k=0;k<ev.length;k++){ assertStringMax(`cases[${i}].instructions[${j}].evidence[${k}]`,ev[k],MAX_LONG,false); } }
+            }
+          }
+          assertIsoSoft(`cases[${i}].reportedAt`,c?.reportedAt,true);
+          assertIsoSoft(`cases[${i}].firstActionAt`,c?.firstActionAt,true);
+          assertIsoSoft(`cases[${i}].escalatedAt`,c?.escalatedAt,true);
+          assertIsoSoft(`cases[${i}].mitigatedAt`,c?.mitigatedAt,true);
+          assertIsoSoft(`cases[${i}].resolvedAt`,c?.resolvedAt,true);
+          assertIsoSoft(`cases[${i}].closedAt`,c?.closedAt,true);
+          assertIsoSoft(`cases[${i}].createdAt`,c?.createdAt,true);
+          assertIsoSoft(`cases[${i}].updatedAt`,c?.updatedAt,true);
+        }
+        const hasExisting=Array.isArray(cases)&&cases.length>0;
+        if (hasExisting){
+          const ok=confirm("Vas a reemplazar los casos actuales por el contenido del JSON. ¿Continuar?");
+          if (!ok){alert("Import cancelado: no se realizaron cambios.");return;}
+          const typed=prompt("Escribe IMPORTAR para confirmar el reemplazo total:");
+          if ((typed??"").trim()!=="IMPORTAR"){alert("Import cancelado: no se realizaron cambios.");return;}
+        }
+        const migrated=migrateLegacyInstructionsInCases(casesIn as CaseItem[]);
+        setCases(migrated);
+        setAuditLog(prev=>appendEvent(prev,"IMPORT_DONE",currentUser.id,currentUser.role,null,"Import JSON"));
+        notify("JSON importado");
+      } catch (err) {
+        alert(err instanceof Error ? err.message : "Import JSON bloqueado: JSON inválido (no se pudo interpretar).");
+      }
+    };
+    reader.readAsText(file);
+  }
   function exportAuditCSV(){
     if (!currentUser) return;
     const{ok,failIndex}=chainResult;
@@ -565,7 +890,7 @@ export default function App(){
     const ca=auditLog.filter(e=>e.caseId===c.id);
     const div=checkLocalDivergence(c,localCatalog);
     const regionsMap = CONFIG.regions as Record<string, { name?: string; communes?: Record<string, { name?: string }> }>;
-    const txt=`SCCE v${APP_VERSION} — REPORTE DE CASO\nID: ${c.id}\nElección: ${electionConfig.name} · ${electionConfig.date}\nRegión: ${regionsMap[c.region]?.name}\nComuna: ${regionsMap[c.region]?.communes?.[c.commune]?.name||c.commune}\nLocal: ${c.local||"—"}\nSnapshot: ${c.localSnapshot?`${c.localSnapshot.nombre} [${c.localSnapshot.idLocal}] @ ${fmtDate(c.localSnapshot.snapshotAt)}`:"sin snapshot"}\n${div?`⚠️ DIVERGENCIA: ${div.msg}\n`:""}\nCRITICIDAD: ${c.criticality} (${c.criticalityScore}/15)\nESTADO: ${c.status}\nBYPASS: ${c.bypass?`SÍ — ${c.bypassMotivo}`:"No"}\n\nRESUMEN: ${c.summary}\nDETALLE: ${c.detail||"—"}\n\nACCIONES:\n${(c.actions as { action?: string; result?: string }[]).map((a: { action?: string; result?: string })=>`• ${a.action} → ${a.result||"—"}`).join("\n")||"—"}\n\nDECISIONES:\n${(c.decisions as { who?: string; fundament?: string }[]).map((d: { who?: string; fundament?: string })=>`• ${USERS.find(u=>u.id===d.who)?.name}: ${d.fundament}`).join("\n")||"—"}\n\nAUDITORÍA (${ca.length} eventos):\n${ca.map(e=>`[${e.at}] ${e.type} | ${USERS.find(u=>u.id===e.actor)?.name||e.actor} | ${e.summary} | ${e.hash}`).join("\n")||"—"}\n\nGenerado: ${nowISO()}\nSCCE v${APP_VERSION} — SERVEL Chile`;
+    const txt=`SCCE v${APP_VERSION} — REPORTE DE CASO\nID: ${c.id}\nElección: ${electionConfig.name} · ${electionConfig.date}\nRegión: ${regionsMap[c.region]?.name}\nComuna: ${regionsMap[c.region]?.communes?.[c.commune]?.name||c.commune}\nLocal: ${c.local||"—"}\nSnapshot: ${c.localSnapshot?`${c.localSnapshot.nombre} [${c.localSnapshot.idLocal}] @ ${fmtDate(c.localSnapshot.snapshotAt)}`:"sin snapshot"}\n${div?`⚠️ DIVERGENCIA: ${div.msg}\n`:""}\nCRITICIDAD: ${c.criticality} (${c.criticalityScore}/15)\nESTADO: ${c.status}\n${UI_TEXT.misc.reporteBypassLabel}: ${c.bypass?`SÍ — ${c.bypassMotivo}`:"No"}\n\nRESUMEN: ${c.summary}\nDETALLE: ${c.detail||"—"}\n\nACCIONES:\n${(c.actions as { action?: string; result?: string }[]).map((a: { action?: string; result?: string })=>`• ${a.action} → ${a.result||"—"}`).join("\n")||"—"}\n\nDECISIONES:\n${(c.decisions as { who?: string; fundament?: string }[]).map((d: { who?: string; fundament?: string })=>`• ${USERS.find(u=>u.id===d.who)?.name}: ${d.fundament}`).join("\n")||"—"}\n\nAUDITORÍA (${ca.length} eventos):\n${ca.map(e=>`[${e.at}] ${e.type} | ${USERS.find(u=>u.id===e.actor)?.name||e.actor} | ${e.summary} | ${e.hash}`).join("\n")||"—"}\n\nGenerado: ${nowISO()}\nSCCE v${APP_VERSION} — SERVEL Chile`;
     const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([txt],{type:"text/plain"}));a.download=`SCCE_${c.id}.txt`;a.click();
     notify("Reporte exportado");
   }
@@ -640,7 +965,7 @@ export default function App(){
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3,flexWrap:"wrap",gap:4}}>
           <span style={{fontSize:"11px",color:"#64748b",fontFamily:"monospace"}}>{c.id}</span>
           <div style={{display:"flex",gap:4,alignItems:"center",flexWrap:"wrap"}}>
-            {c.bypassFlagged&&!c.bypassValidated&&<span style={{...S.badge("#ef4444"),fontSize:"9px"}}>⚠️ BYPASS</span>}
+            {c.bypassFlagged&&!c.bypassValidated&&<span style={{...S.badge("#ef4444"),fontSize:"9px"}}>⚠️ {UI_TEXT.states.modoUrgente}</span>}
             {c.isSim&&<span style={{...S.badge("#6366f1"),fontSize:"9px"}}>SIM</span>}
             <SlaBadge c={c}/><RecBadge c={c}/><DivBadge c={c}/>
             <span style={S.badge(critColor(c.criticality))}>{c.criticality}</span>
@@ -701,7 +1026,7 @@ export default function App(){
         <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
           <h2 style={{margin:0,fontSize:"16px"}}>Panel de Operación</h2>
           {metrics.critica>0&&<span style={S.badge("#ef4444")}>🚨 {metrics.critica} CRÍTICOS</span>}
-          {metrics.flagged>0&&<span style={S.badge("#ef4444")}>⚠️ {metrics.flagged} BYPASS SIN VALIDAR</span>}
+          {metrics.flagged>0&&<span style={S.badge("#ef4444")}>⚠️ {metrics.flagged} {UI_TEXT.states.flagged}</span>}
           {divergencias.length>0&&<span style={{...S.badge("#f97316"),cursor:"pointer"}} onClick={()=>setView("catalog")}>⚡ {divergencias.length} LOCAL(ES) MOD.</span>}
         </div>
         <button style={S.btn(crisisMode?"danger":"dark")} onClick={()=>setCrisisMode(p=>!p)}>{crisisMode?"🔄 Normal":"⚡ Crisis"}</button>
@@ -872,19 +1197,23 @@ export default function App(){
             </div>
             {canDo("bypass",currentUser)&&(
               <div style={{...S.card,background:"#1e1528",border:"1px solid #7c3aed44"}}>
-                <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer"}}>
+                <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer"}} title={UI_TEXT.tooltips.modoUrgente}>
                   <input type="checkbox" checked={lb.active} onChange={e=>setLb(p=>({...p,active:e.target.checked,confirmed:false}))}/>
-                  <span style={{color:"#a78bfa",fontWeight:600,fontSize:"12px"}}>⚡ ACTIVAR BYPASS</span>
+                  <span style={{color:"#a78bfa",fontWeight:600,fontSize:"12px"}}>⚡ Activar Modo urgente (Excepción operativa)</span>
                 </label>
                 {lb.active&&(
                   <div style={{marginTop:8}}>
-                    <div style={{color:"#f97316",fontSize:"11px",marginBottom:6}}>Solo si: variable=3 / PESE inoperante / riesgo inminente.</div>
-                    <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",marginBottom:8}}>
-                      <input type="checkbox" checked={lb.peseInoperante} onChange={e=>setLb(p=>({...p,peseInoperante:e.target.checked}))}/>
-                      <span style={{color:"#f97316",fontSize:"12px",fontWeight:600}}>PESE inoperante</span>
-                    </label>
-                    <label style={S.lbl}>Motivo *</label>
-                    <input style={S.inp} placeholder="Motivo del bypass" value={lb.motivo} onChange={e=>setLb(p=>({...p,motivo:e.target.value}))}/>
+                    <div style={{color:"#94a3b8",fontSize:"11px",marginBottom:6}}>Úselo solo si no es posible seguir el procedimiento normal. Queda registrado como excepción.</div>
+                    <label style={S.lbl}>Causal de la excepción *</label>
+                    <select style={S.inp} value={lb.cause} onChange={e=>setLb(p=>({...p,cause:e.target.value as BypassCause}))}>
+                      <option value="">Seleccione...</option>
+                      <option value="system_down">Sistema institucional no disponible</option>
+                      <option value="risk_imminent">Riesgo inminente (seguridad/orden público/continuidad)</option>
+                      <option value="critical_level_3">Evaluación crítica máxima (Nivel 3)</option>
+                      <option value="other">Otra (requiere explicación detallada)</option>
+                    </select>
+                    <label style={S.lbl}>Motivo / respaldo *</label>
+                    <input style={S.inp} placeholder="Motivo o respaldo de la excepción" value={lb.motivo} onChange={e=>setLb(p=>({...p,motivo:e.target.value}))}/>
                   </div>
                 )}
               </div>
@@ -893,7 +1222,9 @@ export default function App(){
               <button style={S.btn("primary")} onClick={()=>{
                 const errs=validateCaseSchema({...lnc,origin:{...lnc.origin}},localCatalog);
                 if(errs.length)return notify("⚠️ "+errs[0],"error");
-                if(lb.active&&!lb.motivo)return notify("El bypass requiere motivo","error");
+                if(lb.active&&!lb.cause)return notify("Seleccione la causal de la excepción","error");
+                if(lb.active&&!lb.motivo)return notify("El Modo urgente requiere motivo o respaldo","error");
+                if(lb.active&&lb.cause==="other"&&lb.motivo.trim().length<15)return notify("Otra causal requiere explicación detallada (mín. 15 caracteres)","error");
                 setNewCase({...lnc} as CaseItem);setBypassForm(lb);setStep(2);
               }}>Siguiente →</button>
             </div>
@@ -915,12 +1246,12 @@ export default function App(){
                 </div>
               </div>
             ))}
-            {lb.active&&maxVar<3&&!lb.peseInoperante&&(
+            {lb.active&&maxVar<3&&lb.cause!=="system_down"&&lb.cause!=="critical_level_3"&&(
               <div style={{...S.card,background:"#2d0a0a",border:"2px solid #ef4444",marginTop:8}}>
-                <div style={{color:"#ef4444",fontWeight:700,marginBottom:6}}>⚠️ BYPASS SIN JUSTIFICACIÓN TÉCNICA → Quedará FLAGGED</div>
+                <div style={{color:"#ef4444",fontWeight:700,marginBottom:6}}>⚠️ {UI_TEXT.misc.excepcionSinFundamentoObjetivo}</div>
                 <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer"}}>
                   <input type="checkbox" checked={lb.confirmed||false} onChange={e=>setLb(p=>({...p,confirmed:e.target.checked}))}/>
-                  <span style={{color:"#ef4444",fontSize:"12px",fontWeight:600}}>Entiendo y confirmo el bypass</span>
+                  <span style={{color:"#ef4444",fontSize:"12px",fontWeight:600}}>{UI_TEXT.misc.confirmarExcepcionOperativa}</span>
                 </label>
               </div>
             )}
@@ -931,7 +1262,7 @@ export default function App(){
             </div>
             <div style={{display:"flex",justifyContent:"space-between",marginTop:10}}>
               <button style={S.btn("dark")} onClick={()=>setStep(1)}>← Atrás</button>
-              <button style={S.btn("primary")} onClick={()=>{if(lb.active&&maxVar<3&&!lb.peseInoperante&&!lb.confirmed)return notify("Confirmar bypass atípico","error");setEvalForm(le);setBypassForm(lb);setStep(3);}}>Siguiente →</button>
+              <button style={S.btn("primary")} onClick={()=>{if(lb.active&&maxVar<3&&lb.cause!=="system_down"&&lb.cause!=="critical_level_3"&&!lb.confirmed)return notify("Confirmar Modo urgente atípico","error");setEvalForm(le);setBypassForm(lb);setStep(3);}}>Siguiente →</button>
             </div>
           </div>
         )}
@@ -971,7 +1302,7 @@ export default function App(){
             </div>
             <div style={{marginBottom:8}}><span style={{color:"#64748b"}}>Resumen:</span> {newCase?.summary}</div>
             <div style={{...S.card,background:"#111827",marginBottom:8,fontSize:"11px",color:"#64748b"}}>
-              Estado inicial: <strong style={{color:"#a78bfa"}}>{bypassForm.active?"En gestión (bypass activo)":"Nuevo → requiere recepción"}</strong>
+              Estado inicial: <strong style={{color:"#a78bfa"}}>{bypassForm.active?"En gestión ("+UI_TEXT.states.modoUrgenteActive+")":"Nuevo → requiere recepción"}</strong>
             </div>
             <div style={{display:"flex",justifyContent:"space-between",marginTop:10}}>
               <button style={S.btn("dark")} onClick={()=>setStep(3)}>← Atrás</button>
@@ -995,6 +1326,10 @@ export default function App(){
     const [aForm, setAForm] = useState({ action: "", responsible: currentUser.id, result: "" });
     const [cmtTxt, setCmtTxt] = useState("");
     const [decForm, setDecForm] = useState("");
+    const [insScope, setInsScope] = useState("");
+    const [insAudience, setInsAudience] = useState("");
+    const [insSummary, setInsSummary] = useState("");
+    const [insDetails, setInsDetails] = useState("");
     const [showRA, setShowRA] = useState(false);
     const [raEval, setRaEval] = useState({ ...(c.evaluation ?? {}) });
     const [raJust, setRaJust] = useState("");
@@ -1014,6 +1349,10 @@ export default function App(){
       CLOSED: "#6b7280", BYPASS: "#a78bfa", COMMENT: "#64748b", MITIGATED: "#eab308", RECEPCIONADO: "#a78bfa",
       REASSESSMENT: "#f97316", IN_MANAGEMENT: "#3b82f6", BYPASS_VALIDATED: "#22c55e", BYPASS_REVOKED: "#ef4444",
     };
+    const instructionsSorted = useMemo(() => {
+      const list = c.instructions ?? [];
+      return [...list].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    }, [c.id, c.instructions]);
     return (
       <div style={{position:"relative"}}>
         {isClosed&&<ClosedOverlay/>}
@@ -1023,12 +1362,12 @@ export default function App(){
             <span style={{fontFamily:"monospace",color:"#64748b",fontSize:"12px"}}>{c.id}</span>
             <span style={S.badge(critColor(c.criticality))}>{c.criticality}</span>
             <span style={S.badge(statusColor(c.status))}>{c.status}</span>
-            {c.bypass&&<span style={S.badge(c.bypassFlagged&&!c.bypassValidated?"#ef4444":"#f97316")}>⚡ BYPASS{c.bypassFlagged&&!c.bypassValidated?" ⚠️ FLAGGED":""}{c.bypassValidated?" ["+c.bypassValidated+"]":""}</span>}
+            {c.bypass&&<span style={S.badge(c.bypassFlagged&&!c.bypassValidated?"#ef4444":"#f97316")}>⚡ {UI_TEXT.states.modoUrgente}{c.bypassFlagged&&!c.bypassValidated?" ⚠️ "+UI_TEXT.states.flaggedShort:""}{c.bypassValidated?" ["+c.bypassValidated+"]":""}</span>}
             <SlaBadge c={c}/><RecBadge c={c}/>
           </div>
           <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
             <button style={S.btn("dark")} onClick={()=>exportCaseTXT(c)}>⬇ TXT</button>
-            <button style={S.btn("dark")} onClick={()=>{const txt=`MINUTA SCCE\nID: ${c.id} | ${fmtDate(nowISO())}\nLocal: ${c.local||"—"}\nResumen: ${c.summary}\nCriticidad: ${c.criticality} | Estado: ${c.status}`;navigator.clipboard?.writeText(txt);notify("Minuta copiada");}}>📋 Minuta</button>
+            <button style={S.btn("dark")} onClick={()=>{const txt=`MINUTA SCCE\nID: ${c.id} | ${fmtDate(nowISO())}\nLocal: ${c.local||"—"}\nResumen: ${c.summary}\nCriticidad: ${c.criticality} | Estado: ${c.status}`;navigator.clipboard?.writeText(txt);notify(UI_TEXT.buttons.minutaCopiada);}}>📋 Minuta</button>
             {canAssign&&(
               <select style={{...S.inp,width:"auto"}} onChange={e=>e.target.value&&(()=>{setCases(prev=>prev.map(x=>x.id!==c.id?x:{...x,assignedTo:e.target.value,updatedAt:nowISO()}));setAuditLog(prev=>appendEvent(prev,"ASSIGNED",currentUser.id,currentUser.role,c.id,"Asignado a "+USERS.find(u=>u.id===e.target.value)?.name));})()}>
                 <option value="">Asignar a...</option>
@@ -1054,16 +1393,16 @@ export default function App(){
 
         {c.bypassFlagged&&!c.bypassValidated&&(
           <div style={{...S.card,background:"#2d0a0a",border:"2px solid #ef4444",marginBottom:8}}>
-            <div style={{color:"#ef4444",fontWeight:700,marginBottom:4}}>⚠️ BYPASS FLAGGED — Requiere validación ex-post</div>
+            <div style={{color:"#ef4444",fontWeight:700,marginBottom:4}}>⚠️ {UI_TEXT.states.modoUrgente} — {UI_TEXT.misc.validacionExpost}</div>
             <div style={{fontSize:"11px",color:"#f87171",marginBottom:8}}>Motivo: {c.bypassMotivo||"—"}</div>
             {canDo("validateBypass",currentUser)&&(
               <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
                 <select style={{...S.inp,width:"auto"}} value={bvForm.decision} onChange={e=>setBvForm(p=>({...p,decision:e.target.value}))}>
-                  <option value="VALIDATED">VALIDAR el bypass</option>
-                  <option value="REVOKED">REVOCAR el bypass</option>
+                  <option value="VALIDATED">{UI_TEXT.labels.validarExcepcion}</option>
+                  <option value="REVOKED">{UI_TEXT.labels.revocarExcepcion}</option>
                 </select>
-                <input style={{...S.inp,flex:1,minWidth:200}} placeholder="Fundamento obligatorio..." value={bvForm.fundament} onChange={e=>setBvForm(p=>({...p,fundament:e.target.value}))}/>
-                <button style={S.btn(bvForm.decision==="VALIDATED"?"success":"danger")} onClick={()=>validateBypass(c.id,bvForm.decision,bvForm.fundament)}>{bvForm.decision==="VALIDATED"?"✓ Validar":"✕ Revocar"}</button>
+                <input style={{...S.inp,flex:1,minWidth:200}} placeholder={UI_TEXT.labels.fundamentoObligatorio} value={bvForm.fundament} onChange={e=>setBvForm(p=>({...p,fundament:e.target.value}))}/>
+                <button style={S.btn(bvForm.decision==="VALIDATED"?"success":"danger")} onClick={()=>validateBypass(c.id,bvForm.decision,bvForm.fundament)}>{bvForm.decision==="VALIDATED"?UI_TEXT.labels.validar:UI_TEXT.labels.revocar}</button>
               </div>
             )}
           </div>
@@ -1083,7 +1422,26 @@ export default function App(){
                   {c.localSnapshot&&<div style={{fontSize:"9px",color:"#475569",marginTop:1}}>📸 {c.localSnapshot.idLocal} · {fmtDate(c.localSnapshot.snapshotAt)}</div>}
                 </div>
               </div>
-              <div style={{color:"#94a3b8",fontSize:"12px",marginBottom:8}}>{c.detail||"—"}</div>
+              <div style={{color:"#94a3b8",fontSize:"12px",marginBottom:8}}>
+                {c.detail || "—"}
+              </div>
+
+              {/* EVIDENCIA */}
+              <div style={{marginBottom:8}}>
+                <div style={{color:"#94a3b8",fontSize:"11px",fontWeight:600,marginBottom:6}}>
+                  {UI_TEXT.labels.evidenceTitle}
+                </div>
+
+                {c.evidence && c.evidence.length > 0 ? (
+                  c.evidence.map((ev, i) => (
+                    <div key={i} style={{fontSize:"12px",marginBottom:4}}>
+                      📎 {ev}
+                    </div>
+                  ))
+                ) : (
+                  <div style={{fontSize:"12px",color:"#94a3b8"}}>—</div>
+                )}
+              </div>
               <div style={S.g2}>
                 <div><span style={{color:"#64748b"}}>Región:</span> {regionsMap[c.region]?.name}</div>
                 <div><span style={{color:"#64748b"}}>Comuna:</span> {regionsMap[c.region]?.communes?.[c.commune]?.name||c.commune}</div>
@@ -1218,10 +1576,66 @@ export default function App(){
               )}
             </div>
 
+            {/* INSTRUCCIONES — lista */}
+            <div style={{...S.card,marginBottom:8}}>
+              <div style={{color:"#94a3b8",fontSize:"11px",fontWeight:600,marginBottom:8}}>{UI_TEXT.labels.instructionsTitle}</div>
+              {instructionsSorted.length === 0 ? (
+                <div style={{fontSize:"12px",color:"#64748b"}}>{UI_TEXT.labels.instructionsEmpty}</div>
+              ) : (
+                <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                  {instructionsSorted.map((ins) => {
+                    const acked = currentUser?.id && isInstructionAckedByUser(ins, currentUser.id);
+                    const last = lastAck(ins);
+                    return (
+                      <div key={ins.id} style={{...S.card,background:"#111827",padding:8}}>
+                        <div style={{fontSize:"11px",color:"#64748b",marginBottom:4}}>{ins.scope} · {ins.audience} · {fmtDate(ins.createdAt)} — {USERS.find(u=>u.id===ins.createdBy)?.name ?? ins.createdBy}</div>
+                        <div style={{fontWeight:600,fontSize:"12px",marginBottom:4}}>{ins.summary}</div>
+                        {ins.details && <div style={{fontSize:"11px",color:"#94a3b8",marginBottom:4}}>{ins.details}</div>}
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:4}}>
+                          <span style={S.badge(acked ? "#22c55e" : "#eab308")}>{acked ? UI_TEXT.labels.statusAcked : UI_TEXT.labels.statusPending}</span>
+                          {last && <span style={{fontSize:"10px",color:"#64748b"}}>Acusado: {USERS.find(u=>u.id===last.userId)?.name ?? last.userId} @ {fmtDate(last.at)}</span>}
+                          {!acked && currentUser?.id && ins.ackRequired && (
+                            <button style={{...S.btn("primary"),fontSize:"10px",padding:"4px 8px"}} title={UI_TEXT.tooltips.ackConfirmReceipt} onClick={()=>ackInstruction(c.id, ins.id)}>{UI_TEXT.buttons.ackConfirmReceipt}</button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* CREAR INSTRUCCIÓN — solo si instruct */}
+            {canDo("instruct", currentUser) && (
+              <div style={{...S.card,marginBottom:8}}>
+                <div style={{color:"#94a3b8",fontSize:"11px",fontWeight:600,marginBottom:8}}>{UI_TEXT.labels.instructionCreateTitle}</div>
+                <div style={S.g2}>
+                  <label style={S.lbl}>{UI_TEXT.labels.scopeLabel}</label>
+                  <select style={S.inp} value={insScope} onChange={e=>setInsScope(e.target.value)}>
+                    <option value="LOCAL">{UI_TEXT.labels.scopeLocal}</option>
+                    <option value="COMUNAL">{UI_TEXT.labels.scopeComunal}</option>
+                    <option value="REGIONAL">{UI_TEXT.labels.scopeRegional}</option>
+                  </select>
+                  <label style={S.lbl}>{UI_TEXT.labels.audienceLabel}</label>
+                  <select style={S.inp} value={insAudience} onChange={e=>setInsAudience(e.target.value)}>
+                    <option value="AMBOS">{UI_TEXT.labels.audienceBoth}</option>
+                    <option value="PESE">{UI_TEXT.labels.audiencePese}</option>
+                    <option value="DELEGADO">{UI_TEXT.labels.audienceDelegado}</option>
+                  </select>
+                </div>
+                <label style={S.lbl}>{UI_TEXT.labels.summaryLabelRequired}</label>
+                <input style={S.inp} placeholder={UI_TEXT.misc.instructionSummaryPlaceholder} value={insSummary} onChange={e=>setInsSummary(e.target.value)}/>
+                <label style={S.lbl}>{UI_TEXT.labels.detailsLabelOptional}</label>
+                <textarea style={{...S.inp,height:40,resize:"vertical"}} placeholder={UI_TEXT.misc.instructionDetailsPlaceholder} value={insDetails} onChange={e=>setInsDetails(e.target.value)}/>
+                <button style={{...S.btn("primary"),marginTop:6}} title={UI_TEXT.tooltips.caseCreateInstruction} onClick={()=>{createInstruction(c.id, insScope, insAudience, insSummary, insDetails);setInsSummary("");setInsDetails("");}}>{UI_TEXT.buttons.caseCreateInstruction}</button>
+              </div>
+            )}
+
+            {/* COMENTARIO */}
             <div style={S.card}>
-              <div style={{color:"#94a3b8",fontSize:"11px",fontWeight:600,marginBottom:6}}>{canDo("instruct",currentUser)?"INSTRUCCIÓN (Nivel Central)":"COMENTARIO"}</div>
-              <textarea style={{...S.inp,height:50,resize:"vertical"}} value={cmtTxt} onChange={e=>setCmtTxt(e.target.value)} placeholder={canDo("instruct",currentUser)?"Instrucción...":"Comentario..."}/>
-              <button style={{...S.btn("dark"),marginTop:4}} onClick={()=>{if(!cmtTxt)return;addComment(c.id,(canDo("instruct",currentUser)?"[INSTRUCCIÓN] ":"")+cmtTxt);setCmtTxt("");notify("Registrado");}}>+ {canDo("instruct",currentUser)?"Instrucción":"Comentario"}</button>
+              <div style={{color:"#94a3b8",fontSize:"11px",fontWeight:600,marginBottom:6}}>{UI_TEXT.labels.commentTitle}</div>
+              <textarea style={{...S.inp,height:50,resize:"vertical"}} value={cmtTxt} onChange={e=>setCmtTxt(e.target.value)} placeholder={UI_TEXT.misc.commentPlaceholder}/>
+              <button style={{...S.btn("dark"),marginTop:4}} onClick={()=>{if(!cmtTxt)return;addComment(c.id, cmtTxt);setCmtTxt("");notify("Registrado");}}>+ {UI_TEXT.buttons.addComment}</button>
             </div>
           </div>
         </div>
@@ -1399,7 +1813,7 @@ export default function App(){
     ];
     return(
       <div>
-        <h2 style={{margin:"0 0 12px",fontSize:"16px"}}>Reportes y Exportación</h2>
+        <h2 style={{margin:"0 0 12px",fontSize:"16px"}}>Respaldos y reportes</h2>
         <div style={{...S.g4,marginBottom:10}}>
           {[{l:"Total casos",v:cases.length,c:"#3b82f6"},{l:"Críticos",v:cases.filter(c=>c.criticality==="CRITICA").length,c:"#ef4444"},{l:"Bypass Flagged",v:cases.filter(c=>c.bypassFlagged&&!c.bypassValidated).length,c:"#f97316"},{l:"Con Snapshot",v:cases.filter(c=>c.localSnapshot).length,c:"#6366f1"}].map(k=>(
             <div key={k.l} style={S.card}><div style={{color:k.c,fontSize:"22px",fontWeight:700}}>{k.v}</div><div style={{color:"#64748b",fontSize:"11px"}}>{k.l}</div></div>
@@ -1429,13 +1843,16 @@ export default function App(){
             );})}
           </div>
         </div>
-        <div style={{...S.card,marginBottom:10}}>
-          <div style={{color:"#94a3b8",fontSize:"11px",fontWeight:600,marginBottom:8}}>EXPORTAR</div>
+        <div id="reports-export" style={{...S.card,marginBottom:10,scrollMarginTop:80}}>
+          <div style={{color:"#64748b",fontSize:"11px",fontWeight:700,marginBottom:8}}>RESPALDOS</div>
+          <input ref={importJsonInputRef} type="file" accept="application/json,.json" style={{display:"none"}} onChange={importJSONSelected} />
           <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-            {canDo("export",currentUser)&&<button style={S.btn("primary")} onClick={exportCSV}>📊 CSV Casos</button>}
-            {canDo("export",currentUser)&&<button style={S.btn("primary")} onClick={exportJSON}>📦 JSON Completo</button>}
-            {canDo("export",currentUser)&&<button style={S.btn("dark")} onClick={exportAuditCSV}>🔗 CSV Auditoría</button>}
+            {canDo("export",currentUser)&&<button style={S.btn("primary")} onClick={exportCSV}>📊 Excel — Lista de casos</button>}
+            {canDo("export",currentUser)&&<button style={S.btn("primary")} onClick={exportJSON}>📦 Respaldo completo</button>}
+            <span id="reports-import">{canDo("export",currentUser)&&<button style={S.btn("primary")} onClick={importJSONClick}>⬆️ Cargar respaldo</button>}</span>
+            {canDo("export",currentUser)&&<button style={S.btn("dark")} onClick={exportAuditCSV}>📑 Excel — Historial</button>}
           </div>
+          <div style={{fontSize:"11px",color:"#64748b",marginTop:8}}>Puedes descargar un respaldo del sistema o cargar uno oficial cuando sea necesario.</div>
         </div>
         {divergencias.length>0&&(
           <div style={{...S.card,border:"1px solid #f9731644"}}>
@@ -1645,7 +2062,7 @@ export default function App(){
             <div style={{marginTop:6,color:"#374151",fontSize:"10px"}}>Sin backend · Sin BD · Auditoría append-only · Snapshots v1.9</div>
           </div>
         </div>
-        <div style={S.card}>
+        <div id="config-reset" style={{...S.card,scrollMarginTop:80}}>
           <div style={{color:"#94a3b8",fontSize:"11px",fontWeight:600,marginBottom:6}}>RESETEAR SISTEMA</div>
           <div style={{color:"#64748b",fontSize:"11px",marginBottom:6}}>Restaura datos de demostración. No reversible.</div>
           <button style={S.btn("danger")} onClick={()=>{if(window.confirm("¿Resetear todo el sistema?"))doReset();}}>Reset Demo</button>
@@ -1661,13 +2078,35 @@ export default function App(){
       <div style={S.nav}>
         <span style={{fontWeight:800,color:"#3b82f6",fontSize:"13px",marginRight:4,letterSpacing:.5}}>SCCE</span>
         <span style={{color:"#374151",fontSize:"10px",marginRight:8}}>v{APP_VERSION}</span>
-        {["dashboard","catalog","audit","reports","simulation","checklist","config"].map(v=>(
+        {(["dashboard","catalog","audit","reports","simulation","checklist","config"] as const).map(v=>(
           <button key={v} style={S.nBtn(view===v)} onClick={()=>setView(v)}>
             {v==="dashboard"?"Dashboard":v==="catalog"?"🗂 Catálogo":v==="audit"?"🔗 Auditoría":v==="reports"?"Reportes":v==="simulation"?"Simulación":v==="checklist"?"Checklist":"Config"}
           </button>
         ))}
         <button style={{background:"#16a34a",color:"#fff",border:"1px solid #22c55e66",padding:"5px 12px",borderRadius:"4px",cursor:"pointer",fontSize:"12px",fontWeight:700,boxShadow:"0 0 8px #16a34a44"}} onClick={startNewCase}>+ Incidente</button>
         <div style={{marginLeft:"auto",display:"flex",gap:6,alignItems:"center"}}>
+          <div data-actions-menu style={{position:"relative",display:"flex",alignItems:"center"}}>
+            <button type="button" onClick={()=>setActionsOpen(v=>!v)} title="Acciones globales: Exportar / Importar / Reset Demo" style={S.nBtn(false)} aria-label="Abrir acciones globales" aria-expanded={actionsOpen}>Acciones ▾</button>
+            {actionsOpen&&(
+              <div style={{position:"absolute",right:0,top:"calc(100% + 6px)",minWidth:220,background:"#fff",border:"1px solid rgba(0,0,0,0.12)",borderRadius:12,boxShadow:"0 12px 30px rgba(0,0,0,0.18)",padding:6,zIndex:1200}} role="menu" aria-label="Acciones globales">
+                <div style={{fontSize:10,opacity:0.7,padding:"6px 8px"}}>Atajos: Ctrl+E Export · Ctrl+I Import</div>
+                <button type="button" role="menuitem" onClick={()=>goToSection("reports","reports-export")} style={{width:"100%",textAlign:"left",padding:"8px 10px",borderRadius:10,border:"0",background:"transparent",cursor:"pointer",fontSize:12,fontWeight:800}}>
+                  📦 Exportar (CSV/JSON)
+                  <div style={{fontSize:10,fontWeight:600,opacity:0.7,marginTop:2}}>Ir a Reportes → Exportar</div>
+                </button>
+                <button type="button" role="menuitem" onClick={()=>goToSection("reports","reports-import")} style={{width:"100%",textAlign:"left",padding:"8px 10px",borderRadius:10,border:"0",background:"transparent",cursor:"pointer",fontSize:12,fontWeight:800}}>
+                  📥 Importar JSON
+                  <div style={{fontSize:10,fontWeight:600,opacity:0.7,marginTop:2}}>Ir a Reportes → Importar</div>
+                </button>
+                <div style={{height:1,background:"rgba(0,0,0,0.08)",margin:"6px 6px"}} />
+                <button type="button" role="menuitem" onClick={()=>goToSection("config","config-reset")} style={{width:"100%",textAlign:"left",padding:"8px 10px",borderRadius:10,border:"0",background:"transparent",cursor:"pointer",fontSize:12,fontWeight:800}}>
+                  🧨 Reset Demo
+                  <div style={{fontSize:10,fontWeight:600,opacity:0.7,marginTop:2}}>Ir a Config → Resetear sistema</div>
+                </button>
+              </div>
+            )}
+          </div>
+          <button type="button" onClick={()=>setHelpOpen(true)} title="Ayuda del módulo actual" style={S.nBtn(false)} aria-label="Abrir ayuda">?</button>
           {divergencias.length>0&&<span style={{...S.badge("#f97316"),fontSize:"9px",cursor:"pointer"}} onClick={()=>setView("catalog")}>⚡ {divergencias.length}</span>}
           <span style={{fontSize:"10px",color:"#475569"}}>{electionConfig.name}</span>
           <span style={S.badge("#374151")}>{currentUser.name}</span>
@@ -1693,6 +2132,7 @@ export default function App(){
         {view==="checklist"&&<ChecklistView/>}
         {view==="config"&&<ConfigView/>}
       </div>
+      <HelpDrawer open={helpOpen} onClose={()=>setHelpOpen(false)} content={helpByView[view]??helpByView.dashboard} />
     </div>
   );
 }

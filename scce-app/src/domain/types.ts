@@ -23,6 +23,27 @@ export type CaseEvent = {
   note?: string;
 };
 
+export type InstructionAck = {
+  userId: string;
+  role: string;
+  at: string;
+};
+
+export type InstructionItem = {
+  id: string;
+  caseId: string;
+  scope: string;
+  audience: string;
+  summary: string;
+  details?: string | null;
+  createdAt: string;
+  createdBy: string;
+  status: string;
+  ackRequired: boolean;
+  acks: InstructionAck[];
+  evidence?: string[];
+};
+
 export type CaseItem = {
   id: string;
   region: string;
@@ -34,6 +55,7 @@ export type CaseItem = {
   localSnapshot?: { idLocal: string; nombre: string; region: string; commune: string; snapshotAt: string } | null;
   origin?: { actor: string; channel: string; detectedAt: string };
   timeline?: CaseEvent[];
+  instructions?: InstructionItem[];
   evaluation?: Record<string, number>;
   criticalityScore?: number;
   detail?: string;
