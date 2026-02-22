@@ -29,6 +29,25 @@ export type InstructionAck = {
   at: string;
 };
 
+/** Nivel de impacto de la instrucción (no del incidente). Fase 3.4 */
+export type ImpactLevel = "L1" | "L2" | "L3";
+
+/** Ámbito funcional de la instrucción. Fase 3.4 */
+export type ScopeFunctional =
+  | "OPERACIONES"
+  | "FISCALIZACION"
+  | "SEGURIDAD"
+  | "TI"
+  | "INFRAESTRUCTURA"
+  | "OTRO";
+
+/** Bypass controlado: excepción registrada y auditable. Fase 3.4 */
+export type InstructionBypass = {
+  enabled: boolean;
+  reason?: string;
+  notified?: string[];
+};
+
 export type InstructionItem = {
   id: string;
   caseId: string;
@@ -42,6 +61,14 @@ export type InstructionItem = {
   ackRequired: boolean;
   acks: InstructionAck[];
   evidence?: string[];
+  /** Fase 3.4 — impacto de la instrucción (default L1) */
+  impactLevel?: ImpactLevel;
+  /** Fase 3.4 — ámbito funcional (default OPERACIONES) */
+  scopeFunctional?: ScopeFunctional;
+  /** Fase 3.4 — destinatario (label obligatorio) */
+  to?: { role?: string; userId?: string; label: string };
+  /** Fase 3.4 — bypass con motivo obligatorio si enabled */
+  bypass?: InstructionBypass;
 };
 
 export type CaseItem = {

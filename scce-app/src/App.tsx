@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
-import type { CaseItem, InstructionItem, LocalCatalog, LocalCatalogEntry, CaseStatus, Criticality, RegionCode, CommuneCode, AuditLogEntry } from "./domain/types";
+import type { CaseItem, InstructionItem, ImpactLevel, ScopeFunctional, LocalCatalog, LocalCatalogEntry, CaseStatus, Criticality, RegionCode, CommuneCode, AuditLogEntry } from "./domain/types";
 import { calcCompleteness } from "./domain/caseMetrics";
 import { findActiveLocal } from "./domain/catalog";
 import { validateCaseSchema } from "./domain/caseValidation";
@@ -590,9 +590,27 @@ export default function App(){
     const acks = ins.acks ?? [];
     return acks.length > 0 ? acks[acks.length - 1] : null;
   }
-  function createInstruction(caseId: string, scope: string, audience: string, summary: string, details: string){
+  function createInstruction(
+    caseId: string,
+    scope: string,
+    audience: string,
+    summary: string,
+    details: string,
+    impactLevel: ImpactLevel = "L1",
+    scopeFunctional: ScopeFunctional = "OPERACIONES",
+    bypass?: { enabled: boolean; reason?: string }
+  ){
     if(!currentUser?.id) return;
     if(!summary?.trim()) return notify(UI_TEXT.errors.instructionSummaryRequired, "error");
+    const role = currentUser.role;
+    const canL3WithoutBypass = role === "DIRECTOR_REGIONAL" || role === "NIVEL_CENTRAL";
+    if (impactLevel === "L3" && !canL3WithoutBypass) {
+      if (!bypass?.enabled || !bypass?.reason?.trim()) return notify(UI_TEXT.errors.l3RequiresBypass, "error");
+      if (bypass.reason.trim().length < 30) return notify(UI_TEXT.errors.bypassReasonMin, "error");
+    }
+    if (bypass?.enabled && (!bypass?.reason?.trim() || bypass.reason.trim().length < 30)) {
+      return notify(UI_TEXT.errors.bypassReasonMin, "error");
+    }
     const newIns: InstructionItem = {
       id: uuidSimple(),
       caseId,
@@ -606,6 +624,12 @@ export default function App(){
       ackRequired: true,
       acks: [],
       evidence: [],
+      impactLevel,
+      scopeFunctional,
+      to: { label: audience === "AMBOS" ? "Dirección Regional / Terreno" : audience === "PESE" ? "PESE" : "Delegado" },
+      ...(bypass?.enabled && bypass?.reason?.trim()
+        ? { bypass: { enabled: true, reason: bypass.reason.trim() } }
+        : {}),
     };
     setCases((prev) =>
       prev.map((x) =>
@@ -615,7 +639,7 @@ export default function App(){
       )
     );
     setAuditLog((prev) =>
-      appendEvent(prev, "COMMENT_ADDED", currentUser.id, currentUser.role, caseId, `Instrucción: ${summary.slice(0, 60)}`)
+      appendEvent(prev, bypass?.enabled ? "INSTRUCTION_BYPASS_USED" : "COMMENT_ADDED", currentUser.id, currentUser.role, caseId, `Instrucción ${impactLevel}: ${summary.slice(0, 50)}${bypass?.enabled ? " [BYPASS]" : ""}`)
     );
     notify("Instrucción creada", "success");
   }
@@ -1333,6 +1357,10 @@ export default function App(){
     const [insAudience, setInsAudience] = useState("");
     const [insSummary, setInsSummary] = useState("");
     const [insDetails, setInsDetails] = useState("");
+    const [insImpactLevel, setInsImpactLevel] = useState<ImpactLevel>("L1");
+    const [insScopeFunctional, setInsScopeFunctional] = useState<ScopeFunctional>("OPERACIONES");
+    const [insBypassEnabled, setInsBypassEnabled] = useState(false);
+    const [insBypassReason, setInsBypassReason] = useState("");
     const [showRA, setShowRA] = useState(false);
     const [raEval, setRaEval] = useState({ ...(c.evaluation ?? {}) });
     const [raJust, setRaJust] = useState("");
@@ -1589,9 +1617,19 @@ export default function App(){
                   {instructionsSorted.map((ins) => {
                     const acked = currentUser?.id && isInstructionAckedByUser(ins, currentUser.id);
                     const last = lastAck(ins);
+                    const impact = ins.impactLevel ?? "L1";
+                    const scopeF = ins.scopeFunctional ?? "OPERACIONES";
+                    const scopeFLabel = { OPERACIONES: UI_TEXT.labels.scopeOperaciones, FISCALIZACION: UI_TEXT.labels.scopeFiscalizacion, SEGURIDAD: UI_TEXT.labels.scopeSeguridad, TI: UI_TEXT.labels.scopeTI, INFRAESTRUCTURA: UI_TEXT.labels.scopeInfraestructura, OTRO: UI_TEXT.labels.scopeOtro }[scopeF] ?? scopeF;
+                    const hasBypass = ins.bypass?.enabled === true;
                     return (
                       <div key={ins.id} style={{...S.card,background:"#111827",padding:8}}>
-                        <div style={{fontSize:"11px",color:"#64748b",marginBottom:4}}>{ins.scope} · {ins.audience} · {fmtDate(ins.createdAt)} — {USERS.find(u=>u.id===ins.createdBy)?.name ?? ins.createdBy}</div>
+                        <div style={{fontSize:"11px",color:"#64748b",marginBottom:4,display:"flex",flexWrap:"wrap",gap:6,alignItems:"center"}}>
+                          <span>{ins.scope} · {ins.audience} · {fmtDate(ins.createdAt)}</span>
+                          <span style={S.badge(impact === "L3" ? "#ef4444" : impact === "L2" ? "#f97316" : "#64748b")}>{impact}</span>
+                          <span style={{color:"#94a3b8"}}>{scopeFLabel}</span>
+                          {hasBypass && <span style={S.badge("#7f1d1d")} title={ins.bypass?.reason}>{UI_TEXT.labels.instructionBypassBadge}</span>}
+                        </div>
+                        <div style={{fontSize:"10px",color:"#475569",marginBottom:2}}>{USERS.find(u=>u.id===ins.createdBy)?.name ?? ins.createdBy}</div>
                         <div style={{fontWeight:600,fontSize:"12px",marginBottom:4}}>{ins.summary}</div>
                         {ins.details && <div style={{fontSize:"11px",color:"#94a3b8",marginBottom:4}}>{ins.details}</div>}
                         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:4}}>
@@ -1625,12 +1663,34 @@ export default function App(){
                     <option value="PESE">{UI_TEXT.labels.audiencePese}</option>
                     <option value="DELEGADO">{UI_TEXT.labels.audienceDelegado}</option>
                   </select>
+                  <label style={S.lbl}>{UI_TEXT.labels.impactLevelLabel}</label>
+                  <select style={S.inp} value={insImpactLevel} onChange={e=>setInsImpactLevel(e.target.value as ImpactLevel)}>
+                    <option value="L1">{UI_TEXT.labels.impactL1}</option>
+                    <option value="L2">{UI_TEXT.labels.impactL2}</option>
+                    <option value="L3">{UI_TEXT.labels.impactL3}</option>
+                  </select>
+                  <label style={S.lbl}>{UI_TEXT.labels.scopeFunctionalLabel}</label>
+                  <select style={S.inp} value={insScopeFunctional} onChange={e=>setInsScopeFunctional(e.target.value as ScopeFunctional)}>
+                    <option value="OPERACIONES">{UI_TEXT.labels.scopeOperaciones}</option>
+                    <option value="FISCALIZACION">{UI_TEXT.labels.scopeFiscalizacion}</option>
+                    <option value="SEGURIDAD">{UI_TEXT.labels.scopeSeguridad}</option>
+                    <option value="TI">{UI_TEXT.labels.scopeTI}</option>
+                    <option value="INFRAESTRUCTURA">{UI_TEXT.labels.scopeInfraestructura}</option>
+                    <option value="OTRO">{UI_TEXT.labels.scopeOtro}</option>
+                  </select>
                 </div>
                 <label style={S.lbl}>{UI_TEXT.labels.summaryLabelRequired}</label>
                 <input style={S.inp} placeholder={UI_TEXT.misc.instructionSummaryPlaceholder} value={insSummary} onChange={e=>setInsSummary(e.target.value)}/>
                 <label style={S.lbl}>{UI_TEXT.labels.detailsLabelOptional}</label>
                 <textarea style={{...S.inp,height:40,resize:"vertical"}} placeholder={UI_TEXT.misc.instructionDetailsPlaceholder} value={insDetails} onChange={e=>setInsDetails(e.target.value)}/>
-                <button style={{...S.btn("primary"),marginTop:6}} title={UI_TEXT.tooltips.caseCreateInstruction} onClick={()=>{createInstruction(c.id, insScope, insAudience, insSummary, insDetails);setInsSummary("");setInsDetails("");}}>{UI_TEXT.buttons.caseCreateInstruction}</button>
+                <div style={{marginTop:8,marginBottom:6,display:"flex",alignItems:"center",gap:8}}>
+                  <input type="checkbox" id="ins-bypass" checked={insBypassEnabled} onChange={e=>setInsBypassEnabled(e.target.checked)}/>
+                  <label htmlFor="ins-bypass" style={{...S.lbl,margin:0}}>{UI_TEXT.labels.bypassLabel}</label>
+                </div>
+                {insBypassEnabled && (
+                  <textarea style={{...S.inp,height:36,resize:"vertical",marginBottom:6}} placeholder={UI_TEXT.labels.bypassReasonPlaceholder} value={insBypassReason} onChange={e=>setInsBypassReason(e.target.value)}/>
+                )}
+                <button style={{...S.btn("primary"),marginTop:6}} title={UI_TEXT.tooltips.caseCreateInstruction} onClick={()=>{createInstruction(c.id, insScope, insAudience, insSummary, insDetails, insImpactLevel, insScopeFunctional, insBypassEnabled ? { enabled: true, reason: insBypassReason } : undefined);setInsSummary("");setInsDetails("");setInsBypassReason("");setInsBypassEnabled(false);}}>{UI_TEXT.buttons.caseCreateInstruction}</button>
               </div>
             )}
 
@@ -1649,7 +1709,7 @@ export default function App(){
             <span style={S.badge(chainResult.ok?"#22c55e":"#ef4444")}>{chainResult.ok?"🔗 Cadena íntegra":"⚠️ Comprometida"}</span>
           </div>
           <div style={{maxHeight:140,overflowY:"auto"}}>
-            {ca.map((e,i)=>{const u=USERS.find(u=>u.id===e.actor);const tc: Record<string, string> = {CASE_CREATED:"#22c55e",BYPASS_USED:"#f97316",BYPASS_FLAGGED:"#ef4444",ESCALATED:"#ef4444",STATUS_CHANGED:"#eab308",ACTION_ADDED:"#94a3b8",EXPORT_DONE:"#6366f1",COMMENT_ADDED:"#64748b",REASSESSMENT:"#f97316",DECISION_ADDED:"#3b82f6",ASSIGNED:"#a78bfa"};
+            {ca.map((e,i)=>{const u=USERS.find(u=>u.id===e.actor);const tc: Record<string, string> = {CASE_CREATED:"#22c55e",BYPASS_USED:"#f97316",BYPASS_FLAGGED:"#ef4444",INSTRUCTION_BYPASS_USED:"#b91c1c",ESCALATED:"#ef4444",STATUS_CHANGED:"#eab308",ACTION_ADDED:"#94a3b8",EXPORT_DONE:"#6366f1",COMMENT_ADDED:"#64748b",REASSESSMENT:"#f97316",DECISION_ADDED:"#3b82f6",ASSIGNED:"#a78bfa"};
               return<div key={i} style={{display:"flex",gap:6,fontSize:"10px",padding:"3px 0",borderBottom:"1px solid #1e2535",flexWrap:"wrap"}}>
                 <span style={{color:"#475569",flexShrink:0,width:108}}>{fmtDate(e.at)}</span>
                 <span style={{color:tc[e.type]||"#64748b",fontWeight:600,flexShrink:0,width:130}}>{e.type}</span>
