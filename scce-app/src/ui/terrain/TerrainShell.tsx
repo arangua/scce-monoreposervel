@@ -88,7 +88,9 @@ type Props = {
   cases: CaseLike[];
   selectedCaseId: string | null;
   setSelectedCaseId: (id: string) => void;
+  onGoToDashboard?: () => void;
   onLogout?: () => void;
+  isCrisisMode?: boolean;
   children?: React.ReactNode;
 };
 
@@ -97,7 +99,9 @@ export function TerrainShell({
   cases,
   selectedCaseId,
   setSelectedCaseId,
+  onGoToDashboard,
   onLogout,
+  isCrisisMode = false,
   children,
 }: Props) {
   const [filterPendingOnly, setFilterPendingOnly] = React.useState(false);
@@ -133,22 +137,41 @@ export function TerrainShell({
           <span style={{ opacity: 0.7, color: "#94a3b8", fontSize: 13 }}>{roleLabel}</span>
         </div>
 
-        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
           <span style={{ opacity: 0.6, fontSize: 12, color: "#94a3b8" }}>Elección 2026</span>
+          {!isCrisisMode && onGoToDashboard && (
+            <button
+              type="button"
+              onClick={onGoToDashboard}
+              style={{
+                background: "#1e293b",
+                color: "white",
+                border: "1px solid rgba(255,255,255,0.10)",
+                padding: "6px 10px",
+                borderRadius: 8,
+                cursor: "pointer",
+                fontSize: 13,
+              }}
+              title="Ir al panel general"
+            >
+              Dashboard
+            </button>
+          )}
           <button
             type="button"
-            onClick={() => (onLogout ? onLogout() : (window.location.reload()))}
+            onClick={() => (onLogout ? onLogout() : window.location.reload())}
             style={{
               background: "#334155",
               color: "white",
               border: "none",
               padding: "6px 12px",
-              borderRadius: 6,
+              borderRadius: 8,
               cursor: "pointer",
               fontSize: 13,
             }}
+            title="Cambiar usuario/rol"
           >
-            Salir
+            Cambiar usuario
           </button>
         </div>
       </div>

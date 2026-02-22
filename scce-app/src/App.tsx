@@ -363,6 +363,7 @@ export default function App(){
   const importJsonInputRef = useRef<HTMLInputElement | null>(null);
   const [view,setView]=useState<ViewKey>("dashboard");
   const [selectedCase, setSelectedCase] = useState<CaseItem | null>(null);
+  const [terrainOverridden, setTerrainOverridden] = useState(false);
   const [crisisMode,setCrisisMode]=useState(false);
   const [filterState,setFilterState]=useState({criticality:"",status:"",commune:"",search:""});
   const [notification, setNotification] = useState<Notification>(null);
@@ -436,7 +437,7 @@ export default function App(){
     setLocalCatalog(cat);
     setCases(makeSeedCases(cat));
     setAuditLog(makeSeedAudit());
-    setCurrentUser(null);setView("dashboard");setSelectedCase(null);
+    setTerrainOverridden(false);setCurrentUser(null);setView("dashboard");setSelectedCase(null);
     setCrisisMode(false);setSimCases([]);setSimReport(null);
     setSimSurvey({claridad:0,respaldo:0,submitted:false});
     setLoginForm({username:"director",password:"demo"});
@@ -2075,8 +2076,9 @@ export default function App(){
 
   // ─── LAYOUT PRINCIPAL ─────────────────────────────────────────────────────
   const terrainMode = isTerrainMode(currentUser);
+  const showTerrainShell = terrainMode && !terrainOverridden;
   return (
-    terrainMode ? (
+    showTerrainShell ? (
       <TerrainShell
         currentUser={currentUser}
         cases={cases}
@@ -2086,7 +2088,9 @@ export default function App(){
           setSelectedCase(found);
           setView("detail");
         }}
-        onLogout={() => setCurrentUser(null)}
+        onGoToDashboard={() => { setTerrainOverridden(true); setView("dashboard"); setSelectedCase(null); }}
+        onLogout={() => { setTerrainOverridden(false); setCurrentUser(null); }}
+        isCrisisMode={crisisMode}
       >
         {view === "detail" && selectedCase ? <CaseDetail /> : <div style={{ padding: 20, color: "#64748b" }}>Selecciona un caso</div>}
       </TerrainShell>
@@ -2129,7 +2133,7 @@ export default function App(){
           <span style={{fontSize:"10px",color:"#475569"}}>{electionConfig.name}</span>
           <span style={S.badge("#374151")}>{currentUser.name}</span>
           <span style={{...S.badge("#1e40af"),fontSize:"9px"}}>{ROLE_LABELS[currentUser.role]}</span>
-          <button style={{...S.btn("dark"),fontSize:"11px"}} onClick={()=>setCurrentUser(null)}>Salir</button>
+          <button style={{...S.btn("dark"),fontSize:"11px"}} onClick={()=>{setTerrainOverridden(false);setCurrentUser(null);}}>Salir</button>
         </div>
       </div>
 
