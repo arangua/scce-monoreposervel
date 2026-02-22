@@ -2086,6 +2086,7 @@ export default function App(){
           setSelectedCase(found);
           setView("detail");
         }}
+        onLogout={() => setCurrentUser(null)}
       >
         {view === "detail" && selectedCase ? <CaseDetail /> : <div style={{ padding: 20, color: "#64748b" }}>Selecciona un caso</div>}
       </TerrainShell>

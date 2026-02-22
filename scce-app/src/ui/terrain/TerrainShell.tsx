@@ -88,6 +88,7 @@ type Props = {
   cases: CaseLike[];
   selectedCaseId: string | null;
   setSelectedCaseId: (id: string) => void;
+  onLogout?: () => void;
   children?: React.ReactNode;
 };
 
@@ -96,6 +97,7 @@ export function TerrainShell({
   cases,
   selectedCaseId,
   setSelectedCaseId,
+  onLogout,
   children,
 }: Props) {
   const [filterPendingOnly, setFilterPendingOnly] = React.useState(false);
@@ -106,15 +108,59 @@ export function TerrainShell({
     activeCases = activeCases.filter((c) => pendingInstructionsCountForUser(c, currentUser) > 0);
   }
 
+  const roleLabel =
+    currentUser?.role === "PESE"
+      ? "PESE Local"
+      : currentUser?.role === "DELEGADO_JE"
+        ? "Delegado JE"
+        : currentUser?.role ?? "—";
+
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "340px 1fr", gap: 12, padding: 12, minHeight: "100vh", background: "#0f172a" }}>
-      <section>
-        <div style={{ fontWeight: 700, marginBottom: 8, color: "#e2e8f0", fontSize: 12 }}>
-          Vista terreno · {currentUser.name}
+    <div style={{ minHeight: "100vh", background: "#0f172a", display: "flex", flexDirection: "column" }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          padding: "10px 16px",
+          background: "#0f172a",
+          borderBottom: "1px solid #1e293b",
+          marginBottom: 16,
+        }}
+      >
+        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          <span style={{ fontWeight: 600, color: "#e2e8f0", fontSize: 14 }}>SCCE</span>
+          <span style={{ opacity: 0.7, color: "#94a3b8", fontSize: 13 }}>{roleLabel}</span>
         </div>
-        <div style={{ fontWeight: 700, marginBottom: 8, color: "#94a3b8", fontSize: 14 }}>
-          Casos activos ({activeCases.length})
+
+        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          <span style={{ opacity: 0.6, fontSize: 12, color: "#94a3b8" }}>Elección 2026</span>
+          <button
+            type="button"
+            onClick={() => (onLogout ? onLogout() : (window.location.reload()))}
+            style={{
+              background: "#334155",
+              color: "white",
+              border: "none",
+              padding: "6px 12px",
+              borderRadius: 6,
+              cursor: "pointer",
+              fontSize: 13,
+            }}
+          >
+            Salir
+          </button>
         </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "340px 1fr", gap: 12, padding: 12, flex: 1 }}>
+        <section>
+          <div style={{ fontWeight: 700, marginBottom: 8, color: "#e2e8f0", fontSize: 12 }}>
+            Vista terreno · {currentUser.name}
+          </div>
+          <div style={{ fontWeight: 700, marginBottom: 8, color: "#94a3b8", fontSize: 14 }}>
+            Casos activos ({activeCases.length})
+          </div>
 
         {filterPendingOnly && (
           <div style={{
@@ -192,6 +238,7 @@ export function TerrainShell({
       </section>
 
       <section>{children}</section>
+      </div>
     </div>
   );
 }
