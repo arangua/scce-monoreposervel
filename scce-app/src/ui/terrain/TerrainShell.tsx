@@ -1,6 +1,86 @@
 import React from "react";
 import { sortCasesForTerrain, pendingInstructionsCountForUser } from "../../domain/cases/terrainSort";
 
+// --- Fase 3.2: Chips tácticos (Pendientes / Severidad / Actualizado) ---
+type ChipTone = "neutral" | "danger" | "warning" | "info";
+
+function Chip({
+  children,
+  tone = "neutral",
+  title,
+}: {
+  children: React.ReactNode;
+  tone?: ChipTone;
+  title?: string;
+}) {
+  const base: React.CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    padding: "3px 8px",
+    borderRadius: 999,
+    fontSize: 11,
+    lineHeight: "14px",
+    fontWeight: 600,
+    border: "1px solid rgba(255,255,255,0.12)",
+    whiteSpace: "nowrap",
+  };
+
+  const tones: Record<ChipTone, React.CSSProperties> = {
+    neutral: { background: "rgba(148, 163, 184, 0.15)", color: "#94a3b8" },
+    info: { background: "rgba(59, 130, 246, 0.2)", border: "1px solid rgba(59, 130, 246, 0.4)", color: "#93c5fd" },
+    warning: { background: "rgba(245, 158, 11, 0.2)", border: "1px solid rgba(245, 158, 11, 0.4)", color: "#fcd34d" },
+    danger: { background: "rgba(239, 68, 68, 0.2)", border: "1px solid rgba(239, 68, 68, 0.4)", color: "#fca5a5" },
+  };
+
+  return (
+    <span title={title} style={{ ...base, ...tones[tone] }}>
+      {children}
+    </span>
+  );
+}
+
+function toTimeHHmm(iso?: string | null): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
+function normalizeCriticalityLabel(s?: string | null): "CRITICA" | "ALTA" | "MEDIA" | "BAJA" | null {
+  if (!s) return null;
+  const up = String(s).trim().toUpperCase();
+  if (up === "CRÍTICA" || up === "CRITICA") return "CRITICA";
+  if (up === "ALTA") return "ALTA";
+  if (up === "MEDIA") return "MEDIA";
+  if (up === "BAJA") return "BAJA";
+  return null;
+}
+
+function severityFromCase(c: { criticalityScore?: number; criticality?: unknown }): { label: string; tone: ChipTone } {
+  const score = typeof c?.criticalityScore === "number" && Number.isFinite(c.criticalityScore) ? c.criticalityScore : null;
+  const fallback = normalizeCriticalityLabel(c?.criticality as string | null);
+
+  const label =
+    score !== null
+      ? `Score ${score}`
+      : fallback ?? "—";
+
+  if (score !== null) {
+    if (score >= 4) return { label, tone: "danger" };
+    if (score === 3) return { label, tone: "warning" };
+    if (score === 2) return { label, tone: "info" };
+    return { label, tone: "neutral" };
+  }
+  if (fallback === "CRITICA") return { label, tone: "danger" };
+  if (fallback === "ALTA") return { label, tone: "warning" };
+  if (fallback === "MEDIA") return { label, tone: "info" };
+  if (fallback === "BAJA") return { label, tone: "neutral" };
+  return { label, tone: "neutral" };
+}
+
 type CaseLike = { id: string; summary: string; commune: string; status: string; criticalityScore?: number; criticality?: string; updatedAt?: string | null; instructions?: { ackRequired?: boolean; acks?: { userId?: string }[] }[] };
 
 type Props = {
@@ -33,6 +113,8 @@ export function TerrainShell({
 
         {activeCases.map((c) => {
           const pending = pendingInstructionsCountForUser(c, currentUser);
+          const sev = severityFromCase(c);
+          const hhmm = toTimeHHmm(c.updatedAt);
           return (
             <div
               key={c.id}
@@ -48,8 +130,19 @@ export function TerrainShell({
             >
               <div style={{ fontWeight: 600, color: "#e2e8f0", fontSize: 12 }}>{c.summary}</div>
               <div style={{ fontSize: 11, color: "#94a3b8" }}>{c.commune}</div>
-              <div style={{ fontSize: 12, opacity: 0.8, marginTop: 4 }}>
-                Pendientes: <b>{pending}</b>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 6 }}>
+                <Chip
+                  tone={pending > 0 ? "danger" : "neutral"}
+                  title="Instrucciones con acuse requerido pendientes para ti"
+                >
+                  Pendientes: {pending}
+                </Chip>
+                <Chip tone={sev.tone} title="Severidad (criticalityScore o fallback criticality)">
+                  Severidad: {sev.label}
+                </Chip>
+                <Chip tone="neutral" title={c.updatedAt ? `updatedAt: ${c.updatedAt}` : "Sin updatedAt"}>
+                  Actualizado: {hhmm}
+                </Chip>
               </div>
             </div>
           );
