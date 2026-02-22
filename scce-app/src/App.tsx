@@ -14,6 +14,8 @@ import { migrateLegacyInstructionsInCases } from "./domain/migrations/migrateLeg
 import { HelpDrawer } from "./components/HelpDrawer";
 import { helpByView, type ViewKey } from "./helpContent";
 import { UI_TEXT } from "./config/uiTextStandard";
+import { isTerrainMode } from "./domain/auth/visibility";
+import { TerrainShell } from "./ui/terrain/TerrainShell";
 
 const APP_VERSION = "1.9";
 const MIN_ELECTION_YEAR = 2026;
@@ -2072,7 +2074,22 @@ export default function App(){
   };
 
   // ─── LAYOUT PRINCIPAL ─────────────────────────────────────────────────────
-  return(
+  const terrainMode = isTerrainMode(currentUser);
+  return (
+    terrainMode ? (
+      <TerrainShell
+        currentUser={currentUser}
+        cases={cases}
+        selectedCaseId={selectedCase?.id ?? null}
+        setSelectedCaseId={(id) => {
+          const found = cases.find((x) => x.id === id) ?? null;
+          setSelectedCase(found);
+          setView("detail");
+        }}
+      >
+        {view === "detail" && selectedCase ? <CaseDetail /> : <div style={{ padding: 20, color: "#64748b" }}>Selecciona un caso</div>}
+      </TerrainShell>
+    ) : (
     <div style={S.app}>
       <style>{`.tipWrap:hover .tip{display:block!important}input,select,textarea{color:#e2e8f0!important}::-webkit-scrollbar{width:4px;height:4px}::-webkit-scrollbar-track{background:#0f1117}::-webkit-scrollbar-thumb{background:#374151;border-radius:2px}`}</style>
       <div style={S.nav}>
@@ -2134,5 +2151,5 @@ export default function App(){
       </div>
       <HelpDrawer open={helpOpen} onClose={()=>setHelpOpen(false)} content={helpByView[view]??helpByView.dashboard} />
     </div>
-  );
+  ) );
 }
