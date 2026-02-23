@@ -1,5 +1,6 @@
 import React from "react";
-import { sortCasesForTerrain, pendingInstructionsCountForUser } from "../../domain/cases/terrainSort";
+import { sortCasesForTerrain, pendingInstructionsCountForUser, totalPendingInstructionsForUser } from "../../domain/cases/terrainSort";
+import { getRecommendation } from "../../domain/recommendation";
 
 // --- Fase 3.2: Chips tácticos (Pendientes / Severidad / Actualizado) ---
 type ChipTone = "neutral" | "danger" | "warning" | "info";
@@ -40,48 +41,120 @@ function Chip({
   );
 }
 
-function toTimeHHmm(iso?: string | null): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  return `${hh}:${mm}`;
+type CaseLike = { id: string; summary: string; commune: string; status: string; criticalityScore?: number; criticality?: string; updatedAt?: string | null; createdAt?: string | null; instructions?: { ackRequired?: boolean; acks?: { userId?: string }[]; to?: { role?: string; userId?: string }; cc?: { role?: string; userId?: string }[]; status?: string }[]; communeName?: string; communeCode?: string | null; local?: string | null; localName?: string | null };
+
+function formatPlace(c: { commune?: string; communeName?: string; communeCode?: string | null; local?: string | null; localName?: string | null }): string {
+  const communeName = c?.communeName || c?.commune || "—";
+  const communeCode = c?.communeCode ?? null;
+  const local = c?.localName || c?.local || "—";
+  const commune = communeCode ? `${communeName} (${communeCode})` : communeName;
+  return `${commune} · ${local}`;
 }
 
-function normalizeCriticalityLabel(s?: string | null): "CRITICA" | "ALTA" | "MEDIA" | "BAJA" | null {
-  if (!s) return null;
-  const up = String(s).trim().toUpperCase();
-  if (up === "CRÍTICA" || up === "CRITICA") return "CRITICA";
-  if (up === "ALTA") return "ALTA";
-  if (up === "MEDIA") return "MEDIA";
-  if (up === "BAJA") return "BAJA";
-  return null;
+function Row({
+  c,
+  right,
+  onOpen,
+}: {
+  c: CaseLike;
+  right?: string;
+  onOpen: (id: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(c.id)}
+      style={{
+        width: "100%",
+        textAlign: "left",
+        background: "transparent",
+        border: "0",
+        padding: 0,
+        cursor: "pointer",
+      }}
+      title="Abrir detalle"
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 10,
+          padding: "6px 0",
+          borderTop: "1px solid #1f2a44",
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <div
+            style={{
+              fontWeight: 700,
+              fontSize: "12px",
+              color: "#e2e8f0",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {c.summary || "—"}
+          </div>
+          <div style={{ fontSize: "11px", color: "#94a3b8" }}>
+            {formatPlace(c)}
+          </div>
+        </div>
+        <div style={{ fontSize: "11px", color: "#cbd5e1", whiteSpace: "nowrap" }}>
+          {right ?? ""}
+        </div>
+      </div>
+    </button>
+  );
 }
 
-function severityFromCase(c: { criticalityScore?: number; criticality?: unknown }): { label: string; tone: ChipTone } {
-  const score = typeof c?.criticalityScore === "number" && Number.isFinite(c.criticalityScore) ? c.criticalityScore : null;
-  const fallback = normalizeCriticalityLabel(c?.criticality as string | null);
+function OpCyclePanel({
+  cases,
+  onOpenCase,
+}: {
+  cases: CaseLike[];
+  onOpenCase: (id: string) => void;
+}) {
+  const recs = cases.map((c) => ({ c, rec: getRecommendation({ ...c, createdAt: c.createdAt ?? undefined }, "OP") }));
+  const high = recs.filter(({ rec }) => rec.level === "high");
+  const medium = recs.filter(({ rec }) => rec.level === "medium");
+  const low = recs.filter(({ rec }) => rec.level === "low");
 
-  const label =
-    score !== null
-      ? `Score ${score}`
-      : fallback ?? "—";
-
-  if (score !== null) {
-    if (score >= 4) return { label, tone: "danger" };
-    if (score === 3) return { label, tone: "warning" };
-    if (score === 2) return { label, tone: "info" };
-    return { label, tone: "neutral" };
-  }
-  if (fallback === "CRITICA") return { label, tone: "danger" };
-  if (fallback === "ALTA") return { label, tone: "warning" };
-  if (fallback === "MEDIA") return { label, tone: "info" };
-  if (fallback === "BAJA") return { label, tone: "neutral" };
-  return { label, tone: "neutral" };
+  return (
+    <div>
+      {high.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontWeight: 900, margin: "8px 0", color: "#e2e8f0", letterSpacing: 0.3, fontSize: 11, textTransform: "uppercase" }}>
+            Prioridad inmediata
+          </div>
+          {high.map(({ c, rec }) => (
+            <Row key={c.id} c={c} right={`${rec.icon} ${rec.label}`} onOpen={onOpenCase} />
+          ))}
+        </div>
+      )}
+      {medium.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontWeight: 900, margin: "8px 0", color: "#e2e8f0", letterSpacing: 0.3, fontSize: 11, textTransform: "uppercase" }}>
+            En seguimiento
+          </div>
+          {medium.map(({ c, rec }) => (
+            <Row key={c.id} c={c} right={`${rec.icon} ${rec.label}`} onOpen={onOpenCase} />
+          ))}
+        </div>
+      )}
+      {low.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontWeight: 900, margin: "8px 0", color: "#e2e8f0", letterSpacing: 0.3, fontSize: 11, textTransform: "uppercase" }}>
+            Confirmaciones recientes
+          </div>
+          {low.map(({ c, rec }) => (
+            <Row key={c.id} c={c} right={`${rec.icon} ${rec.label}`} onOpen={onOpenCase} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
-
-type CaseLike = { id: string; summary: string; commune: string; status: string; criticalityScore?: number; criticality?: string; updatedAt?: string | null; instructions?: { ackRequired?: boolean; acks?: { userId?: string }[] }[] };
 
 type Props = {
   currentUser: { id: string; name: string; role: string };
@@ -97,7 +170,7 @@ type Props = {
 export function TerrainShell({
   currentUser,
   cases,
-  selectedCaseId,
+  selectedCaseId: _selectedCaseId,
   setSelectedCaseId,
   onGoToDashboard,
   onLogout,
@@ -105,6 +178,11 @@ export function TerrainShell({
   children,
 }: Props) {
   const [filterPendingOnly, setFilterPendingOnly] = React.useState(false);
+
+  const pendingCount = React.useMemo(
+    () => totalPendingInstructionsForUser(cases, currentUser),
+    [cases, currentUser]
+  );
 
   const activeCasesRaw = cases.filter((c) => c.status !== "Cerrado");
   let activeCases = sortCasesForTerrain(activeCasesRaw, currentUser);
@@ -178,8 +256,13 @@ export function TerrainShell({
 
       <div style={{ display: "grid", gridTemplateColumns: "340px 1fr", gap: 12, padding: 12, flex: 1 }}>
         <section>
-          <div style={{ fontWeight: 700, marginBottom: 8, color: "#e2e8f0", fontSize: 12 }}>
-            Vista terreno · {currentUser.name}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
+            <span style={{ fontWeight: 700, color: "#e2e8f0", fontSize: 12 }}>
+              Modo Operativo · {currentUser.name}
+            </span>
+            <Chip tone={pendingCount > 0 ? "warning" : "neutral"} title="Instrucciones dirigidas a ti no cerradas">
+              Con pendientes: {pendingCount}
+            </Chip>
           </div>
           <div style={{ fontWeight: 700, marginBottom: 8, color: "#94a3b8", fontSize: 14 }}>
             Casos activos ({activeCases.length})
@@ -216,48 +299,10 @@ export function TerrainShell({
           </div>
         )}
 
-        {activeCases.map((c) => {
-          const pending = pendingInstructionsCountForUser(c, currentUser);
-          const sev = severityFromCase(c);
-          const hhmm = toTimeHHmm(c.updatedAt);
-          return (
-            <div
-              key={c.id}
-              onClick={() => setSelectedCaseId(c.id)}
-              style={{
-                padding: 8,
-                marginBottom: 6,
-                cursor: "pointer",
-                border: c.id === selectedCaseId ? "2px solid #2563eb" : "1px solid #334155",
-                borderRadius: 6,
-                background: c.id === selectedCaseId ? "#1e3a5f22" : "#1e293b",
-              }}
-            >
-              <div style={{ fontWeight: 600, color: "#e2e8f0", fontSize: 12 }}>{c.summary}</div>
-              <div style={{ fontSize: 11, color: "#94a3b8" }}>{c.commune}</div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 6 }}>
-                <span
-                  role="button"
-                  tabIndex={0}
-                  title="Filtrar solo casos con pendientes"
-                  onClick={(e) => { e.stopPropagation(); setFilterPendingOnly(true); }}
-                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setFilterPendingOnly(true); } }}
-                  style={{ cursor: "pointer", display: "inline-flex" }}
-                >
-                  <Chip tone={pending > 0 ? "danger" : "neutral"} title="Filtrar solo casos con pendientes">
-                    Pendientes: {pending}
-                  </Chip>
-                </span>
-                <Chip tone={sev.tone} title="Severidad (criticalityScore o fallback criticality)">
-                  Severidad: {sev.label}
-                </Chip>
-                <Chip tone="neutral" title={c.updatedAt ? `updatedAt: ${c.updatedAt}` : "Sin updatedAt"}>
-                  Actualizado: {hhmm}
-                </Chip>
-              </div>
-            </div>
-          );
-        })}
+        <OpCyclePanel
+          cases={activeCases}
+          onOpenCase={(id) => setSelectedCaseId(id)}
+        />
       </section>
 
       <section>{children}</section>

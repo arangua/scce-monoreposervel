@@ -1,9 +1,9 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
-import type { CaseItem, InstructionItem, ImpactLevel, ScopeFunctional, LocalCatalog, LocalCatalogEntry, CaseStatus, Criticality, RegionCode, CommuneCode, AuditLogEntry } from "./domain/types";
+import type { CaseItem, InstructionItem, ImpactLevel, ScopeFunctional, LocalCatalog, LocalCatalogEntry, CaseStatus, Criticality, RegionCode, CommuneCode, AuditLogEntry, CaseEventKind, CaseEvent } from "./domain/types";
 import { calcCompleteness } from "./domain/caseMetrics";
 import { findActiveLocal } from "./domain/catalog";
 import { validateCaseSchema } from "./domain/caseValidation";
-import { fmtDate, timeDiff, nowISO, uuidSimple, tsISO } from "./domain/date";
+import { fmtDate, fmtTime, timeDiff, nowISO, uuidSimple, tsISO } from "./domain/date";
 import { checkLocalDivergence } from "./domain/localDivergence";
 import { SLA_MINUTES, isSlaVencido, type SlaLevel } from "./domain/caseSla";
 import { getRecommendation } from "./domain/recommendation";
@@ -15,6 +15,19 @@ import { HelpDrawer } from "./components/HelpDrawer";
 import { helpByView, type ViewKey } from "./helpContent";
 import { UI_TEXT } from "./config/uiTextStandard";
 import { isTerrainMode } from "./domain/auth/visibility";
+import { isInstructionForUser, isClosedStatus } from "./domain/cases/terrainSort";
+import { newEventId } from "./domain/eventId";
+import { isDuplicateEvent } from "./domain/dedupe";
+import { buildExportBundle, validateImportBundle } from "./domain/exportImport";
+import {
+  hasSigningKey,
+  initSigningKey,
+  signIntegrityHashHex,
+  getTrustedEntries,
+  addTrustedKey,
+  removeTrustedKey,
+  publicKeyFingerprintShort,
+} from "./domain/signingVault";
 import { TerrainShell } from "./ui/terrain/TerrainShell";
 
 const APP_VERSION = "1.9";
@@ -141,6 +154,12 @@ const POLICIES = {
   NIVEL_CENTRAL:     {create:false,update:false,assign:false,close:false,bypass:false,viewAll:true, comment:true, instruct:true, recepcionar:false,export:true, validateBypass:false,manageCatalog:true},
 } as const;
 
+/** Fase 3.6 — detectar si el usuario es Nivel Central (por role en USERS). */
+function isNivelCentral(userId: string): boolean {
+  const u = USERS.find((x) => x.id === userId);
+  return (u as { role?: string } | undefined)?.role === "NIVEL_CENTRAL";
+}
+
 // =====================
 // Tipado mínimo SCCE (Enterprise)
 // =====================
@@ -159,6 +178,7 @@ type User = {
   username?: string;
   password?: string;
   commune?: string;
+  assignedLocalId?: string | null;
 };
 
 type SimReport = {
@@ -333,7 +353,7 @@ function makeSeedAudit(){
 
 // ─── ESTILOS ──────────────────────────────────────────────────────────────────
 const S={
-  app:{fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#0f1117",color:"#e2e8f0",minHeight:"100vh",fontSize:"13px"},
+  app:{fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#0f1117",color:"#e2e8f0",minHeight:"100vh",fontSize:"13px",width:"100%",boxSizing:"border-box" as const},
   nav:{background:"#1a1d2e",borderBottom:"1px solid #2d3748",padding:"8px 16px",display:"flex",alignItems:"center",gap:"6px",flexWrap:"wrap" as const,minHeight:42},
   nBtn:(a: boolean)=>({background:a?"#3b82f6":"transparent",color:a?"#fff":"#94a3b8",border:"none",padding:"5px 10px",borderRadius:"4px",cursor:"pointer",fontSize:"12px"}),
   card:{background:"#1a1d2e",border:"1px solid #2d3748",borderRadius:"6px",padding:"12px"},
@@ -361,9 +381,207 @@ export default function App(){
   });
   const [auditLog, setAuditLog] = useState<AuditLogEntry[]>(() => makeSeedAudit());
   const importJsonInputRef = useRef<HTMLInputElement | null>(null);
+  const importFileRef = useRef<HTMLInputElement | null>(null);
+
+  function downloadJson(filename: string, jsonText: string) {
+    const blob = new Blob([jsonText], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function onExportState() {
+    const bundle = await buildExportBundle(cases, APP_VERSION);
+    let signed = false;
+
+    if (await hasSigningKey()) {
+      const passphrase = globalThis.prompt(
+        UI_TEXT.misc.signPassphrasePrompt ?? "Ingrese passphrase para firmar el export:"
+      );
+      if (passphrase && passphrase.trim()) {
+        try {
+          const sig = await signIntegrityHashHex({
+            passphrase,
+            hashHex: bundle.integrity!.value,
+          });
+          bundle.signature = {
+            algo: "Ed25519",
+            publicKeyB64: sig.publicKeyB64,
+            valueB64: sig.signatureB64,
+            signedAt: sig.signedAt,
+          };
+          signed = true;
+        } catch {
+          notify(
+            UI_TEXT.errors.signFailed ??
+              "No se pudo firmar (passphrase incorrecta o llave inválida). Se exportará sin firma.",
+            "error"
+          );
+        }
+      } else {
+        notify(
+          UI_TEXT.misc.exportUnsignedWarning ?? "Export sin firma (no se ingresó passphrase).",
+          "warning"
+        );
+      }
+    } else {
+      const wants = globalThis.confirm(
+        UI_TEXT.misc.noSigningKeyConfirm ??
+          "No hay llave de firma configurada. ¿Deseas crear una ahora (recomendado)?"
+      );
+
+      if (wants) {
+        const p1 = globalThis.prompt(
+          UI_TEXT.misc.signCreatePassphrase1 ?? "Crea una passphrase (guárdala):"
+        );
+        if (p1 && p1.trim()) {
+          const p2 = globalThis.prompt(
+            UI_TEXT.misc.signCreatePassphrase2 ?? "Repite la passphrase:"
+          );
+          if (p2 === p1) {
+            try {
+              await initSigningKey(p1);
+              notify(
+                UI_TEXT.misc.signKeyCreated ?? "Llave creada. Reintenta Exportar para firmar.",
+                "success"
+              );
+            } catch {
+              notify(
+                UI_TEXT.errors.signKeyCreateFailed ?? "No se pudo crear la llave de firma.",
+                "error"
+              );
+            }
+          } else {
+            notify(
+              UI_TEXT.errors.signPassphraseMismatch ??
+                "Las passphrases no coinciden. Export se hará sin firma.",
+              "error"
+            );
+          }
+        }
+      }
+
+      notify(
+        UI_TEXT.misc.exportUnsignedWarning ?? "Export sin firma (no hay llave configurada).",
+        "warning"
+      );
+    }
+
+    const text = JSON.stringify(bundle, null, 2);
+    const name = `SCCE_APP_export_${new Date().toISOString().replaceAll(":", "-")}.json`;
+    downloadJson(name, text);
+
+    if (currentUser?.id) {
+      setAuditLog((prev) =>
+        appendEvent(
+          prev,
+          "EXPORT_DONE",
+          currentUser.id,
+          currentUser.role,
+          null,
+          signed ? "Export estado v3 (firmado)" : "Export estado v3 (sin firma)"
+        )
+      );
+    }
+
+    notify(UI_TEXT.misc.exportOk ?? "Export listo.", "success");
+  }
+
+  async function onImportStateFile(file: File) {
+    const MAX_IMPORT_BYTES = 5 * 1024 * 1024; // 5 MB
+    if (file.size > MAX_IMPORT_BYTES) {
+      notify((UI_TEXT.errors.importFileTooLarge ?? "Archivo demasiado grande (máx. {maxMb} MB).").replace("{maxMb}", String(MAX_IMPORT_BYTES / (1024 * 1024))), "error");
+      return;
+    }
+    let raw: unknown;
+    try {
+      raw = JSON.parse(await file.text());
+    } catch {
+      notify(UI_TEXT.errors.importInvalidJson ?? "Archivo no es JSON válido.", "error");
+      return;
+    }
+    const v = await validateImportBundle(raw);
+    if (!v.ok) {
+      notify(v.error, "error");
+      if (currentUser?.id) {
+        const evType = v.error.includes("Firma inválida")
+          ? "IMPORT_SIG_INVALID_BLOCKED"
+          : v.error.includes("Integridad fallida")
+            ? "IMPORT_INTEGRITY_FAILED_BLOCKED"
+            : "IMPORT_FAILED";
+        setAuditLog((prev) =>
+          appendEvent(prev, evType, currentUser.id, currentUser.role, null, v.error.slice(0, 80))
+        );
+      }
+      return;
+    }
+
+    const signerPub = (raw as { signature?: { publicKeyB64: string } })?.signature?.publicKeyB64 ?? "";
+    const fpForAudit = signerPub ? await publicKeyFingerprintShort(signerPub) : "";
+
+    if (v.signatureStatus === "none") {
+      notify(
+        UI_TEXT.misc.importUnsignedWarning ??
+          "Import sin firma: permitido, pero no hay garantía de autoría.",
+        "warning"
+      );
+      if (currentUser?.id)
+        setAuditLog((prev) =>
+          appendEvent(prev, "IMPORT_SIG_NONE_ALLOWED", currentUser.id, currentUser.role, null, "Import sin firma permitido")
+        );
+    } else if (v.signatureStatus === "valid_untrusted") {
+      const confirmWord = UI_TEXT.misc.trustConfirmWord ?? "CONFIAR";
+      const typed = globalThis.prompt(
+        UI_TEXT.misc.importUntrustedTypeToConfirm ??
+          "Firma válida, pero no confiable. Para continuar escribe CONFIAR:"
+      );
+      if (typed?.trim() !== confirmWord) {
+        notify(
+          UI_TEXT.errors.importUntrustedConfirmFailed ?? "No se confirmó la confianza. Import cancelado.",
+          "error"
+        );
+        if (currentUser?.id)
+          setAuditLog((prev) =>
+            appendEvent(prev, "IMPORT_SIG_VALID_UNTRUSTED_REJECTED", currentUser.id, currentUser.role, null, fpForAudit ? `Rechazado – huella ${fpForAudit}` : "Rechazado")
+          );
+        return;
+      }
+      if (currentUser?.id)
+        setAuditLog((prev) =>
+          appendEvent(prev, "IMPORT_SIG_VALID_UNTRUSTED_ACCEPTED", currentUser.id, currentUser.role, null, fpForAudit ? `Aceptado – huella ${fpForAudit}` : "Aceptado")
+        );
+    } else {
+      notify(
+        UI_TEXT.misc.importSignedTrustedOk ?? "Import con autoría verificada (confiable).",
+        "success"
+      );
+      if (currentUser?.id)
+        setAuditLog((prev) =>
+          appendEvent(prev, "IMPORT_SIG_VALID_TRUSTED", currentUser.id, currentUser.role, null, fpForAudit ? `Import confiable – huella ${fpForAudit}` : "Import confiable")
+        );
+    }
+
+    const ok = globalThis.confirm(
+      UI_TEXT.misc.importConfirm ?? "Esto reemplazará los casos actuales. ¿Continuar?"
+    );
+    if (!ok) return;
+    setCases(v.cases);
+    notify(UI_TEXT.misc.importOk ?? "Import realizado.", "success");
+  }
   const [view,setView]=useState<ViewKey>("dashboard");
+  const OP_HOME_VIEW = "op_home" as const;
   const [selectedCase, setSelectedCase] = useState<CaseItem | null>(null);
-  const [terrainOverridden, setTerrainOverridden] = useState(false);
+  type UiMode = "OP" | "FULL";
+  function uiModeStorageKey(userId: string) {
+    return `SCCE_UI_MODE:${userId}`;
+  }
+  function defaultUiModeForUser(u: User | null): UiMode {
+    return isTerrainMode(u) ? "OP" : "FULL";
+  }
+  const [uiMode, setUiMode] = useState<UiMode>("FULL");
   const [crisisMode,setCrisisMode]=useState(false);
   const [filterState,setFilterState]=useState({criticality:"",status:"",commune:"",search:""});
   const [notification, setNotification] = useState<Notification>(null);
@@ -399,6 +617,27 @@ export default function App(){
     return ()=>window.removeEventListener("mousedown",onDown);
   },[actionsOpen]);
   useEffect(()=>{setHelpOpen(false);},[view]);
+  useEffect(() => {
+    if (!currentUser) {
+      setUiMode("FULL");
+      return;
+    }
+    const key = uiModeStorageKey(currentUser.id);
+    const saved = localStorage.getItem(key);
+    if (saved === "OP" || saved === "FULL") {
+      setUiMode(saved);
+    } else {
+      setUiMode(defaultUiModeForUser(currentUser));
+    }
+  }, [currentUser]);
+
+  function setUiModeAndPersist(next: UiMode) {
+    setUiMode(next);
+    if (currentUser?.id) {
+      localStorage.setItem(uiModeStorageKey(currentUser.id), next);
+    }
+  }
+
   useEffect(()=>{
     const onKey=(e: KeyboardEvent)=>{
       const isCtrl=e.ctrlKey||e.metaKey;
@@ -428,6 +667,20 @@ export default function App(){
     if(v.length)console.warn("[SCCE][CATALOG-SELFCHECK]",v);
   },[localCatalog]);
 
+  const showTerrainShell = currentUser != null && uiMode === "OP";
+  useEffect(() => {
+    if (!showTerrainShell) return;
+    if (view === "dashboard") setView(OP_HOME_VIEW);
+  }, [showTerrainShell, view]);
+  const goOpHome = () => {
+    setSelectedCase(null);
+    setView(OP_HOME_VIEW);
+  };
+  const goNewCase = () => {
+    setSelectedCase(null);
+    setView("new_case");
+  };
+
   const notify=(msg: string, type="info")=>{setNotification({msg,type});setTimeout(()=>setNotification(null),4000);};
 
   function doReset(){
@@ -437,7 +690,7 @@ export default function App(){
     setLocalCatalog(cat);
     setCases(makeSeedCases(cat));
     setAuditLog(makeSeedAudit());
-    setTerrainOverridden(false);setCurrentUser(null);setView("dashboard");setSelectedCase(null);
+    setCurrentUser(null);setView("dashboard");setSelectedCase(null);
     setCrisisMode(false);setSimCases([]);setSimReport(null);
     setSimSurvey({claridad:0,respaldo:0,submitted:false});
     setLoginForm({username:"director",password:"demo"});
@@ -453,9 +706,30 @@ export default function App(){
     setLoginErr("");
   }
 
+  function nowLocalInput() {
+    return nowISO().slice(0, 16);
+  }
+
   function startNewCase(){
     if (!currentUser) return;
-    setNewCase({region:currentUser.region||activeRegion,commune:"",local:"",origin:{actor:currentUser.name,channel:"Teams",detectedAt:nowISO()},summary:"",detail:"",evidence:[],id:"",status:"Nuevo",criticality:"MEDIA"} as CaseItem);
+    const fixedCommune = assignedCommuneEffective || "";
+    const fixedLocal = assignedLocal?.nombre ?? "";
+    setNewCase({
+      region: currentUser.region || activeRegion,
+      commune: fixedCommune,
+      local: fixedLocal,
+      origin: {
+        actor: currentUser.name,
+        channel: "Teams",
+        detectedAt: nowLocalInput()
+      },
+      summary: "",
+      detail: "",
+      evidence: [],
+      id: "",
+      status: "Nuevo",
+      criticality: "MEDIA"
+    } as CaseItem);
     setEvalForm({continuidad:0,integridad:0,seguridad:0,exposicion:0,capacidadLocal:0});
     setBypassForm({active:false,motivo:"",cause:"",confirmed:false});
     setStep(1);setView("new_case");
@@ -463,27 +737,146 @@ export default function App(){
 
   function submitCase(){
     if (!currentUser || !newCase) return;
-    const se=validateCaseSchema(newCase,localCatalog);
-    if(se.length)return notify("⚠️ "+se[0],"error");
-    const result=calcCriticality(evalForm);
-    const maxVar=Math.max(...Object.values(evalForm));
-    const bypassTechOk=maxVar>=3||bypassForm.cause==="system_down";
-    const bypassFlagged=bypassForm.active&&!bypassTechOk;
-    const rCases=cases.filter(c=>c.region===newCase.region&&c.commune===newCase.commune);
-    const id=genId(newCase.region,newCase.commune,rCases.length+1);
-    const now_=nowISO();
-    const localEntry=findActiveLocal(localCatalog,newCase.region,newCase.commune,newCase.local ?? "");
-    const localSnapshot=localEntry?{idLocal:localEntry.idLocal,nombre:localEntry.nombre,region:localEntry.region,commune:localEntry.commune,snapshotAt:now_}:null;
-    const c={...newCase,id,localSnapshot,evaluation:evalForm,evaluationLocked:true,evaluationHistory:[],criticality:result.criticality,criticalityScore:result.score,status:bypassForm.active?"En gestión":"Nuevo",assignedTo:null,slaMinutes:(SLA_MINUTES as Record<SlaLevel, number>)[result.criticality as SlaLevel]||60,closingMotivo:null,bypassValidated:null,timeline:[{type:"DETECTED",at:newCase.origin!.detectedAt,actor:currentUser.id,note:"Detectado"},{type:"REPORTED",at:now_,actor:currentUser.id,note:"Reportado en SCCE"}],actions:[],decisions:[],bypass:bypassForm.active,bypassMotivo:bypassForm.motivo,bypassFlagged,bypassActor:bypassForm.active?currentUser.id:null,peseInoperante:bypassForm.cause==="system_down",completeness:0,reportedAt:now_,firstActionAt:null,escalatedAt:null,mitigatedAt:null,resolvedAt:null,closedAt:null,createdBy:currentUser.id,createdAt:now_,updatedAt:now_};
-    c.completeness=calcCompleteness(c as CaseItem);
-    setCases(prev=>[c as CaseItem,...prev]);
-    setAuditLog(prev=>{
-      let log=appendEvent(prev,"CASE_CREATED",currentUser.id,currentUser.role,id,`Caso: ${c.summary.slice(0,60)}`);
-      if(bypassForm.active)log=appendEvent(log,"BYPASS_USED",currentUser.id,currentUser.role,id,`Bypass: ${bypassForm.motivo}`);
-      if(bypassFlagged)    log=appendEvent(log,"BYPASS_FLAGGED",currentUser.id,currentUser.role,id,UI_TEXT.errors.excepcionRequiereValidacion);
+
+    // 0) Validación base existente (schema)
+    const se = validateCaseSchema(newCase, localCatalog);
+    if (se.length) return notify("⚠️ " + se[0], "error");
+
+    // =========================
+    // HARDENING OPERATIVO (fail-closed)
+    // =========================
+
+    // 1) Comuna obligatoria y válida en la región seleccionada
+    const regionSel = (newCase.region ?? "").trim();
+    const communeSel = (newCase.commune ?? "").trim();
+    if (!communeSel) {
+      return notify("⚠️ Debes seleccionar una comuna.", "error");
+    }
+    // Catálogo maestro es array: LocalCatalogEntry[] (region, commune por entrada)
+    const communesInRegion = [...new Set(localCatalog.filter((e) => e.region === regionSel).map((e) => e.commune))];
+    if (!communesInRegion.length) {
+      return notify("⚠️ Catálogo de locales no disponible para la región seleccionada.", "error");
+    }
+    if (!communesInRegion.includes(communeSel)) {
+      return notify("⚠️ La comuna seleccionada no corresponde a la región indicada.", "error");
+    }
+
+    // 2) Local obligatorio y existente en catálogo
+    const localName = (newCase.local ?? "").trim();
+    if (!localName) {
+      return notify("⚠️ Debes seleccionar un local de votación.", "error");
+    }
+
+    const now_ = nowISO();
+
+    // 3) Hora detección no futura (y fecha válida)
+    const detectedAt = newCase.origin?.detectedAt;
+    if (!detectedAt) {
+      return notify("⚠️ Falta la hora de detección del incidente.", "error");
+    }
+    const detMs = new Date(detectedAt).getTime();
+    const nowMs = Date.now();
+    if (!Number.isFinite(detMs)) {
+      return notify("⚠️ Hora de detección inválida.", "error");
+    }
+    if (detMs > nowMs + 5000) {
+      return notify("⚠️ La hora de detección no puede estar en el futuro.", "error");
+    }
+
+    // 4) Local existe y pertenece a la comuna/región seleccionada
+    const localEntry = findActiveLocal(localCatalog, regionSel, communeSel, localName);
+    if (!localEntry) {
+      return notify("⚠️ El local seleccionado no existe o no está activo en el catálogo maestro.", "error");
+    }
+    if (localEntry.region !== regionSel || localEntry.commune !== communeSel) {
+      return notify("⚠️ El local seleccionado no corresponde a la comuna/región indicada.", "error");
+    }
+
+    // 5) Usuario no puede forzar comuna/local fuera de su ámbito efectivo (usa derivados ya en scope)
+    if (currentUser.region && regionSel !== currentUser.region) {
+      return notify("⚠️ No puedes registrar incidentes fuera de tu región autorizada.", "error");
+    }
+    if (assignedCommuneEffective && communeSel !== assignedCommuneEffective) {
+      return notify("⚠️ No puedes registrar incidentes fuera de tu comuna autorizada.", "error");
+    }
+    if (assignedLocalIdEffective && localEntry.idLocal !== assignedLocalIdEffective) {
+      return notify("⚠️ No puedes registrar incidentes fuera de tu local autorizado.", "error");
+    }
+
+    // 6) Snapshot desde catálogo activo (consistente)
+    const localSnapshot = {
+      idLocal: localEntry.idLocal,
+      nombre: localEntry.nombre,
+      region: localEntry.region,
+      commune: localEntry.commune,
+      snapshotAt: now_
+    };
+
+    // =========================
+    // CONTINÚA FLUJO ORIGINAL (sin refactor masivo)
+    // =========================
+
+    const result = calcCriticality(evalForm);
+    const maxVar = Math.max(...Object.values(evalForm));
+    const bypassTechOk = maxVar >= 3 || bypassForm.cause === "system_down";
+    const bypassFlagged = bypassForm.active && !bypassTechOk;
+
+    const rCases = cases.filter((c) => c.region === newCase.region && c.commune === newCase.commune);
+    const id = genId(newCase.region, newCase.commune, rCases.length + 1);
+
+    const c = {
+      ...newCase,
+      id,
+      localSnapshot,
+      evaluation: evalForm,
+      evaluationLocked: true,
+      evaluationHistory: [],
+      criticality: result.criticality,
+      criticalityScore: result.score,
+      status: bypassForm.active ? "En gestión" : "Nuevo",
+      assignedTo: null,
+      slaMinutes: (SLA_MINUTES as Record<SlaLevel, number>)[result.criticality as SlaLevel] || 60,
+      closingMotivo: null,
+      bypassValidated: null,
+      timeline: [
+        { eventId: newEventId("ev"), type: "DETECTED", at: newCase.origin!.detectedAt, actor: currentUser.id, note: "Detectado" },
+        { eventId: newEventId("ev"), type: "REPORTED", at: now_, actor: currentUser.id, note: "Reportado en SCCE" }
+      ],
+      actions: [],
+      decisions: [],
+      bypass: bypassForm.active,
+      bypassMotivo: bypassForm.motivo,
+      bypassFlagged,
+      bypassActor: bypassForm.active ? currentUser.id : null,
+      peseInoperante: bypassForm.cause === "system_down",
+      completeness: 0,
+      reportedAt: now_,
+      firstActionAt: null,
+      escalatedAt: null,
+      mitigatedAt: null,
+      resolvedAt: null,
+      closedAt: null,
+      createdBy: currentUser.id,
+      createdAt: now_,
+      updatedAt: now_
+    };
+
+    c.completeness = calcCompleteness(c as CaseItem);
+
+    setCases((prev) => [c as CaseItem, ...prev]);
+
+    setAuditLog((prev) => {
+      let log = appendEvent(prev, "CASE_CREATED", currentUser.id, currentUser.role, id, `Caso: ${c.summary.slice(0, 60)}`);
+      if (bypassForm.active) log = appendEvent(log, "BYPASS_USED", currentUser.id, currentUser.role, id, `Bypass: ${bypassForm.motivo}`);
+      if (bypassFlagged) log = appendEvent(log, "BYPASS_FLAGGED", currentUser.id, currentUser.role, id, UI_TEXT.errors.excepcionRequiereValidacion);
       return log;
     });
-    notify(`Caso ${id} — ${result.criticality}${bypassFlagged?" ⚠️ "+UI_TEXT.states.flagged:""}`,result.criticality==="CRITICA"?"error":"success");
+
+    notify(
+      `Caso ${id} — ${result.criticality}${bypassFlagged ? " ⚠️ " + UI_TEXT.states.flagged : ""}`,
+      result.criticality === "CRITICA" ? "error" : "success"
+    );
+
     setView("dashboard");
   }
 
@@ -491,7 +884,7 @@ export default function App(){
     if (!currentUser) return;
     const c=cases.find(x=>x.id===caseId);
     if(!c||!canDo("recepcionar",currentUser,c))return notify(UI_TEXT.errors.unauthorized,"error");
-    setCases(prev=>prev.map(x=>x.id!==caseId?x:{...x,status:"Recepcionado por DR",updatedAt:nowISO(),timeline:[...(x.timeline ?? []),{type:"RECEPCIONADO",at:nowISO(),actor:currentUser.id,note:`Recepcionado por ${currentUser.name}`}]} as CaseItem));
+    setCases(prev=>prev.map(x=>x.id!==caseId?x:{...x,status:"Recepcionado por DR",updatedAt:nowISO(),timeline:[...(x.timeline ?? []),{eventId:newEventId("ev"),type:"RECEPCIONADO",at:nowISO(),actor:currentUser.id,note:`Recepcionado por ${currentUser.name}`}]} as CaseItem));
     setAuditLog(prev=>appendEvent(prev,"STATUS_CHANGED",currentUser.id,currentUser.role,caseId,"Estado → Recepcionado por DR"));
     notify("Caso recepcionado","success");
   }
@@ -513,7 +906,7 @@ export default function App(){
     const tsMap: Partial<Record<CaseStatus, string>> = {Escalado:"escalatedAt",Mitigado:"mitigatedAt",Resuelto:"resolvedAt",Cerrado:"closedAt"};
     setCases(prev=>prev.map(x=>{
       if(x.id!==caseId)return x;
-      const tl=[...(x.timeline ?? []),{type:tlMap[newStatus]||"STATUS_CHANGED",at:nowISO(),actor:currentUser.id,note:`Estado → ${newStatus}`}];
+      const tl=[...(x.timeline ?? []),{eventId:newEventId("ev"),type:tlMap[newStatus]||"STATUS_CHANGED",at:nowISO(),actor:currentUser.id,note:`Estado → ${newStatus}`}];
       return{...x,status:newStatus,...(tsMap[newStatus]?{[tsMap[newStatus]!]:nowISO()}:{}),timeline:tl,updatedAt:nowISO()} as CaseItem;
     }));
     setAuditLog(prev=>appendEvent(prev,"STATUS_CHANGED",currentUser.id,currentUser.role,caseId,`Estado → ${newStatus}`));
@@ -524,9 +917,10 @@ export default function App(){
     if(!canDo("validateBypass",currentUser))return notify(UI_TEXT.errors.soloDirectorValida,"error");
     if(!fundament)return notify(UI_TEXT.errors.fundamentoRequerido,"error");
     const validated=decision==="VALIDATED";
+    const bypassEv: CaseEvent = { eventId: newEventId("ev"), type: validated ? "BYPASS_VALIDATED" : "BYPASS_REVOKED", at: nowISO(), actor: currentUser.id, note: fundament };
     setCases(prev=>prev.map(x=>{
       if(x.id!==caseId)return x;
-      const tl=[...(x.timeline ?? []),{type:validated?"BYPASS_VALIDATED":"BYPASS_REVOKED",at:nowISO(),actor:currentUser.id,note:fundament}];
+      const tl = pushTimelineEvent(x.timeline ?? [], bypassEv);
       const nd=[...(x.decisions ?? []),{who:currentUser.id,at:nowISO(),fundament:`Bypass ${validated?"VALIDADO":"REVOCADO"}: ${fundament}`}];
       return{...x,bypassValidated:decision,decisions:nd,timeline:tl,updatedAt:nowISO()} as CaseItem;
     }));
@@ -542,7 +936,7 @@ export default function App(){
     const snap={previousEval:c.evaluation,at:nowISO(),by:currentUser.id,justification};
     setCases(prev=>prev.map(x=>{
       if(x.id!==caseId)return x;
-      const tl=[...(x.timeline ?? []),{type:"REASSESSMENT",at:nowISO(),actor:currentUser.id,note:`Reevaluación: ${justification}`}];
+      const tl=[...(x.timeline ?? []),{eventId:newEventId("ev"),type:"REASSESSMENT",at:nowISO(),actor:currentUser.id,note:`Reevaluación: ${justification}`}];
       const upd={...x,evaluation:newEval,criticality:nr.criticality as Criticality,criticalityScore:nr.score,evaluationHistory:[...(x.evaluationHistory||[]),snap],timeline:tl,updatedAt:nowISO()} as CaseItem;
       upd.completeness=calcCompleteness(upd);return upd;
     }));
@@ -558,7 +952,7 @@ export default function App(){
       if(x.id!==caseId)return x;
       const na={id:"a"+Date.now(),action,responsible,at:nowISO(),result:result_};
       const tl=[...(x.timeline ?? [])];
-      if(!x.firstActionAt)tl.push({type:"FIRST_ACTION",at:nowISO(),actor:currentUser.id,note:action});
+      if(!x.firstActionAt)tl.push({eventId:newEventId("ev"),type:"FIRST_ACTION",at:nowISO(),actor:currentUser.id,note:action});
       const upd={...x,actions:[...(x.actions ?? []),na],firstActionAt:x.firstActionAt||nowISO(),timeline:tl,updatedAt:nowISO()} as CaseItem;
       upd.completeness=calcCompleteness(upd);return upd;
     }));
@@ -579,8 +973,26 @@ export default function App(){
 
   function addComment(caseId: string, comment: string){
     if(!currentUser) return;
-    setCases(prev=>prev.map(x=>x.id!==caseId?x:{...x,timeline:[...(x.timeline ?? []),{type:"COMMENT",at:nowISO(),actor:currentUser.id,note:comment}],updatedAt:nowISO()} as CaseItem));
+    setCases(prev=>prev.map(x=>x.id!==caseId?x:{...x,timeline:[...(x.timeline ?? []),{eventId:newEventId("ev"),type:"COMMENT",at:nowISO(),actor:currentUser.id,note:comment}],updatedAt:nowISO()} as CaseItem));
     setAuditLog(prev=>appendEvent(prev,"COMMENT_ADDED",currentUser.id,currentUser.role,caseId,comment.slice(0,80)));
+  }
+
+  /** Fase 3.5 — Respuesta de terreno a una instrucción: COMMENT en timeline con refInstructionId. */
+  function addInstructionReply(caseId: string, instructionId: string, replyText: string){
+    if(!currentUser?.id || !replyText?.trim()) return;
+    setCases(prev=>prev.map(x=>x.id!==caseId?x:{...x,timeline:[...(x.timeline ?? []),{eventId:newEventId("ev"),type:"COMMENT",kind:"INSTRUCTION_REPLY",refInstructionId:instructionId,at:nowISO(),actor:currentUser.id,note:replyText.trim()}],updatedAt:nowISO()} as CaseItem));
+    setAuditLog(prev=>appendEvent(prev,"COMMENT_ADDED",currentUser.id,currentUser.role,caseId,`Respuesta instrucción ${instructionId}: ${replyText.trim().slice(0,60)}`));
+  }
+
+  /** Fase 3.8 — evento formal de ciclo de instrucción (append-only en timeline). Fase 3.9: eventId estable. */
+  function makeInstructionTraceEvent(kind: CaseEventKind, instructionId: string, note: string): CaseEvent {
+    return { eventId: newEventId("ev"), type: "COMMENT", kind, refInstructionId: instructionId, at: nowISO(), actor: currentUser!.id, note };
+  }
+
+  /** Fase 4.0 — push a timeline con dedupe (evita doble evento en ventana de ~4s). */
+  function pushTimelineEvent(timeline: CaseEvent[], ev: CaseEvent): CaseEvent[] {
+    if (isDuplicateEvent(timeline, ev)) return timeline;
+    return [...timeline, ev];
   }
 
   function isInstructionAckedByUser(ins: InstructionItem, userId: string): boolean {
@@ -598,7 +1010,8 @@ export default function App(){
     details: string,
     impactLevel: ImpactLevel = "L1",
     scopeFunctional: ScopeFunctional = "OPERACIONES",
-    bypass?: { enabled: boolean; reason?: string }
+    bypass?: { enabled: boolean; reason?: string },
+    cc?: { role?: string; userId?: string; label: string }[]
   ){
     if(!currentUser?.id) return;
     if(!summary?.trim()) return notify(UI_TEXT.errors.instructionSummaryRequired, "error");
@@ -626,16 +1039,21 @@ export default function App(){
       evidence: [],
       impactLevel,
       scopeFunctional,
-      to: { label: audience === "AMBOS" ? "Dirección Regional / Terreno" : audience === "PESE" ? "PESE" : "Delegado" },
+      to: {
+        label: audience === "AMBOS" ? "Dirección Regional / Terreno" : audience === "PESE" ? "PESE" : "Delegado",
+        role: audience === "PESE" ? "PESE" : audience === "DELEGADO" ? "DELEGADO_JE" : undefined,
+      },
+      ...(cc?.length ? { cc } : {}),
       ...(bypass?.enabled && bypass?.reason?.trim()
         ? { bypass: { enabled: true, reason: bypass.reason.trim() } }
         : {}),
     };
+    const traceEv = makeInstructionTraceEvent("INSTRUCTION_CREATED", newIns.id, `Instrucción creada: ${newIns.summary.slice(0, 80)}`);
     setCases((prev) =>
       prev.map((x) =>
         x.id !== caseId
           ? x
-          : { ...x, instructions: [...(x.instructions ?? []), newIns], updatedAt: nowISO() } as CaseItem
+          : { ...x, instructions: [...(x.instructions ?? []), newIns], timeline: pushTimelineEvent(x.timeline ?? [], traceEv), updatedAt: nowISO() } as CaseItem
       )
     );
     setAuditLog((prev) =>
@@ -645,7 +1063,11 @@ export default function App(){
   }
   function ackInstruction(caseId: string, instructionId: string){
     if(!currentUser?.id) return;
+    const c = cases.find((x) => x.id === caseId);
+    const ins = c?.instructions?.find((i) => i.id === instructionId);
+    if (ins && (ins.acks ?? []).some((a) => a.userId === currentUser.id)) return;
     const role = currentUser?.role ?? "unknown";
+    const traceEv = makeInstructionTraceEvent("INSTRUCTION_ACK", instructionId, "Acuse registrado");
     setCases((prev) =>
       prev.map((x) => {
         if (x.id !== caseId) return x;
@@ -657,13 +1079,33 @@ export default function App(){
                 acks: [...(ins.acks ?? []), { userId: currentUser.id, role, at: nowISO() }],
               }
         );
-        return { ...x, instructions, updatedAt: nowISO() } as CaseItem;
+        return { ...x, instructions, timeline: pushTimelineEvent(x.timeline ?? [], traceEv), updatedAt: nowISO() } as CaseItem;
       })
     );
     setAuditLog((prev) =>
       appendEvent(prev, "COMMENT_ADDED", currentUser.id, currentUser.role, caseId, `Acuse instrucción ${instructionId}`)
     );
     notify(UI_TEXT.buttons.ackConfirmReceipt, "success");
+  }
+
+  /** Fase 3.8 — cierre formal de instrucción (status CERRADA + evento en timeline). Fase 4.0: guard + dedupe. */
+  function closeInstruction(caseId: string, instructionId: string){
+    if(!currentUser?.id) return;
+    const c = cases.find((x) => x.id === caseId);
+    const ins = c?.instructions?.find((i) => i.id === instructionId);
+    if (ins && isClosedStatus(ins.status)) return;
+    const traceEv = makeInstructionTraceEvent("INSTRUCTION_CLOSED", instructionId, "Instrucción cerrada");
+    setCases((prev) =>
+      prev.map((x) => {
+        if (x.id !== caseId) return x;
+        const instructions = (x.instructions ?? []).map((ins) =>
+          ins.id !== instructionId ? ins : { ...ins, status: "CERRADA" }
+        );
+        return { ...x, instructions, timeline: pushTimelineEvent(x.timeline ?? [], traceEv), updatedAt: nowISO() } as CaseItem;
+      })
+    );
+    setAuditLog((prev) => appendEvent(prev, "COMMENT_ADDED", currentUser.id, currentUser.role, caseId, `Instrucción cerrada ${instructionId}`));
+    notify("Instrucción cerrada", "success");
   }
 
   function catalogAddLocal(nombre: string, region: string, commune: string, actor: User){
@@ -922,18 +1364,74 @@ export default function App(){
     notify("Reporte exportado");
   }
 
-  const visibleCases=useMemo(()=>cases.filter(c=>{
-    if(currentUser?.role!=="NIVEL_CENTRAL"&&c.region!==activeRegion)return false;
-    if(!canDo("viewAll",currentUser,c)){if(c.createdBy!==currentUser?.id&&c.assignedTo!==currentUser?.id)return false;}
-    if(filterState.criticality&&c.criticality!==filterState.criticality)return false;
-    if(filterState.status&&c.status!==filterState.status)return false;
-    if(filterState.commune&&c.commune!==filterState.commune)return false;
-    if(filterState.search){
-      const q=filterState.search.toLowerCase();
-      if(!c.summary.toLowerCase().includes(q)&&!c.id.toLowerCase().includes(q)&&!(c.local||"").toLowerCase().includes(q))return false;
+  function isFixedLocalRole(u: { role?: string } | null | undefined): boolean {
+    const r = String(u?.role ?? "").toUpperCase();
+    return r === "PESE" || r === "DELEGADO_JE";
+  }
+
+  function getCaseLocalIdSafe(c: { localScope?: string; localRef?: { idLocal?: string }; localSnapshot?: { idLocal?: string } | null }, localCatalogById: Map<string, unknown>): string | null {
+    if (c?.localScope === "REGIONAL") return null;
+    const raw = (c as { localRef?: { idLocal?: string }; localSnapshot?: { idLocal?: string } | null })?.localRef?.idLocal ?? (c as { localSnapshot?: { idLocal?: string } | null })?.localSnapshot?.idLocal ?? null;
+    if (!raw) return null;
+    const id = String(raw);
+    return localCatalogById.has(id) ? id : null;
+  }
+
+  const localCatalogById = useMemo(() => new Map(localCatalog.map((e) => [e.idLocal, e])), [localCatalog]);
+
+  const fixedLocalRole = isFixedLocalRole(currentUser);
+
+  const assignedLocalIdEffective = useMemo(() => {
+    if (!fixedLocalRole) return null;
+    const explicit = currentUser?.assignedLocalId != null ? String(currentUser.assignedLocalId) : null;
+    if (explicit && localCatalogById.has(explicit)) return explicit;
+    const fallback = localCatalog.find((e) => e.activoGlobal && e.region === currentUser?.region && e.commune === currentUser?.commune)?.idLocal ?? null;
+    return fallback && localCatalogById.has(fallback) ? fallback : null;
+  }, [fixedLocalRole, currentUser?.assignedLocalId, currentUser?.region, currentUser?.commune, localCatalog, localCatalogById]);
+
+  const assignedLocal = useMemo(() => {
+    if (!assignedLocalIdEffective) return null;
+    return (localCatalogById.get(assignedLocalIdEffective) as LocalCatalogEntry | undefined) ?? null;
+  }, [assignedLocalIdEffective, localCatalogById]);
+
+  const assignedCommuneEffective = assignedLocal?.commune ?? "";
+
+  useEffect(() => {
+    if (!fixedLocalRole) return;
+    const next = assignedCommuneEffective || "";
+    setFilterState((p) => {
+      if ((p.commune || "") === next) return p;
+      return { ...p, commune: next };
+    });
+  }, [fixedLocalRole, assignedCommuneEffective]);
+
+  const visibleCases = useMemo(() => cases.filter((c) => {
+    if (fixedLocalRole) {
+      if (!assignedLocalIdEffective || !localCatalogById.has(assignedLocalIdEffective)) return false;
+      const cid = getCaseLocalIdSafe(c, localCatalogById);
+      if (cid !== assignedLocalIdEffective) return false;
     }
+
+    if (currentUser?.role !== "NIVEL_CENTRAL" && c.region !== activeRegion) return false;
+
+    if (!isFixedLocalRole(currentUser)) {
+      if (!canDo("viewAll", currentUser, c)) {
+        if (c.createdBy !== currentUser?.id && c.assignedTo !== currentUser?.id) return false;
+      }
+    }
+
+    if (filterState.criticality && c.criticality !== filterState.criticality) return false;
+    if (filterState.status && c.status !== filterState.status) return false;
+    if (filterState.commune && c.commune !== filterState.commune) return false;
+
+    if (filterState.search) {
+      const q = filterState.search.toLowerCase();
+      const localText = (c.local || "") + " " + ((c as { localSnapshot?: { nombre?: string }; localRef?: { label?: string } }).localSnapshot?.nombre || "") + " " + ((c as { localRef?: { label?: string } }).localRef?.label || "");
+      if (!String(c.summary ?? "").toLowerCase().includes(q) && !String(c.id ?? "").toLowerCase().includes(q) && !localText.toLowerCase().includes(q)) return false;
+    }
+
     return true;
-  }),[cases,currentUser,activeRegion,filterState]);
+  }), [cases, currentUser, activeRegion, filterState, fixedLocalRole, assignedLocalIdEffective, localCatalogById]);
 
   const metrics=useMemo(()=>({
     total:visibleCases.length,
@@ -947,15 +1445,18 @@ export default function App(){
   // ─── SUB-COMPONENTS ───────────────────────────────────────────────────────
   const SlaBadge=({c}:{c:CaseItem})=>isSlaVencido(c)?<span style={{...S.badge("#ef4444"),fontSize:"9px"}}>SLA VENCIDO</span>:null;
 
-  const RecBadge=({c}:{c:CaseItem})=>{
-    const rec=getRecommendation(c);
+  const RecBadge=({c,variant="FULL"}:{c:CaseItem;variant?:"FULL"|"OP"})=>{
+    const rec=getRecommendation(c,variant);
+    const showTip=variant==="FULL";
     return(
       <span style={{position:"relative",display:"inline-flex",alignItems:"center"}} className="tipWrap">
-        <span style={{...S.badge(recColor(rec.level as RecLevel)),fontSize:"9px",cursor:"help"}}>{rec.icon} {rec.label}</span>
+        <span style={{...S.badge(recColor(rec.level as RecLevel)),fontSize:"9px",cursor:showTip?"help":"default"}}>{rec.icon} {rec.label}</span>
+        {showTip&&(
         <span className="tip" style={{position:"absolute",top:"125%",left:0,background:"#0b1220",color:"#e2e8f0",border:"1px solid #334155",borderRadius:"8px",padding:"10px 12px",width:"220px",fontSize:"11px",lineHeight:1.4,boxShadow:"0 10px 28px rgba(0,0,0,.45)",zIndex:999,display:"none"}}>
           <div style={{fontWeight:800,marginBottom:4,color:"#fff"}}>{rec.text}</div>
           <div style={{color:"#94a3b8"}}>{rec.reason}</div>
         </span>
+        )}
       </span>
     );
   };
@@ -1092,11 +1593,38 @@ export default function App(){
           <select style={{...S.inp,width:"130px"}} value={filterState.status} onChange={e=>setFilterState(p=>({...p,status:e.target.value}))}>
             {["","Nuevo","Recepcionado por DR","En gestión","Escalado","Mitigado","Resuelto","Cerrado"].map(o=><option key={o} value={o}>{o||"Estado"}</option>)}
           </select>
-          <select style={{...S.inp,width:"150px"}} value={filterState.commune} onChange={e=>setFilterState(p=>({...p,commune:e.target.value}))}>
+          <select style={{...S.inp,width:"150px"}} disabled={fixedLocalRole} value={fixedLocalRole ? (assignedCommuneEffective || "") : filterState.commune} onChange={e=>{if(fixedLocalRole)return;setFilterState(p=>({...p,commune:e.target.value}));}}>
             <option value="">Todas las comunas</option>
             {Object.entries(regionsMap[activeRegion]?.communes||{}).map(([k,v])=><option key={k} value={k}>{(v as { name?: string })?.name}</option>)}
           </select>
+          {fixedLocalRole&&<div style={{fontSize:12,opacity:0.85,color:assignedLocal?"#94a3b8":"#f97316"}}>{assignedLocal?`📍 Comuna fijada por local asignado: ${assignedLocal.nombre}`:"⚠️ Sin local asignado válido (no se mostrarán casos)"}</div>}
           <button style={S.btn("dark")} onClick={()=>setFilterState({criticality:"",status:"",commune:"",search:""})}>✕</button>
+        </div>
+      )}
+
+      {fixedLocalRole && (
+        <div
+          style={{
+            ...S.card,
+            marginBottom: 8,
+            padding: "8px 10px",
+            fontSize: 13,
+            opacity: 0.95,
+          }}
+        >
+          {assignedLocal ? (
+            <div>
+              📍 Local asignado: {assignedLocal.nombre} — {assignedCommuneEffective} (
+              {assignedLocalIdEffective})
+              <div style={{ fontSize: 12, opacity: 0.85, marginTop: 4 }}>
+                Alcance: solo este local.
+              </div>
+            </div>
+          ) : (
+            <div>
+              ⚠️ Sin local asignado válido — No se mostrarán casos.
+            </div>
+          )}
         </div>
       )}
 
@@ -1140,7 +1668,7 @@ export default function App(){
   );
 
   // ─── NEW CASE FORM ────────────────────────────────────────────────────────
-  const NewCaseForm=()=>{
+  const NewCaseForm=({ hideBack = false }: { hideBack?: boolean })=>{
     const[lnc,setLnc]=useState<LncDraft>(newCase?{...newCase}:{});
     const[le,setLe]=useState(evalForm);
     const[lb,setLb]=useState(bypassForm);
@@ -1148,10 +1676,25 @@ export default function App(){
     const maxVar=Math.max(...Object.values(le));
     const rData=regionsMap[lnc.region||"TRP"];
     const availableLocals=useMemo(()=>getActiveLocals(localCatalog,lnc.region||"TRP",lnc.commune||""),[lnc.region,lnc.commune,localCatalog]);
+
+    const isFixedLocal = Boolean(assignedLocalIdEffective);
+    const isFixedCommune = Boolean(assignedCommuneEffective);
+    const lockCommune = isFixedCommune;
+    const lockLocal = isFixedLocal;
+
     useEffect(()=>{
-      if(availableLocals.length===1&&lnc.local!==availableLocals[0].nombre)setLnc(p=>({...p,local:availableLocals[0].nombre}));
-      else if(availableLocals.length===0&&lnc.local)setLnc(p=>({...p,local:""}));
-    },[lnc.commune,lnc.region]);
+      if (!lnc.origin?.detectedAt) {
+        setLnc(p=>({ ...p, origin: { ...(p.origin||{}), detectedAt: nowLocalInput() } }));
+      }
+      if (lockCommune && lnc.commune !== assignedCommuneEffective) {
+        setLnc(p=>({ ...p, commune: assignedCommuneEffective, local: "" }));
+        return;
+      }
+      if (lockLocal && lnc.local !== (assignedLocal?.nombre ?? "")) {
+        setLnc(p=>({ ...p, local: assignedLocal?.nombre ?? "" }));
+      }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    },[lockCommune, lockLocal, assignedCommuneEffective, assignedLocalIdEffective]);
 
     const varDefs=[
       {key:"continuidad",   label:"1. Continuidad del acto",     desc:"0=Sin impacto · 1=Parcial · 2=Mesa suspendida · 3=Local sin funcionar"},
@@ -1163,7 +1706,9 @@ export default function App(){
     return(
       <div>
         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
-          <button style={S.btn("dark")} onClick={()=>setView("dashboard")}>← Volver</button>
+          {!hideBack && (
+            <button style={S.btn("dark")} onClick={()=>setView("dashboard")}>← Volver</button>
+          )}
           <h2 style={{margin:0,fontSize:"16px"}}>Nuevo Incidente — Ficha 60s</h2>
         </div>
         <div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap"}}>
@@ -1186,7 +1731,12 @@ export default function App(){
               </div>
               <div>
                 <label style={S.lbl}>Comuna *</label>
-                <select style={S.inp} value={lnc.commune||""} onChange={e=>setLnc(p=>({...p,commune:e.target.value,local:""}))}>
+                <select
+                  style={S.inp}
+                  value={lnc.commune||""}
+                  disabled={lockCommune}
+                  onChange={e=>setLnc(p=>({...p,commune:e.target.value,local:""}))}
+                >
                   <option value="">Seleccione...</option>
                   {Object.entries(rData?.communes||{}).map(([k,v])=><option key={k} value={k}>{v.name}</option>)}
                 </select>
@@ -1199,7 +1749,12 @@ export default function App(){
               ):availableLocals.length===0?(
                 <div style={{...S.inp,color:"#ef4444",cursor:"not-allowed",borderColor:"#ef444444"}}>⚠️ Sin locales activos — administre el catálogo</div>
               ):(
-                <select style={{...S.inp,borderColor:lnc.local?"#22c55e44":"#ef444444"}} value={lnc.local||""} onChange={e=>setLnc(p=>({...p,local:e.target.value}))}>
+                <select
+                  style={{...S.inp,borderColor:lnc.local?"#22c55e44":"#ef444444"}}
+                  value={lnc.local||""}
+                  disabled={lockLocal || !lnc.commune}
+                  onChange={e=>setLnc(p=>({...p,local:e.target.value}))}
+                >
                   {availableLocals.length>1&&<option value="">Seleccione local...</option>}
                   {availableLocals.map(l=><option key={l.idLocal} value={l.nombre}>{l.nombre}</option>)}
                 </select>
@@ -1284,7 +1839,7 @@ export default function App(){
             )}
             <div style={{...S.card,background:"#111827",border:`2px solid ${critColor(er.criticality as Criticality)}`,marginTop:8}}>
               <span style={S.badge(critColor(er.criticality as Criticality))}>CRITICIDAD: {er.criticality}</span>
-              <span style={{marginLeft:8,color:"#64748b",fontSize:"11px"}}>Score: {er.score}/15</span>
+              <span style={{marginLeft:8,color:"#64748b",fontSize:"11px"}}>Prioridad sugerida: {er.score}/15</span>
               <div style={{marginTop:6,color:"#94a3b8",fontSize:"12px"}}>{er.recommendation}</div>
             </div>
             <div style={{display:"flex",justifyContent:"space-between",marginTop:10}}>
@@ -1366,6 +1921,20 @@ export default function App(){
     const [raJust, setRaJust] = useState("");
     const [motDraft, setMotDraft] = useState(c.closingMotivo ?? "");
     const [bvForm, setBvForm] = useState({ decision: "VALIDATED", fundament: "" });
+    const [replyingToInstructionId, setReplyingToInstructionId] = useState<string | null>(null);
+    const [replyDraft, setReplyDraft] = useState("");
+    const [draftCc, setDraftCc] = useState<{ role?: string; userId?: string; label: string }[]>([]);
+    const [busyAction, setBusyAction] = useState<Record<string, boolean>>({});
+
+    function withBusy(key: string, fn: () => void) {
+      if (busyAction[key]) return;
+      setBusyAction((prev) => ({ ...prev, [key]: true }));
+      try {
+        fn();
+      } finally {
+        setTimeout(() => setBusyAction((prev) => ({ ...prev, [key]: false })), 350);
+      }
+    }
 
     const isClosed = c.status === "Cerrado";
     const canAssign =
@@ -1381,21 +1950,23 @@ export default function App(){
       REASSESSMENT: "#f97316", IN_MANAGEMENT: "#3b82f6", BYPASS_VALIDATED: "#22c55e", BYPASS_REVOKED: "#ef4444",
     };
     const instructionsSorted = useMemo(() => {
-      const list = c.instructions ?? [];
+      const list = (c.instructions ?? []).filter((ins) => isInstructionForUser(ins, currentUser ?? undefined));
       return [...list].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    }, [c.id, c.instructions]);
+    }, [c.id, c.instructions, currentUser]);
+    const isOpView = uiMode === "OP";
     return (
       <div style={{position:"relative"}}>
         {isClosed&&<ClosedOverlay/>}
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:6}}>
           <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
             <button style={S.btn("dark")} onClick={()=>setView("dashboard")}>← Volver</button>
-            <span style={{fontFamily:"monospace",color:"#64748b",fontSize:"12px"}}>{c.id}</span>
+            {!isOpView&&<span style={{fontFamily:"monospace",color:"#64748b",fontSize:"12px"}}>{c.id}</span>}
             <span style={S.badge(critColor(c.criticality))}>{c.criticality}</span>
             <span style={S.badge(statusColor(c.status))}>{c.status}</span>
             {c.bypass&&<span style={S.badge(c.bypassFlagged&&!c.bypassValidated?"#ef4444":"#f97316")}>⚡ {UI_TEXT.states.modoUrgente}{c.bypassFlagged&&!c.bypassValidated?" ⚠️ "+UI_TEXT.states.flaggedShort:""}{c.bypassValidated?" ["+c.bypassValidated+"]":""}</span>}
-            <SlaBadge c={c}/><RecBadge c={c}/>
+            {!isOpView && <SlaBadge c={c}/>}<RecBadge c={c} variant={isOpView?"OP":"FULL"}/>
           </div>
+          {!isOpView&&(
           <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
             <button style={S.btn("dark")} onClick={()=>exportCaseTXT(c)}>⬇ TXT</button>
             <button style={S.btn("dark")} onClick={()=>{const txt=`MINUTA SCCE\nID: ${c.id} | ${fmtDate(nowISO())}\nLocal: ${c.local||"—"}\nResumen: ${c.summary}\nCriticidad: ${c.criticality} | Estado: ${c.status}`;navigator.clipboard?.writeText(txt);notify(UI_TEXT.buttons.minutaCopiada);}}>📋 Minuta</button>
@@ -1411,9 +1982,10 @@ export default function App(){
               </select>
             )}
           </div>
+          )}
         </div>
 
-        {div&&(
+        {!isOpView && div&&(
           <div style={{...S.card,background:"#1c1408",border:"2px solid #f97316",marginBottom:8}}>
             <div style={{color:"#f97316",fontWeight:700,marginBottom:4}}>⚡ Divergencia de catálogo</div>
             <div style={{fontSize:"12px",color:"#fbd38d",marginBottom:4}}>{div.msg}</div>
@@ -1439,7 +2011,7 @@ export default function App(){
           </div>
         )}
 
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+        <div style={{display:"grid",gridTemplateColumns: isOpView ? "1fr" : "1fr 1fr",gap:10}}>
           <div>
             <div style={{...S.card,marginBottom:8}}>
               <div style={{fontWeight:700,fontSize:"14px",marginBottom:4}}>{c.summary}</div>
@@ -1478,8 +2050,12 @@ export default function App(){
                 <div><span style={{color:"#64748b"}}>Comuna:</span> {regionsMap[c.region]?.communes?.[c.commune]?.name||c.commune}</div>
                 <div><span style={{color:"#64748b"}}>Canal:</span> {c.origin?.channel}</div>
                 <div><span style={{color:"#64748b"}}>Asignado:</span> {assignee?.name||"—"}</div>
-                <div><span style={{color:"#64748b"}}>SLA:</span> {c.slaMinutes} min</div>
-                {(()=>{const comp=c.completeness??0;return <div><span style={{color:"#64748b"}}>Complet.:</span> <span style={{color:comp>=80?"#22c55e":comp>=50?"#eab308":"#ef4444"}}>{comp}%</span></div>;})()}
+                {!isOpView&&(
+                  <>
+                    <div><span style={{color:"#64748b"}}>SLA:</span> {c.slaMinutes} min</div>
+                    {(()=>{const comp=c.completeness??0;return <div><span style={{color:"#64748b"}}>Complet.:</span> <span style={{color:comp>=80?"#22c55e":comp>=50?"#eab308":"#ef4444"}}>{comp}%</span></div>;})()}
+                  </>
+                )}
               </div>
             </div>
 
@@ -1492,6 +2068,7 @@ export default function App(){
               </div>
             )}
 
+            {!isOpView&&(
             <div style={{...S.card,marginBottom:8}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
                 <div style={{color:"#94a3b8",fontSize:"11px",fontWeight:600}}>FICHA EVALUACIÓN</div>
@@ -1511,9 +2088,44 @@ export default function App(){
                   </div>
                 </div>
               ));})()}
-              <div style={{marginTop:6,borderTop:"1px solid #2d3748",paddingTop:6,display:"flex",justifyContent:"space-between"}}>
-                <span style={{color:"#64748b",fontSize:"11px"}}>Score:</span>
-                <span style={{color:critColor(c.criticality),fontWeight:700}}>{c.criticalityScore}/15 — {c.criticality}</span>
+              <div
+                style={{
+                  marginTop: 6,
+                  borderTop: "1px solid #2d3748",
+                  paddingTop: 6,
+                  display: "flex",
+                  justifyContent: "space-between",
+                }}
+              >
+                {!isOpView ? (
+                  <>
+                    <span style={{ color: "#64748b", fontSize: "11px" }}>
+                      Nivel:
+                    </span>
+                    <span
+                      style={{
+                        color: critColor(c.criticality),
+                        fontWeight: 700,
+                      }}
+                    >
+                      {c.criticalityScore}/15 — {c.criticality}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span style={{ color: "#64748b", fontSize: "11px" }}>
+                      Criticidad:
+                    </span>
+                    <span
+                      style={{
+                        color: critColor(c.criticality),
+                        fontWeight: 700,
+                      }}
+                    >
+                      {c.criticality}
+                    </span>
+                  </>
+                )}
               </div>
               {showRA&&(
                 <div style={{...S.card,background:"#111827",marginTop:8,border:"1px solid #f9731644"}}>
@@ -1532,7 +2144,9 @@ export default function App(){
                 </div>
               )}
             </div>
+            )}
 
+            {!isOpView&&(
             <div style={S.card}>
               <div style={{color:"#94a3b8",fontSize:"11px",fontWeight:600,marginBottom:6}}>MÉTRICAS</div>
               {[["T. Activación",timeDiff(c.origin?.detectedAt,c.reportedAt)],["T. 1ª Acción",timeDiff(c.reportedAt,c.firstActionAt)],["T. Escalamiento",timeDiff(c.reportedAt,c.escalatedAt)],["T. Resolución",timeDiff(c.reportedAt,c.resolvedAt)]].map(([l,v])=>(
@@ -1542,19 +2156,20 @@ export default function App(){
                 </div>
               ))}
             </div>
+            )}
           </div>
 
           <div>
             <div style={{...S.card,marginBottom:8}}>
               <div style={{color:"#94a3b8",fontSize:"11px",fontWeight:600,marginBottom:8}}>LÍNEA DE TIEMPO</div>
               <div style={{maxHeight:200,overflowY:"auto"}}>
-                {(c.timeline??[]).map((t,i)=>{const u=USERS.find(u=>u.id===t.actor);return(
-                  <div key={i} style={{display:"flex",gap:8,alignItems:"flex-start",paddingBottom:8,borderBottom:"1px solid #1e2535"}}>
+                {(c.timeline??[]).map((t,i)=>{const u=USERS.find(u=>u.id===t.actor);const te=t as typeof t & { eventId?: string; kind?: string; refInstructionId?: string };const eventKey=te.eventId??`${t.at}_${t.actor}_${i}`;const formalLabels: Record<string, string> = { INSTRUCTION_CREATED: UI_TEXT.labels.instructionCreated, INSTRUCTION_ACK: UI_TEXT.labels.instructionAck, INSTRUCTION_CLOSED: UI_TEXT.labels.instructionClosed };const formalLabel=te.kind&&formalLabels[te.kind];const isReply=te.kind==="INSTRUCTION_REPLY"&&te.refInstructionId;const ins=isReply?(c.instructions??[]).find(ins=>ins.id===te.refInstructionId):null;const impact=ins?.impactLevel??"L1";const scopeFLabel={OPERACIONES:UI_TEXT.labels.scopeOperaciones,FISCALIZACION:UI_TEXT.labels.scopeFiscalizacion,SEGURIDAD:UI_TEXT.labels.scopeSeguridad,TI:UI_TEXT.labels.scopeTI,INFRAESTRUCTURA:UI_TEXT.labels.scopeInfraestructura,OTRO:UI_TEXT.labels.scopeOtro}[ins?.scopeFunctional??"OPERACIONES"]??ins?.scopeFunctional??"";const replyPrefix=ins?`Respuesta a instrucción ${impact} ${scopeFLabel} (${fmtTime(ins.createdAt)}): `:(isReply?`${UI_TEXT.labels.instructionUnavailable}: `:"");const displayNote=formalLabel?(t.note??""):replyPrefix?(replyPrefix+(t.note??"")):(t.note??"");const typeLabel=formalLabel??(isReply?UI_TEXT.labels.instructionReplyLabel:t.type);return(
+                  <div key={eventKey} style={{display:"flex",gap:8,alignItems:"flex-start",paddingBottom:8,borderBottom:"1px solid #1e2535"}}>
                     <div style={{width:6,height:6,borderRadius:"50%",background:tlC[t.type]||"#64748b",marginTop:5,flexShrink:0}}/>
                     <div>
                       <div style={{fontSize:"10px",color:"#475569"}}>{fmtDate(t.at)}</div>
-                      <div style={{fontSize:"11px",color:tlC[t.type]||"#64748b",fontWeight:600}}>{t.type}</div>
-                      <div style={{fontSize:"11px",color:"#94a3b8"}}>{t.note}{u&&<span style={{color:"#475569"}}> — {u.name}</span>}</div>
+                      <div style={{fontSize:"11px",color:tlC[t.type]||"#64748b",fontWeight:600}}>{typeLabel}</div>
+                      <div style={{fontSize:"11px",color:"#94a3b8"}}>{displayNote}{u&&<span style={{color:"#475569"}}> — {u.name}</span>}</div>
                     </div>
                   </div>
                 );})}
@@ -1632,13 +2247,36 @@ export default function App(){
                         <div style={{fontSize:"10px",color:"#475569",marginBottom:2}}>{USERS.find(u=>u.id===ins.createdBy)?.name ?? ins.createdBy}</div>
                         <div style={{fontWeight:600,fontSize:"12px",marginBottom:4}}>{ins.summary}</div>
                         {ins.details && <div style={{fontSize:"11px",color:"#94a3b8",marginBottom:4}}>{ins.details}</div>}
+                        {ins.cc?.length ? (
+                          <div style={{fontSize:10,color:"#64748b",marginBottom:4}}>{UI_TEXT.labelsCc?.ccReadOnly ?? "Con copia:"} {ins.cc.map(x=>x.label).join(", ")}</div>
+                        ) : null}
                         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:4}}>
                           <span style={S.badge(acked ? "#22c55e" : "#eab308")}>{acked ? UI_TEXT.labels.statusAcked : UI_TEXT.labels.statusPending}</span>
+                          {isClosedStatus(ins.status) && <span style={S.badge("#64748b")}>Cerrada</span>}
                           {last && <span style={{fontSize:"10px",color:"#64748b"}}>Acusado: {USERS.find(u=>u.id===last.userId)?.name ?? last.userId} @ {fmtDate(last.at)}</span>}
                           {!acked && currentUser?.id && ins.ackRequired && (
-                            <button style={{...S.btn("primary"),fontSize:"10px",padding:"4px 8px"}} title={UI_TEXT.tooltips.ackConfirmReceipt} onClick={()=>ackInstruction(c.id, ins.id)}>{UI_TEXT.buttons.ackConfirmReceipt}</button>
+                            <button style={{...S.btn("primary"),fontSize:"10px",padding:"4px 8px"}} title={UI_TEXT.tooltips.ackConfirmReceipt} disabled={!!busyAction[`ack_${c.id}_${ins.id}`]} onClick={()=>withBusy(`ack_${c.id}_${ins.id}`,()=>ackInstruction(c.id,ins.id))}>{UI_TEXT.buttons.ackConfirmReceipt}</button>
+                          )}
+                          {!isClosedStatus(ins.status) && canDo("instruct", currentUser) && (
+                            <button style={{...S.btn("dark"),fontSize:"10px",padding:"4px 8px"}} disabled={!!busyAction[`close_${c.id}_${ins.id}`]} onClick={()=>withBusy(`close_${c.id}_${ins.id}`,()=>closeInstruction(c.id,ins.id))}>{UI_TEXT.buttons.closeInstruction}</button>
                           )}
                         </div>
+                        {/* Fase 3.5 — Responder a instrucción (COMMENT en timeline con refInstructionId) */}
+                        {currentUser?.id && (
+                          <div style={{marginTop:6,borderTop:"1px solid #1e293b",paddingTop:6}}>
+                            {replyingToInstructionId !== ins.id ? (
+                              <button style={{...S.btn("dark"),fontSize:"10px",padding:"4px 8px"}} onClick={()=>{setReplyingToInstructionId(ins.id);setReplyDraft("");}}>{UI_TEXT.buttons.replyToInstruction}</button>
+                            ) : (
+                              <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                                <textarea style={{...S.inp,height:48,resize:"vertical",fontSize:"11px"}} placeholder={UI_TEXT.misc.instructionReplyPlaceholder} value={replyDraft} onChange={e=>setReplyDraft(e.target.value)} rows={2}/>
+                                <div style={{display:"flex",gap:6}}>
+                                  <button style={{...S.btn("primary"),fontSize:"10px",padding:"4px 10px"}} onClick={()=>{if(!replyDraft.trim())return;addInstructionReply(c.id,ins.id,replyDraft);setReplyDraft("");setReplyingToInstructionId(null);notify(UI_TEXT.misc.instructionReplySaved);}}>{UI_TEXT.buttons.sendReply}</button>
+                                  <button style={{...S.btn("dark"),fontSize:"10px",padding:"4px 8px"}} onClick={()=>{setReplyingToInstructionId(null);setReplyDraft("");}}>Cancelar</button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -1679,6 +2317,11 @@ export default function App(){
                     <option value="OTRO">{UI_TEXT.labels.scopeOtro}</option>
                   </select>
                 </div>
+                {isNivelCentral(currentUser?.id ?? "") && (insAudience === "PESE" || insAudience === "DELEGADO") && (
+                  <div style={{marginBottom:8,padding:8,background:"rgba(245,158,11,0.15)",border:"1px solid rgba(245,158,11,0.5)",borderRadius:4,fontSize:11,color:"#fcd34d"}}>
+                    {UI_TEXT.warnings?.centralToPeseOrDelegado ?? "Advertencia: instrucción desde Nivel Central a PESE/DELEGADO."}
+                  </div>
+                )}
                 <label style={S.lbl}>{UI_TEXT.labels.summaryLabelRequired}</label>
                 <input style={S.inp} placeholder={UI_TEXT.misc.instructionSummaryPlaceholder} value={insSummary} onChange={e=>setInsSummary(e.target.value)}/>
                 <label style={S.lbl}>{UI_TEXT.labels.detailsLabelOptional}</label>
@@ -1690,7 +2333,19 @@ export default function App(){
                 {insBypassEnabled && (
                   <textarea style={{...S.inp,height:36,resize:"vertical",marginBottom:6}} placeholder={UI_TEXT.labels.bypassReasonPlaceholder} value={insBypassReason} onChange={e=>setInsBypassReason(e.target.value)}/>
                 )}
-                <button style={{...S.btn("primary"),marginTop:6}} title={UI_TEXT.tooltips.caseCreateInstruction} onClick={()=>{createInstruction(c.id, insScope, insAudience, insSummary, insDetails, insImpactLevel, insScopeFunctional, insBypassEnabled ? { enabled: true, reason: insBypassReason } : undefined);setInsSummary("");setInsDetails("");setInsBypassReason("");setInsBypassEnabled(false);}}>{UI_TEXT.buttons.caseCreateInstruction}</button>
+                <div style={{marginTop:8,marginBottom:6}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                    <span style={S.lbl}>{UI_TEXT.labelsCc?.ccLabel ?? "Con copia (CC)"}</span>
+                    <button type="button" style={{...S.btn("dark"),fontSize:10,padding:"4px 8px"}} onClick={()=>setDraftCc(prev=>[...prev,{label:"Copia",role:undefined,userId:undefined}])}>{UI_TEXT.buttons.addCc ?? "+ Agregar copia"}</button>
+                  </div>
+                  {draftCc.map((ccRow,i)=>(
+                    <div key={i} style={{display:"flex",gap:6,alignItems:"center",marginBottom:4}}>
+                      <input style={{...S.inp,flex:1}} value={ccRow.label} onChange={e=>setDraftCc(prev=>prev.map((x,idx)=>idx===i?{...x,label:e.target.value}:x))} placeholder={UI_TEXT.labelsCc?.ccPlaceholder ?? "Ej: Dirección Regional"} />
+                      <button type="button" style={{...S.btn("dark"),fontSize:10,padding:"4px 6px"}} onClick={()=>setDraftCc(prev=>prev.filter((_,idx)=>idx!==i))}>{UI_TEXT.buttons.removeCc ?? "Quitar"}</button>
+                    </div>
+                  ))}
+                </div>
+                <button style={{...S.btn("primary"),marginTop:6}} title={UI_TEXT.tooltips.caseCreateInstruction} onClick={()=>{createInstruction(c.id, insScope, insAudience, insSummary, insDetails, insImpactLevel, insScopeFunctional, insBypassEnabled ? { enabled: true, reason: insBypassReason } : undefined, draftCc.length?draftCc:undefined);setInsSummary("");setInsDetails("");setInsBypassReason("");setInsBypassEnabled(false);setDraftCc([]);}}>{UI_TEXT.buttons.caseCreateInstruction}</button>
               </div>
             )}
 
@@ -1703,6 +2358,7 @@ export default function App(){
           </div>
         </div>
 
+        {!isOpView&&(
         <div style={{...S.card,marginTop:10}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
             <div style={{color:"#94a3b8",fontSize:"11px",fontWeight:600}}>AUDITORÍA ({ca.length} eventos)</div>
@@ -1720,6 +2376,7 @@ export default function App(){
             })}
           </div>
         </div>
+        )}
       </div>
     );
   };
@@ -1909,6 +2566,7 @@ export default function App(){
         <div id="reports-export" style={{...S.card,marginBottom:10,scrollMarginTop:80}}>
           <div style={{color:"#64748b",fontSize:"11px",fontWeight:700,marginBottom:8}}>RESPALDOS</div>
           <input ref={importJsonInputRef} type="file" accept="application/json,.json" style={{display:"none"}} onChange={importJSONSelected} />
+          <input ref={importFileRef} type="file" accept="application/json" style={{display:"none"}} onChange={(e)=>{const f=e.target.files?.[0];e.currentTarget.value="";if(f)void onImportStateFile(f);}} />
           <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
             {canDo("export",currentUser)&&<button style={S.btn("primary")} onClick={exportCSV}>📊 Excel — Lista de casos</button>}
             {canDo("export",currentUser)&&<button style={S.btn("primary")} onClick={exportJSON}>📦 Respaldo completo</button>}
@@ -2134,9 +2792,190 @@ export default function App(){
     );
   };
 
+  // ─── FIRMA Y CONFIANZA (4.3.b) ─────────────────────────────────────────────
+  const TrustView = () => {
+    const [status, setStatus] = useState<{ cryptoAvailable: boolean; hasKey: boolean; trustedCount: number } | null>(null);
+    const [entriesWithFp, setEntriesWithFp] = useState<{ alias: string; addedAt: string; reason: string; publicKeyB64: string; fingerprint: string }[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [addForm, setAddForm] = useState({ alias: "", publicKeyB64: "", reason: "" });
+
+    const load = async () => {
+      setLoading(true);
+      let cryptoAvailable = false;
+      try {
+        await crypto.subtle.digest("SHA-256", new Uint8Array(1));
+        cryptoAvailable = true;
+      } catch {}
+      const hasKey = await hasSigningKey();
+      const entries = await getTrustedEntries();
+      const trustedCount = entries.length;
+      const withFp = await Promise.all(
+        entries.map(async (e) => ({
+          ...e,
+          fingerprint: await publicKeyFingerprintShort(e.publicKeyB64),
+        }))
+      );
+      setStatus({ cryptoAvailable, hasKey, trustedCount });
+      setEntriesWithFp(withFp);
+      setLoading(false);
+    };
+
+    useEffect(() => {
+      void load();
+    }, []);
+
+    const recommendation =
+      status == null
+        ? ""
+        : !status.cryptoAvailable
+          ? (UI_TEXT.misc.trustRecommendationNoSupport ?? "Usar sin firma.")
+          : !status.hasKey
+            ? (UI_TEXT.misc.trustRecommendationNoKey ?? "Crear llave para firmar exports.")
+            : (UI_TEXT.misc.trustRecommendationOk ?? "Puedes firmar y verificar autoría.");
+
+    const handleAdd = async () => {
+      const alias = addForm.alias.trim();
+      const pub = addForm.publicKeyB64.trim();
+      const reason = addForm.reason.trim();
+      if (alias.length < 3) return notify(UI_TEXT.errors.trustAddInvalid ?? "Revisa alias, clave pública y motivo.", "error");
+      if (reason.length < 5) return notify(UI_TEXT.errors.trustAddInvalid ?? "Revisa alias, clave pública y motivo.", "error");
+      let validB64 = false;
+      try {
+        atob(pub.replace(/\s/g, ""));
+        if (pub.length >= 40 && pub.length <= 500) validB64 = true;
+      } catch {}
+      if (!validB64) return notify(UI_TEXT.errors.trustAddInvalid ?? "Revisa alias, clave pública y motivo.", "error");
+      try {
+        await addTrustedKey({ publicKeyB64: pub, alias, reason });
+        const fp = await publicKeyFingerprintShort(pub);
+        if (currentUser?.id)
+          setAuditLog((prev) =>
+            appendEvent(prev, "TRUST_KEY_ADDED", currentUser.id, currentUser.role, null, `${alias} – ${fp}`)
+          );
+        notify(UI_TEXT.misc.trustAddedOk ?? "Firmante agregado a confianza.", "success");
+        setAddForm({ alias: "", publicKeyB64: "", reason: "" });
+        void load();
+      } catch {
+        notify(UI_TEXT.errors.trustAddFailed ?? "No se pudo agregar el firmante.", "error");
+      }
+    };
+
+    const handleRemove = async (publicKeyB64: string, alias: string, fingerprint: string) => {
+      if (!globalThis.confirm(`¿Quitar a "${alias}" de la lista de confianza?`)) return;
+      try {
+        await removeTrustedKey(publicKeyB64);
+        if (currentUser?.id)
+          setAuditLog((prev) =>
+            appendEvent(prev, "TRUST_KEY_REMOVED", currentUser.id, currentUser.role, null, `${alias} – ${fingerprint}`)
+          );
+        notify(UI_TEXT.misc.trustRemovedOk ?? "Firmante eliminado de confianza.", "success");
+        void load();
+      } catch {
+        notify(UI_TEXT.errors.trustRemoveFailed ?? "No se pudo quitar el firmante.", "error");
+      }
+    };
+
+    if (loading && status == null) return <div style={S.card}>Cargando…</div>;
+
+    return (
+      <div>
+        <h2 style={{ margin: "0 0 12px", fontSize: "16px" }}>
+          {UI_TEXT.labels.trustPanelTitle ?? "Firma y confianza"}
+        </h2>
+        <button style={{ ...S.btn("dark"), marginBottom: 12 }} onClick={() => setView("dashboard")}>← Volver</button>
+
+        <div style={{ ...S.card, marginBottom: 10 }}>
+          <div style={{ color: "#94a3b8", fontSize: "11px", fontWeight: 600, marginBottom: 8 }}>
+            {UI_TEXT.labels.trustStatusTitle ?? "Estado de verificación"}
+          </div>
+          <div style={{ fontSize: "12px", color: "#e2e8f0" }}>
+            <div style={{ marginBottom: 4 }}>
+              La verificación de autoría está:{" "}
+              <strong>{status?.cryptoAvailable ? (UI_TEXT.misc.trustVerificationAvailable ?? "Disponible") : (UI_TEXT.misc.trustVerificationUnavailable ?? "No disponible")}</strong>
+            </div>
+            <div style={{ marginBottom: 4 }}>
+              Llave local:{" "}
+              <strong>{status?.hasKey ? (UI_TEXT.misc.trustLocalKeyConfigured ?? "Configurada") : (UI_TEXT.misc.trustLocalKeyNotConfigured ?? "No configurada")}</strong>
+            </div>
+            <div style={{ marginBottom: 4 }}>
+              Firmantes confiables: <strong>{status?.trustedCount ?? 0}</strong>
+            </div>
+            <div style={{ marginTop: 6, color: "#94a3b8" }}>{recommendation}</div>
+          </div>
+        </div>
+
+        <div style={{ ...S.card, marginBottom: 10 }}>
+          <div style={{ color: "#94a3b8", fontSize: "11px", fontWeight: 600, marginBottom: 8 }}>
+            {UI_TEXT.labels.trustTrustedListTitle ?? "Firmantes confiables"}
+          </div>
+          {entriesWithFp.length === 0 ? (
+            <div style={{ color: "#64748b", fontSize: "12px" }}>Ninguno. Agrega uno más abajo.</div>
+          ) : (
+            <table style={{ width: "100%", fontSize: "12px", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ textAlign: "left", borderBottom: "1px solid #2d3748" }}>
+                  <th style={{ padding: "6px 8px" }}>{UI_TEXT.labels.trustAliasLabel ?? "Alias"}</th>
+                  <th style={{ padding: "6px 8px" }}>{UI_TEXT.labels.trustFingerprintLabel ?? "Huella"}</th>
+                  <th style={{ padding: "6px 8px" }}>Agregada</th>
+                  <th style={{ padding: "6px 8px" }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {entriesWithFp.map((e) => (
+                  <tr key={e.publicKeyB64} style={{ borderBottom: "1px solid #1e293b" }}>
+                    <td style={{ padding: "6px 8px" }}>{e.alias}</td>
+                    <td style={{ padding: "6px 8px", fontFamily: "monospace", fontSize: "11px" }}>{e.fingerprint}</td>
+                    <td style={{ padding: "6px 8px", color: "#64748b" }}>{e.addedAt.slice(0, 10)}</td>
+                    <td style={{ padding: "6px 8px" }}>
+                      <button type="button" style={{ ...S.btn("danger"), fontSize: "10px", padding: "2px 8px" }} onClick={() => handleRemove(e.publicKeyB64, e.alias, e.fingerprint)}>🗑 Quitar</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        <div style={{ ...S.card, marginBottom: 10 }}>
+          <div style={{ color: "#94a3b8", fontSize: "11px", fontWeight: 600, marginBottom: 8 }}>
+            {UI_TEXT.labels.trustAddTitle ?? "Agregar firmante confiable"}
+          </div>
+          <div style={{ marginBottom: 8 }}>
+            <label style={S.lbl}>{UI_TEXT.labels.trustAliasLabel ?? "Alias"}</label>
+            <input style={S.inp} value={addForm.alias} onChange={(e) => setAddForm((p) => ({ ...p, alias: e.target.value }))} placeholder="Ej: SERVEL Tarapacá – Piloto" />
+          </div>
+          <div style={{ marginBottom: 8 }}>
+            <label style={S.lbl}>{UI_TEXT.labels.trustPublicKeyLabel ?? "Clave pública"}</label>
+            <textarea style={{ ...S.inp, minHeight: 80 }} value={addForm.publicKeyB64} onChange={(e) => setAddForm((p) => ({ ...p, publicKeyB64: e.target.value }))} placeholder="Pega aquí la clave pública en base64" />
+          </div>
+          <div style={{ marginBottom: 8 }}>
+            <label style={S.lbl}>{UI_TEXT.labels.trustReasonLabel ?? "Motivo"}</label>
+            <textarea style={{ ...S.inp, minHeight: 50 }} value={addForm.reason} onChange={(e) => setAddForm((p) => ({ ...p, reason: e.target.value }))} placeholder="Ej: Clave oficial para intercambio entre equipos" />
+          </div>
+          <button style={S.btn("success")} onClick={handleAdd}>
+            {UI_TEXT.misc.trustAddButton ?? "➕ Agregar a confianza"}
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  const OpHome = ({ onNew: _onNew }: { onNew: () => void }) => {
+    return (
+      <div>
+        <div style={{ ...S.card, marginBottom: 10 }}>
+          <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 8 }}>
+            Respuestas recibidas
+          </div>
+          <div style={{ color: "#94a3b8", fontSize: 12 }}>
+            Sin respuestas nuevas.
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   // ─── LAYOUT PRINCIPAL ─────────────────────────────────────────────────────
-  const terrainMode = isTerrainMode(currentUser);
-  const showTerrainShell = terrainMode && !terrainOverridden;
   return (
     showTerrainShell ? (
       <TerrainShell
@@ -2148,11 +2987,36 @@ export default function App(){
           setSelectedCase(found);
           setView("detail");
         }}
-        onGoToDashboard={() => { setTerrainOverridden(true); setView("dashboard"); setSelectedCase(null); }}
-        onLogout={() => { setTerrainOverridden(false); setCurrentUser(null); }}
+        onGoToDashboard={() => {
+          setUiModeAndPersist("FULL");
+          setView("dashboard");
+          setSelectedCase(null);
+        }}
+        onLogout={() => {
+          setCurrentUser(null);
+        }}
         isCrisisMode={crisisMode}
       >
-        {view === "detail" && selectedCase ? <CaseDetail /> : <div style={{ padding: 20, color: "#64748b" }}>Selecciona un caso</div>}
+        <div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
+            {view !== OP_HOME_VIEW && (
+              <button type="button" style={S.btn("dark")} onClick={goOpHome}>
+                ← Volver
+              </button>
+            )}
+            <div style={{ flex: 1 }} />
+            <button type="button" style={{ ...S.btn("primary"), minWidth: 220 }} onClick={goNewCase}>
+              + Nuevo incidente
+            </button>
+          </div>
+          {view === "new_case" ? (
+            <NewCaseForm hideBack />
+          ) : view === "detail" && selectedCase ? (
+            <CaseDetail />
+          ) : (
+            <OpHome onNew={goNewCase} />
+          )}
+        </div>
       </TerrainShell>
     ) : (
     <div style={S.app}>
@@ -2172,6 +3036,16 @@ export default function App(){
             {actionsOpen&&(
               <div style={{position:"absolute",right:0,top:"calc(100% + 6px)",minWidth:220,background:"#fff",border:"1px solid rgba(0,0,0,0.12)",borderRadius:12,boxShadow:"0 12px 30px rgba(0,0,0,0.18)",padding:6,zIndex:1200}} role="menu" aria-label="Acciones globales">
                 <div style={{fontSize:10,opacity:0.7,padding:"6px 8px"}}>Atajos: Ctrl+E Export · Ctrl+I Import</div>
+                <button type="button" role="menuitem" onClick={onExportState} style={{width:"100%",textAlign:"left",padding:"8px 10px",borderRadius:10,border:"0",background:"transparent",cursor:"pointer",fontSize:12,fontWeight:800}}>
+                  📤 {UI_TEXT.buttons.exportState ?? "Exportar"}
+                </button>
+                <button type="button" role="menuitem" onClick={()=>importFileRef.current?.click()} style={{width:"100%",textAlign:"left",padding:"8px 10px",borderRadius:10,border:"0",background:"transparent",cursor:"pointer",fontSize:12,fontWeight:800}}>
+                  📥 {UI_TEXT.buttons.importState ?? "Importar"}
+                </button>
+                <button type="button" role="menuitem" onClick={()=>{setView("trust");setActionsOpen(false);}} style={{width:"100%",textAlign:"left",padding:"8px 10px",borderRadius:10,border:"0",background:"transparent",cursor:"pointer",fontSize:12,fontWeight:800}}>
+                  🔐 {UI_TEXT.labels.trustPanelTitle ?? "Firma y confianza"}
+                </button>
+                <div style={{height:1,background:"rgba(0,0,0,0.08)",margin:"6px 6px"}} />
                 <button type="button" role="menuitem" onClick={()=>goToSection("reports","reports-export")} style={{width:"100%",textAlign:"left",padding:"8px 10px",borderRadius:10,border:"0",background:"transparent",cursor:"pointer",fontSize:12,fontWeight:800}}>
                   📦 Exportar (CSV/JSON)
                   <div style={{fontSize:10,fontWeight:600,opacity:0.7,marginTop:2}}>Ir a Reportes → Exportar</div>
@@ -2190,10 +3064,15 @@ export default function App(){
           </div>
           <button type="button" onClick={()=>setHelpOpen(true)} title="Ayuda del módulo actual" style={S.nBtn(false)} aria-label="Abrir ayuda">?</button>
           {divergencias.length>0&&<span style={{...S.badge("#f97316"),fontSize:"9px",cursor:"pointer"}} onClick={()=>setView("catalog")}>⚡ {divergencias.length}</span>}
+          <div style={{ display: "flex", gap: 4, alignItems: "center", marginRight: 6 }}>
+            <span style={{ color: "#94a3b8", fontSize: "11px", fontWeight: 700 }}>Vista:</span>
+            <button type="button" style={S.nBtn(uiMode === "OP")} onClick={() => setUiModeAndPersist("OP")} title="Vista operativa (terreno)">Operativa</button>
+            <button type="button" style={S.nBtn(uiMode === "FULL")} onClick={() => setUiModeAndPersist("FULL")} title="Vista completa (central)">Completa</button>
+          </div>
           <span style={{fontSize:"10px",color:"#475569"}}>{electionConfig.name}</span>
           <span style={S.badge("#374151")}>{currentUser.name}</span>
           <span style={{...S.badge("#1e40af"),fontSize:"9px"}}>{ROLE_LABELS[currentUser.role]}</span>
-          <button style={{...S.btn("dark"),fontSize:"11px"}} onClick={()=>{setTerrainOverridden(false);setCurrentUser(null);}}>Salir</button>
+          <button style={{...S.btn("dark"),fontSize:"11px"}} onClick={()=>{setCurrentUser(null);}}>Salir</button>
         </div>
       </div>
 
@@ -2213,6 +3092,7 @@ export default function App(){
         {view==="simulation"&&<SimulationView/>}
         {view==="checklist"&&<ChecklistView/>}
         {view==="config"&&<ConfigView/>}
+        {view==="trust"&&<TrustView/>}
       </div>
       <HelpDrawer open={helpOpen} onClose={()=>setHelpOpen(false)} content={helpByView[view]??helpByView.dashboard} />
     </div>
