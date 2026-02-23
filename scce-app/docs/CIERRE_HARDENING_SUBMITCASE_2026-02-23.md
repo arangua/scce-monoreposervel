@@ -78,7 +78,7 @@ Se mantiene el comportamiento funcional del sistema.
 feat(hardening): validate territory on submitCase + build green
 ```
 
-**Hash commit:** `549e156c9d4918690b71eefc9f854be899f96e1f`
+**Hash commit:** `57d644f673f8123277ee60809283462d54d151db`
 
 ---
 
