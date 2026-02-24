@@ -2980,7 +2980,7 @@ export default function App(){
     showTerrainShell ? (
       <TerrainShell
         currentUser={currentUser}
-        cases={cases}
+        cases={visibleCases}
         selectedCaseId={selectedCase?.id ?? null}
         setSelectedCaseId={(id) => {
           const found = cases.find((x) => x.id === id) ?? null;
