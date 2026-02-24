@@ -596,6 +596,17 @@ export default function App(){
   const [step,setStep]=useState(1);
   const [helpOpen,setHelpOpen]=useState(false);
   const [actionsOpen,setActionsOpen]=useState(false);
+  const [busyAction, setBusyAction] = useState<Record<string, boolean>>({});
+
+  function withBusy(key: string, fn: () => void) {
+    if (busyAction[key]) return;
+    setBusyAction((prev) => ({ ...prev, [key]: true }));
+    try {
+      fn();
+    } finally {
+      setTimeout(() => setBusyAction((prev) => ({ ...prev, [key]: false })), 350);
+    }
+  }
 
   const goToSection=(nextView: ViewKey,sectionId: string)=>{
     setView(nextView);
@@ -1888,7 +1899,13 @@ export default function App(){
             </div>
             <div style={{display:"flex",justifyContent:"space-between",marginTop:10}}>
               <button style={S.btn("dark")} onClick={()=>setStep(3)}>← Atrás</button>
-              <button style={{...S.btn("success"),padding:"8px 20px"}} onClick={submitCase}>✓ Registrar Incidente</button>
+              <button
+                disabled={!!busyAction["submit_case"]}
+                style={{...S.btn("success"),padding:"8px 20px"}}
+                onClick={() => withBusy("submit_case", submitCase)}
+              >
+                ✓ Registrar Incidente
+              </button>
             </div>
           </div>
         )}
@@ -1924,17 +1941,6 @@ export default function App(){
     const [replyingToInstructionId, setReplyingToInstructionId] = useState<string | null>(null);
     const [replyDraft, setReplyDraft] = useState("");
     const [draftCc, setDraftCc] = useState<{ role?: string; userId?: string; label: string }[]>([]);
-    const [busyAction, setBusyAction] = useState<Record<string, boolean>>({});
-
-    function withBusy(key: string, fn: () => void) {
-      if (busyAction[key]) return;
-      setBusyAction((prev) => ({ ...prev, [key]: true }));
-      try {
-        fn();
-      } finally {
-        setTimeout(() => setBusyAction((prev) => ({ ...prev, [key]: false })), 350);
-      }
-    }
 
     const isClosed = c.status === "Cerrado";
     const canAssign =

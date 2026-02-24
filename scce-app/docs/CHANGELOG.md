@@ -4,9 +4,10 @@ Entradas breves para trazabilidad de hitos técnicos (sin sobre-ingeniería).
 
 ---
 
-## 2026-02-24 — Filtro ámbito Modo OP (CRIT Bloque 5)
+## 2026-02-24 — Filtro ámbito Modo OP (CRIT Bloque 5) + anti doble envío (CRIT Bloque 6)
 
 - **fix(op):** Modo OP ahora usa visibleCases (filtrado por ámbito efectivo) al renderizar TerrainShell — corrige exposición de casos fuera de alcance (CRIT Bloque 5).
+- **fix(guardrails):** anti doble envío en submitCase usando withBusy (CRIT Bloque 6).
 
 ---
 
