@@ -48,6 +48,14 @@ jobs:
           fi
           ls -la api/node_modules/@prisma/client/package.json
 
+      - name: Debug jest e2e files
+        working-directory: api
+        run: |
+          ls -la test || true
+          cat test/jest-e2e.json || true
+          node -p "require('./package.json').devDependencies.jest"
+          node -p "require('./package.json').devDependencies['ts-jest']"
+
       - name: Run E2E
         working-directory: api
         env:
