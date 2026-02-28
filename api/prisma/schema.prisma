@@ -1,0 +1,111 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ContextType {
+  OPERACION
+  SIMULACION
+}
+
+enum Role {
+  ADMIN_PILOTO
+  DR
+  EQUIPO_REGIONAL
+  NIVEL_CENTRAL_SIM
+}
+
+enum RegionScopeMode {
+  ALL
+  LIST
+}
+
+model Region {
+  id        String   @id
+  name      String
+  createdAt DateTime @default(now())
+
+  simulations Simulation[]
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  memberships Membership[]
+}
+
+model Membership {
+  id               String           @id @default(cuid())
+  userId           String
+  contextType      ContextType
+  contextId        String
+  regionCode       String
+  role             Role
+  regionScopeMode  RegionScopeMode  @default(LIST)
+  regionScope      String[]         @default([])
+  createdAt        DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([contextType, contextId])
+  @@index([userId])
+  @@index([regionCode])
+  @@unique([userId, contextType, contextId, regionCode])
+}
+
+model Simulation {
+  id           String   @id @default(cuid())
+  regionId     String
+  name         String
+  electionYear Int
+  isActive     Boolean  @default(true)
+  createdBy    String
+  createdAt    DateTime @default(now())
+
+  region Region @relation(fields: [regionId], references: [id])
+
+  @@index([regionId])
+}
+
+model Case {
+  id            String      @id @default(cuid())
+  contextType   ContextType
+  contextId     String
+  summary       String
+  status        String
+  criticality   String
+  regionCode    String
+  communeCode   String
+  localCode     String
+  localSnapshot Json?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@index([contextType, contextId])
+  @@index([regionCode, communeCode])
+}
+
+model Event {
+  id          String      @id @default(cuid())
+  caseId      String
+  contextType ContextType
+  contextId   String
+  actorId     String
+  eventType   String
+  payloadJson Json
+  prevHash    String?
+  hash        String
+  createdAt   DateTime    @default(now())
+
+  @@index([caseId])
+  @@index([contextType, contextId])
+}
