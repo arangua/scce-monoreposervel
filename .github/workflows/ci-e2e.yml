@@ -71,6 +71,17 @@ jobs:
           ls -la test/jest-e2e.setup.ts
           cat jest-e2e.json
 
+      - name: Debug paths (api)
+        working-directory: api
+        run: |
+          pwd
+          ls -la
+          ls -la src || true
+          ls -la src/app.module.ts || true
+          find src -maxdepth 3 -type f -name "app.module.*" -print || true
+          node -p "require('fs').existsSync('src/app.module.ts')"
+          cat jest-e2e.json
+
       - name: Run E2E
         working-directory: api
         env:
