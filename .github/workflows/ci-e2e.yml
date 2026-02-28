@@ -38,6 +38,10 @@ jobs:
         run: npm install
 
       - name: Run E2E
+        working-directory: api
         env:
           DATABASE_URL: postgresql://scce:scce@localhost:54329/scce_test?schema=public
-        run: npm --prefix api run prisma:migrate:deploy && npm --prefix api run prisma:generate && npm --prefix api run test:e2e
+        run: |
+          npm run prisma:migrate:deploy
+          npm run prisma:generate
+          npm run test:e2e
