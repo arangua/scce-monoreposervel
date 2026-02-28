@@ -62,6 +62,15 @@ jobs:
           ls -la api/tsconfig.build.json
           cat api/tsconfig.json | head -n 5
 
+      - name: Verify e2e setup file exists (api cwd)
+        working-directory: api
+        run: |
+          pwd
+          ls -la
+          ls -la test
+          ls -la test/jest-e2e.setup.ts
+          cat jest-e2e.json
+
       - name: Run E2E
         working-directory: api
         env:
