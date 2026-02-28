@@ -52,7 +52,7 @@ jobs:
         working-directory: api
         run: |
           ls -la test || true
-          cat test/jest-e2e.json || true
+          cat jest-e2e.json || true
           node -p "require('./package.json').devDependencies.jest"
           node -p "require('./package.json').devDependencies['ts-jest']"
 
