@@ -34,14 +34,19 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Install (workspaces)
+      - name: Install (workspaces, nested)
         run: |
-          npm ci --workspaces --include-workspace-root
+          npm ci --workspaces --include-workspace-root --install-strategy=nested
 
-      - name: Verify prisma client present
+      - name: Ensure prisma client is local to api
+        shell: bash
         run: |
-          npm --workspace api ls @prisma/client
-          node -e "process.chdir('api'); console.log(require.resolve('@prisma/client/package.json'))"
+          set -euxo pipefail
+          if [ ! -f "api/node_modules/@prisma/client/package.json" ]; then
+            echo "api/node_modules/@prisma/client missing -> installing @prisma/client locally in api (deterministic)"
+            npm --prefix api ci || npm --prefix api install
+          fi
+          ls -la api/node_modules/@prisma/client/package.json
 
       - name: Run E2E
         working-directory: api
