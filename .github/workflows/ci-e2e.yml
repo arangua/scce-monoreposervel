@@ -1,0 +1,44 @@
+name: CI E2E
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: scce
+          POSTGRES_PASSWORD: scce
+          POSTGRES_DB: scce_test
+        ports:
+          - 54329:5432
+        options: >-
+          --health-cmd="pg_isready -U scce -d scce_test"
+          --health-interval=2s
+          --health-timeout=2s
+          --health-retries=30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install
+        run: npm ci
+
+      - name: Run E2E
+        env:
+          DATABASE_URL: postgresql://scce:scce@localhost:54329/scce_test?schema=public
+        run: npm --prefix api run prisma:migrate:deploy && npm --prefix api run prisma:generate && npm --prefix api run test:e2e
