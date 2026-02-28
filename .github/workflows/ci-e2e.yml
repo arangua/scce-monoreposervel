@@ -40,6 +40,12 @@ jobs:
           cd api
           npm install
 
+      - name: Debug prisma client presence
+        working-directory: api
+        run: |
+          node -p "require.resolve('@prisma/client/package.json')"
+          npm ls @prisma/client || true
+
       - name: Run E2E
         working-directory: api
         env:
