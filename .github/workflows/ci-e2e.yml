@@ -34,16 +34,14 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Install (workspaces, nested)
+      - name: Install (workspaces)
         run: |
-          npm ci --workspaces --include-workspace-root --install-strategy=nested
+          npm ci --workspaces --include-workspace-root
 
-      - name: Verify @prisma/client present in api node_modules
-        working-directory: api
+      - name: Verify prisma client present
         run: |
-          ls -la node_modules/@prisma/client/package.json
-          node -p "require.resolve('@prisma/client/package.json')"
-          npm run prisma:generate
+          npm --workspace api ls @prisma/client
+          node -e "process.chdir('api'); console.log(require.resolve('@prisma/client/package.json'))"
 
       - name: Run E2E
         working-directory: api
