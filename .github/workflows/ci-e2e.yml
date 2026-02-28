@@ -56,6 +56,12 @@ jobs:
           node -p "require('./package.json').devDependencies.jest"
           node -p "require('./package.json').devDependencies['ts-jest']"
 
+      - name: Verify tsconfig files exist
+        run: |
+          ls -la api/tsconfig.json
+          ls -la api/tsconfig.build.json
+          cat api/tsconfig.json | head -n 5
+
       - name: Run E2E
         working-directory: api
         env:
