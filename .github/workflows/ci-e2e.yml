@@ -34,17 +34,22 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Install (workspaces root)
+      - name: Install (workspaces, nested)
         run: |
-          npm ci --workspaces --include-workspace-root
+          npm ci --workspaces --include-workspace-root --install-strategy=nested
+
+      - name: Verify @prisma/client present in api node_modules
+        working-directory: api
+        run: |
+          ls -la node_modules/@prisma/client/package.json
+          node -p "require.resolve('@prisma/client/package.json')"
+          npm run prisma:generate
 
       - name: Run E2E
-        shell: bash
+        working-directory: api
         env:
           DATABASE_URL: postgresql://scce:scce@localhost:54329/scce_test?schema=public
         run: |
-          set -euxo pipefail
-          npm exec --yes --package=prisma@5.22.0 -- prisma -v
-          npm exec --yes --package=prisma@5.22.0 -- prisma migrate deploy --schema=api/prisma/schema.prisma
-          npm exec --yes --package=prisma@5.22.0 -- prisma generate --schema=api/prisma/schema.prisma
-          npm --workspace api run test:e2e
+          npm run prisma:migrate:deploy
+          npm run prisma:generate
+          npm run test:e2e
