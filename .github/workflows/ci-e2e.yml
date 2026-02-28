@@ -42,6 +42,7 @@ jobs:
         env:
           DATABASE_URL: postgresql://scce:scce@localhost:54329/scce_test?schema=public
         run: |
-          npx prisma migrate deploy --schema=api/prisma/schema.prisma
-          npx prisma generate --schema=api/prisma/schema.prisma
+          npx --yes prisma@5.22.0 -v
+          npx --yes prisma@5.22.0 migrate deploy --schema=api/prisma/schema.prisma
+          npx --yes prisma@5.22.0 generate --schema=api/prisma/schema.prisma
           npm --workspace api run test:e2e
