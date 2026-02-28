@@ -34,23 +34,20 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Install
+      - name: Install (workspaces root)
         run: |
-          npm install
-          cd api
-          npm install
+          npm ci --workspaces --include-workspace-root
 
-      - name: Debug prisma client presence
-        working-directory: api
+      - name: Verify @prisma/client resolvable from api
         run: |
-          node -p "require.resolve('@prisma/client/package.json')"
-          npm ls @prisma/client || true
+          npm --workspace api ls @prisma/client
+          node -e "process.chdir('api'); console.log('resolve:', require.resolve('@prisma/client/package.json'))"
+          npm --workspace api run prisma:generate -- --schema=prisma/schema.prisma
 
       - name: Run E2E
-        working-directory: api
         env:
           DATABASE_URL: postgresql://scce:scce@localhost:54329/scce_test?schema=public
         run: |
-          npm run prisma:migrate:deploy
-          npm run prisma:generate
-          npm run test:e2e
+          npm --workspace api run prisma:migrate:deploy
+          npm --workspace api run prisma:generate
+          npm --workspace api run test:e2e
