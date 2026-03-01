@@ -19,5 +19,20 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "Literal[value=/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/]",
+          message: "No usar colores hardcodeados. Usa THEME.",
+        },
+      ],
+    },
+  },
+  {
+    files: ["src/theme.ts", "src/domain/theme.ts"],
+    rules: {
+      "no-restricted-syntax": "off",
+    },
   },
 ])

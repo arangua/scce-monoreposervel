@@ -1,11 +1,13 @@
 export type ViewKey =
   | "dashboard"
+  | "op_home"
   | "catalog"
   | "audit"
   | "reports"
   | "simulation"
   | "checklist"
   | "config"
+  | "trust"
   | "new_case"
   | "detail";
 
@@ -25,6 +27,16 @@ export const helpByView: Record<ViewKey, HelpBlock> = {
       "Revisa los números principales.",
       "Observa si hay alertas o situaciones pendientes.",
       "Usa las pestañas superiores para ir al módulo que necesites."
+    ]
+  },
+
+  op_home: {
+    title: "Modo Operativo — Inicio",
+    purpose: "Vista de terreno: casos del local asignado y respuestas recibidas.",
+    quickSteps: [
+      "Selecciona un caso de la izquierda para ver detalle.",
+      "Usa + Nuevo incidente para registrar un incidente.",
+      "Usa Volver para regresar a esta pantalla."
     ]
   },
 
@@ -122,6 +134,16 @@ export const helpByView: Record<ViewKey, HelpBlock> = {
       "Revisa el historial y decisiones.",
       "Verifica evidencia y responsables.",
       "Actualiza estado si corresponde."
+    ]
+  },
+
+  trust: {
+    title: "Firma y confianza",
+    purpose: "Ver estado de verificación de autoría, llave local y lista de firmantes confiables.",
+    quickSteps: [
+      "Revisa si la verificación está disponible y si tienes llave configurada.",
+      "Agrega o quita firmantes confiables según necesidad.",
+      "Al importar, un firmante confiable evita tener que escribir CONFIAR."
     ]
   }
 };
