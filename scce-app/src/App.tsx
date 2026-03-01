@@ -1,17 +1,21 @@
-import React, { useState, useMemo, useEffect, useRef } from "react";
+import React, { useState, useMemo, useEffect, useRef, forwardRef, useImperativeHandle, useCallback } from "react";
 import type { CaseItem, InstructionItem, ImpactLevel, ScopeFunctional, LocalCatalog, LocalCatalogEntry, CaseStatus, Criticality, RegionCode, CommuneCode, AuditLogEntry, CaseEventKind, CaseEvent } from "./domain/types";
 import { calcCompleteness } from "./domain/caseMetrics";
 import { findActiveLocal } from "./domain/catalog";
 import { validateCaseSchema } from "./domain/caseValidation";
-import { fmtDate, fmtTime, timeDiff, nowISO, uuidSimple, tsISO } from "./domain/date";
+import { fmtDate, fmtTime, timeDiff, nowISO, uuidSimple, tsISO, isDetectedAtInFuture, nowLocalDatetimeInput } from "./domain/date";
 import { checkLocalDivergence } from "./domain/localDivergence";
 import { SLA_MINUTES, isSlaVencido, type SlaLevel } from "./domain/caseSla";
 import { getRecommendation } from "./domain/recommendation";
 import { recColor } from "./domain/theme";
+import { themeColor } from "./theme";
 import { chainHash } from "./domain/hash";
 import { appendEvent, verifyChain } from "./domain/audit";
 import { migrateLegacyInstructionsInCases } from "./domain/migrations/migrateLegacyInstructions";
 import { HelpDrawer } from "./components/HelpDrawer";
+import { IconButton } from "./components/IconButton";
+import { Badge } from "./ui/Badge";
+import { Tooltip } from "./ui/Tooltip";
 import { helpByView, type ViewKey } from "./helpContent";
 import { UI_TEXT } from "./config/uiTextStandard";
 import { isTerrainMode } from "./domain/auth/visibility";
@@ -29,6 +33,19 @@ import {
   publicKeyFingerprintShort,
 } from "./domain/signingVault";
 import { TerrainShell } from "./ui/terrain/TerrainShell";
+import { apiRequest } from "./domain/apiClient";
+import {
+  getToken,
+  setToken,
+  clearSession,
+  clearActiveMembership,
+  getActiveMembership,
+  setActiveMembership,
+  isCentralFromContext,
+  type ApiUser,
+  type Membership,
+} from "./domain/authSession";
+import { API_BASE_URL } from "./config/runtime";
 
 const APP_VERSION = "1.9";
 const MIN_ELECTION_YEAR = 2026;
@@ -132,6 +149,8 @@ const CONFIG = {
   }
 };
 
+const DEFAULT_REGION = "TRP";
+
 const USERS = [
   {id:"u1",name:"PESE Local",                  username:"pese1",         password:"demo",role:"PESE",               region:"TRP",commune:"IQQ"},
   {id:"u2",name:"Delegado Junta Electoral",     username:"delegado1",     password:"demo",role:"DELEGADO_JE",        region:"TRP",commune:"IQQ"},
@@ -142,7 +161,7 @@ const USERS = [
   {id:"u7",name:"Director Regional",            username:"director",      password:"demo",role:"DIRECTOR_REGIONAL",  region:"TRP"},
   {id:"u8",name:"Usuario Nivel Central",        username:"nivel_central", password:"demo",role:"NIVEL_CENTRAL",      region:null},
 ];
-const ROLE_LABELS = {PESE:"PESE",DELEGADO_JE:"Delegado JE",DR_EVENTUAL:"DR Eventual",REGISTRO_SCCE:"Registro SCCE",JEFE_OPS:"Jefe Ops",ENCARGADO_GASTO:"Encargado Gasto",DIRECTOR_REGIONAL:"Director Regional",NIVEL_CENTRAL:"Nivel Central"} as const;
+const ROLE_LABELS = {PESE:"PESE",DELEGADO_JE:"Delegado JE",DR_EVENTUAL:"DR Eventual",REGISTRO_SCCE:"Registro SCCE",JEFE_OPS:"Jefe Ops",ENCARGADO_GASTO:"Encargado Gasto",DIRECTOR_REGIONAL:"Director Regional",NIVEL_CENTRAL:"Nivel Central",ADMIN_PILOTO:"Admin Piloto",DR:"DR",EQUIPO_REGIONAL:"Equipo Regional",NIVEL_CENTRAL_SIM:"Nivel Central Sim"} as const;
 const POLICIES = {
   PESE:              {create:true, update:false,assign:false,close:false,bypass:false,viewAll:false,comment:true, instruct:false,recepcionar:false,export:false,validateBypass:false,manageCatalog:false},
   DELEGADO_JE:       {create:true, update:false,assign:false,close:false,bypass:false,viewAll:false,comment:true, instruct:false,recepcionar:false,export:false,validateBypass:false,manageCatalog:false},
@@ -152,6 +171,10 @@ const POLICIES = {
   ENCARGADO_GASTO:   {create:false,update:false,assign:false,close:false,bypass:false,viewAll:true, comment:true, instruct:false,recepcionar:false,export:false,validateBypass:false,manageCatalog:false},
   DIRECTOR_REGIONAL: {create:true, update:true, assign:true, close:true, bypass:true, viewAll:true, comment:true, instruct:false,recepcionar:true, export:true, validateBypass:true, manageCatalog:false},
   NIVEL_CENTRAL:     {create:false,update:false,assign:false,close:false,bypass:false,viewAll:true, comment:true, instruct:true, recepcionar:false,export:true, validateBypass:false,manageCatalog:true},
+  ADMIN_PILOTO:      {create:true, update:true, assign:true, close:true, bypass:true, viewAll:true, comment:true, instruct:false,recepcionar:true, export:true, validateBypass:true, manageCatalog:false},
+  DR:                {create:true, update:true, assign:true, close:false,bypass:true, viewAll:true, comment:true, instruct:false,recepcionar:true, export:true, validateBypass:false,manageCatalog:false},
+  EQUIPO_REGIONAL:   {create:true, update:true, assign:false,close:false,bypass:false,viewAll:true, comment:true, instruct:false,recepcionar:false,export:true, validateBypass:false,manageCatalog:false},
+  NIVEL_CENTRAL_SIM: {create:false,update:false,assign:false,close:false,bypass:false,viewAll:true, comment:true, instruct:true, recepcionar:false,export:true, validateBypass:false,manageCatalog:true},
 } as const;
 
 /** Fase 3.6 — detectar si el usuario es Nivel Central (por role en USERS). */
@@ -283,20 +306,54 @@ function calcCriticality(ev: Record<string, number> | null | undefined) {
   return          {criticality:"BAJA",  score:sum,recommendation:"Gestión local. Registrar y monitorear."};
 }
 function critColor(c: Criticality): string {
-  const map = { CRITICA:"#ef4444", ALTA:"#f97316", MEDIA:"#eab308", BAJA:"#22c55e" } as const;
-  return map[c] ?? "#6b7280";
+  const map = { CRITICA:themeColor("danger"), ALTA:themeColor("warning"), MEDIA:themeColor("warningAlt"), BAJA:themeColor("success") } as const;
+  return map[c] ?? themeColor("gray");
 }
 function statusColor(s: CaseStatus): string {
   const map = {
-    "Nuevo":"#6366f1",
-    "Recepcionado por DR":"#a78bfa",
-    "En gestión":"#3b82f6",
-    "Escalado":"#ef4444",
-    "Mitigado":"#f97316",
-    "Resuelto":"#22c55e",
-    "Cerrado":"#6b7280",
+    "Nuevo":themeColor("purple"),
+    "Recepcionado por DR":themeColor("purpleLight"),
+    "En gestión":themeColor("primary"),
+    "Escalado":themeColor("danger"),
+    "Mitigado":themeColor("warning"),
+    "Resuelto":themeColor("success"),
+    "Cerrado":themeColor("gray"),
   } as const;
-  return map[s] ?? "#6b7280";
+  return map[s] ?? themeColor("gray");
+}
+
+type UiStatus =
+  | "Nuevo"
+  | "Recepcionado por DR"
+  | "En gestión"
+  | "Escalado"
+  | "Mitigado"
+  | "Resuelto"
+  | "Cerrado";
+
+const STATUS_MAP: Record<string, UiStatus> = {
+  // backend / legacy
+  OPEN: "Nuevo",
+  NEW: "Nuevo",
+  IN_PROGRESS: "En gestión",
+  ESCALATED: "Escalado",
+  MITIGATED: "Mitigado",
+  RESOLVED: "Resuelto",
+  CLOSED: "Cerrado",
+
+  // ya en español (por si ya existen)
+  "Nuevo": "Nuevo",
+  "Recepcionado por DR": "Recepcionado por DR",
+  "En gestión": "En gestión",
+  "Escalado": "Escalado",
+  "Mitigado": "Mitigado",
+  "Resuelto": "Resuelto",
+  "Cerrado": "Cerrado",
+};
+
+function normalizeStatus(s: unknown): UiStatus | "Otros / Desconocido" {
+  const key = String(s ?? "").trim();
+  return STATUS_MAP[key] ?? "Otros / Desconocido";
 }
 type SeedEventInput = { type: string; at: string; actor: string; role: string; caseId?: string | null; summary: string };
 
@@ -351,19 +408,77 @@ function makeSeedAudit(){
   ]);
 }
 
-// ─── ESTILOS ──────────────────────────────────────────────────────────────────
+// ─── ESTILOS (tema claro profesional) ─────────────────────────────────────────
 const S={
-  app:{fontFamily:"'Segoe UI',system-ui,sans-serif",background:"#0f1117",color:"#e2e8f0",minHeight:"100vh",fontSize:"13px",width:"100%",boxSizing:"border-box" as const},
-  nav:{background:"#1a1d2e",borderBottom:"1px solid #2d3748",padding:"8px 16px",display:"flex",alignItems:"center",gap:"6px",flexWrap:"wrap" as const,minHeight:42},
-  nBtn:(a: boolean)=>({background:a?"#3b82f6":"transparent",color:a?"#fff":"#94a3b8",border:"none",padding:"5px 10px",borderRadius:"4px",cursor:"pointer",fontSize:"12px"}),
-  card:{background:"#1a1d2e",border:"1px solid #2d3748",borderRadius:"6px",padding:"12px"},
+  app:{fontFamily:"'Segoe UI',system-ui,sans-serif",background:themeColor("bgApp"),color:themeColor("textPrimary"),minHeight:"100vh",fontSize:"13px",width:"100%",boxSizing:"border-box" as const},
+  nav:{background:themeColor("bgSurface"),borderBottom:"1px solid #e5e7eb",padding:"8px 16px",display:"flex",alignItems:"center",gap:"6px",flexWrap:"wrap" as const,minHeight:42},
+  nBtn:(a: boolean)=>({background:a?themeColor("primary"):"transparent",color:a?themeColor("white"):themeColor("textSecondary"),border:"none",padding:"5px 10px",borderRadius:"4px",cursor:"pointer",fontSize:"12px"}),
+  card:{background:themeColor("bgSurface"),border:"1px solid #e5e7eb",borderRadius:"6px",padding:"12px"},
   badge:(color: string)=>({background:color+"22",color,border:"1px solid "+color+"44",borderRadius:"3px",padding:"2px 6px",fontSize:"11px",fontWeight:600}),
-  btn:(v="primary")=>({background:{primary:"#3b82f6",success:"#22c55e",danger:"#ef4444",warning:"#f97316",dark:"#2d3748"}[v]||"#3b82f6",color:"#fff",border:"none",padding:"6px 12px",borderRadius:"4px",cursor:"pointer",fontSize:"12px",fontWeight:500}),
-  inp:{background:"#0f1117",border:"1px solid #374151",borderRadius:"4px",padding:"6px 8px",color:"#e2e8f0",fontSize:"13px",width:"100%",boxSizing:"border-box"} as React.CSSProperties,
-  lbl:{display:"block",marginBottom:"3px",color:"#94a3b8",fontSize:"11px",fontWeight:600,textTransform:"uppercase"} as React.CSSProperties,
+  btn:(v="primary")=>({background:{primary:themeColor("primary"),success:themeColor("success"),danger:themeColor("danger"),warning:themeColor("warning"),dark:themeColor("textSecondary")}[v]||themeColor("primary"),color:themeColor("white"),border:"none",padding:"6px 12px",borderRadius:"4px",cursor:"pointer",fontSize:"12px",fontWeight:500}),
+  inp:{background:themeColor("bgSurface"),border:"1px solid #e5e7eb",borderRadius:"4px",padding:"6px 8px",color:themeColor("textPrimary"),fontSize:"13px",width:"100%",boxSizing:"border-box"} as React.CSSProperties,
+  lbl:{display:"block",marginBottom:"3px",color:themeColor("textSecondary"),fontSize:"11px",fontWeight:600,textTransform:"uppercase"} as React.CSSProperties,
   g2:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px"},
   g4:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"8px"},
 };
+
+// Paso 3 (Detalles) como componente estable: evita remount del textarea al tipear (NewCaseForm está definido inline).
+type DetailStepContentRef = { getDetail: () => string };
+type DetailStepContentProps = {
+  initialDetail: string;
+  newCase: CaseItem | null;
+  setNewCase: React.Dispatch<React.SetStateAction<CaseItem | null>>;
+  onConfirm: () => void;
+  onBack: () => void;
+};
+const DetailStepContent = forwardRef<DetailStepContentRef, DetailStepContentProps>(function DetailStepContent(
+  { initialDetail, newCase, setNewCase, onConfirm, onBack },
+  ref
+) {
+  const [detail, setDetail] = useState(initialDetail);
+  useEffect(() => {
+    setDetail(initialDetail);
+  }, [initialDetail]);
+  useImperativeHandle(ref, () => ({
+    getDetail: () => detail,
+  }), [detail]);
+  return (
+    <div style={S.card}>
+      <div style={{ color: themeColor("mutedAlt"), fontSize: "11px", fontWeight: 600, marginBottom: 10 }}>PASO 3 — DETALLES</div>
+      <div style={{ marginBottom: 8 }}>
+        <label style={S.lbl}>Detalle</label>
+        <textarea
+          style={{ ...S.inp, height: 70, resize: "vertical" }}
+          placeholder="Describe el incidente..."
+          value={detail}
+          onChange={(e) => setDetail(e.target.value)}
+        />
+      </div>
+      <div>
+        <label style={S.lbl}>Evidencia (Enter para agregar)</label>
+        <input
+          style={S.inp}
+          placeholder="URL o descripción"
+          onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+            const target = e.currentTarget;
+            if (e.key === "Enter" && target.value) {
+              const val = target.value;
+              setNewCase((p) => (p ? { ...p, detail, evidence: [...(Array.isArray(p.evidence) ? p.evidence : []), val] } : p));
+              target.value = "";
+            }
+          }}
+        />
+        {(newCase?.evidence || []).map((ev, i) => (
+          <div key={i} style={{ fontSize: "11px", color: themeColor("mutedAlt"), marginTop: 2 }}>📎 {ev}</div>
+        ))}
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10 }}>
+        <button style={S.btn("dark")} type="button" onClick={onBack}>← Atrás</button>
+        <button style={S.btn("primary")} type="button" onClick={onConfirm}>Confirmar →</button>
+      </div>
+    </div>
+  );
+});
 
 // ─── COMPONENTE PRINCIPAL ─────────────────────────────────────────────────────
 export default function App(){
@@ -372,7 +487,54 @@ export default function App(){
 
   const [electionConfig,setElectionConfig]=useState({name:`Elecciones Generales ${defaultYear}`,date:`${defaultYear}-11-15`,year:defaultYear});
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [activeRegion,setActiveRegion]=useState("TRP");
+
+  // Auth real (API)
+  const [authToken, setAuthToken] = useState<string | null>(() => getToken());
+  const [apiUser, setApiUser] = useState<ApiUser | null>(null);
+  const [memberships, setMemberships] = useState<Membership[]>([]);
+  const [activeMembership, setActiveMembershipState] = useState<Membership | null>(() => getActiveMembership());
+
+  const [activeRegion,setActiveRegion]=useState(DEFAULT_REGION);
+  const [membershipScopes, setMembershipScopes] = useState<Record<
+    string,
+    { regionScopeMode: "ALL" | "LIST"; regionScope: string[]; regionCode?: string | null }
+  >>({});
+  const justBecameCentralRef = useRef(false);
+  const effectiveMembership = getActiveMembership();
+  const isCentral = isCentralFromContext(effectiveMembership, currentUser?.role);
+  const regionOptions = useMemo(() => {
+    const entriesAll = Object.entries(CONFIG.regions).map(([code, d]) => ({
+      code,
+      name: (d as { name?: string }).name ?? code,
+    }));
+
+    if (isCentral) {
+      return [{ code: "ALL", name: "Todas las regiones" }, ...entriesAll];
+    }
+
+    const mid = effectiveMembership?.id;
+
+    const mode =
+      effectiveMembership?.regionScopeMode ??
+      (mid ? membershipScopes[mid]?.regionScopeMode : undefined);
+
+    const scope =
+      effectiveMembership?.regionScope ??
+      (mid ? membershipScopes[mid]?.regionScope : undefined);
+
+    if (mode === "LIST" && Array.isArray(scope) && scope.length) {
+      const allowed = new Set(scope);
+      return entriesAll.filter((e) => allowed.has(e.code));
+    }
+
+    const rc =
+      effectiveMembership?.regionCode ??
+      (mid ? membershipScopes[mid]?.regionCode : undefined);
+
+    if (rc) return entriesAll.filter((e) => e.code === rc);
+
+    return entriesAll;
+  }, [isCentral, effectiveMembership, membershipScopes]);
   const [localCatalog, setLocalCatalog] = useState<LocalCatalog>(() => buildCatalogSeed());
 
   const [cases, setCases] = useState<CaseItem[]>(() => {
@@ -578,18 +740,23 @@ export default function App(){
   function uiModeStorageKey(userId: string) {
     return `SCCE_UI_MODE:${userId}`;
   }
-  function defaultUiModeForUser(u: User | null): UiMode {
+  const defaultUiModeForUser = useCallback((u: User | null): UiMode => {
     return isTerrainMode(u) ? "OP" : "FULL";
-  }
+  }, []);
   const [uiMode, setUiMode] = useState<UiMode>("FULL");
   const [crisisMode,setCrisisMode]=useState(false);
-  const [filterState,setFilterState]=useState({criticality:"",status:"",commune:"",search:""});
+  const [filterState,setFilterState]=useState({criticality:"",status:"",commune:"",search:"",region:""});
+  const regionEffective = isCentral
+    ? (filterState.region || activeRegion || "ALL")
+    : (effectiveMembership?.regionCode || "");
   const [notification, setNotification] = useState<Notification>(null);
   const [simCases,setSimCases]=useState<CaseItem[]>([]);
   const [simReport, setSimReport] = useState<SimReport>(null);
   const [simSurvey,setSimSurvey]=useState({claridad:0,respaldo:0,submitted:false});
-  const [loginForm,setLoginForm]=useState({username:"director",password:"demo"});
-  const [loginErr,setLoginErr]=useState("");
+  const [loginForm, setLoginForm] = useState({ email: "admin.piloto@scce.local", password: "SCCE-Piloto-2026!" });
+  const [loginErr, setLoginErr] = useState<string>("");
+  const [ctxErr, setCtxErr] = useState<string>("");
+  const [authBusy, setAuthBusy] = useState(false);
   const [newCase, setNewCase] = useState<CaseItem | null>(null);
   const [evalForm,setEvalForm]=useState({continuidad:0,integridad:0,seguridad:0,exposicion:0,capacidadLocal:0});
   const [bypassForm,setBypassForm]=useState<BypassFormState>({active:false,motivo:"",cause:"",confirmed:false});
@@ -640,7 +807,7 @@ export default function App(){
     } else {
       setUiMode(defaultUiModeForUser(currentUser));
     }
-  }, [currentUser]);
+  }, [currentUser, defaultUiModeForUser]);
 
   function setUiModeAndPersist(next: UiMode) {
     setUiMode(next);
@@ -694,31 +861,198 @@ export default function App(){
 
   const notify=(msg: string, type="info")=>{setNotification({msg,type});setTimeout(()=>setNotification(null),4000);};
 
+  async function bootstrapSession(token: string) {
+    const meRes = await apiRequest<{ user: ApiUser; memberships?: Array<{ id: string; regionCode?: string | null; regionScopeMode?: string; regionScope?: string[] }> }>("/me", { token });
+    console.log("ME (crudo):", meRes);
+    console.log(
+      "ME memberships resumido:",
+      (meRes?.data?.memberships || []).map((m: { id: string; regionCode?: string | null; regionScopeMode?: string; regionScope?: string[] }) => ({
+        id: m.id,
+        regionCode: m.regionCode,
+        regionScopeMode: m.regionScopeMode,
+        regionScope: m.regionScope,
+      }))
+    );
+    if (!meRes.ok) {
+      clearSession();
+      setAuthToken(null);
+      setApiUser(null);
+      setMemberships([]);
+      setActiveMembershipState(null);
+      setCurrentUser(null);
+      setLoginErr("Sesión inválida o expirada. Inicia sesión nuevamente.");
+      return;
+    }
+    setApiUser(meRes.data.user);
+    if (meRes.data.memberships?.length) {
+      const map: Record<string, { regionScopeMode: "ALL" | "LIST"; regionScope: string[]; regionCode?: string | null }> = {};
+      for (const m of meRes.data.memberships) {
+        map[m.id] = {
+          regionScopeMode: (m.regionScopeMode === "ALL" ? "ALL" : "LIST") as "ALL" | "LIST",
+          regionScope: Array.isArray(m.regionScope) ? m.regionScope : [],
+          regionCode: m.regionCode ?? null,
+        };
+      }
+      setMembershipScopes(map);
+    }
+
+    const ctxRes = await apiRequest<{ memberships: Membership[] }>("/contexts", { token });
+    if (!ctxRes.ok) {
+      setCtxErr(ctxRes.error || "No se pudo cargar contextos.");
+      setMemberships([]);
+      return;
+    }
+    setCtxErr("");
+    setMemberships(ctxRes.data.memberships || []);
+
+    if (!getActiveMembership()) {
+      const list = ctxRes.data.memberships || [];
+
+      // 1) Si existe ADM, preferirlo como activo por defecto (modo admin)
+      const adm = list.find((m) => m.regionCode === "ADM");
+      const pick = adm ?? (list.length === 1 ? list[0] : list[0] ?? null);
+
+      if (pick) {
+        setActiveMembership(pick);
+        setActiveMembershipState(pick);
+      }
+    }
+
+    // DR hardening: cargar casos reales desde API (fallback seed si falla)
+    const effectiveMembership = getActiveMembership();
+    if (token && effectiveMembership) {
+      const headers: Record<string, string> = {};
+      if (effectiveMembership.id) headers["x-scce-membership-id"] = effectiveMembership.id;
+      if (effectiveMembership.contextType && effectiveMembership.contextId) {
+        headers["x-scce-context-type"] = effectiveMembership.contextType;
+        headers["x-scce-context-id"] = effectiveMembership.contextId;
+      }
+      const res = await apiRequest<unknown>("/cases", {
+        token,
+        method: "GET",
+        headers: Object.keys(headers).length ? headers : undefined,
+      });
+
+      // Fallback seed: si falla, NO reemplazamos cases
+      if (res.ok && Array.isArray(res.data)) {
+        setCases(res.data as CaseItem[]);
+      }
+    }
+  }
+
+  useEffect(() => {
+    if (!authToken) return;
+    if (apiUser && memberships.length) return;
+    bootstrapSession(authToken);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authToken]);
+
+  useEffect(() => {
+    if (!apiUser || !activeMembership) return;
+    const u: User = {
+      id: apiUser.id,
+      username: apiUser.email,
+      name: apiUser.email,
+      role: activeMembership.role,
+      region: null,
+      commune: undefined,
+      password: "",
+    };
+    setCurrentUser(u);
+  }, [apiUser, activeMembership]);
+
+  // Por defecto, usuario central ve "Todas las regiones" (solo al volverse central)
+  useEffect(() => {
+    if (isCentral && !justBecameCentralRef.current) {
+      justBecameCentralRef.current = true;
+      setActiveRegion("ALL");
+    }
+    if (!isCentral) {
+      justBecameCentralRef.current = false;
+      if (activeRegion === "ALL") setActiveRegion(DEFAULT_REGION);
+    }
+  }, [isCentral, activeRegion]);
+
+  // Enforce: si DR tiene activeRegion fuera de su scope, corregir al primer permitido
+  useEffect(() => {
+    if (isCentral) return;
+    const mid = effectiveMembership?.id;
+    if (!mid) return;
+
+    const scope = membershipScopes[mid];
+    if (!scope || scope.regionScopeMode !== "LIST") return;
+
+    const allowed = scope.regionScope || [];
+    if (!allowed.length) return;
+
+    if (!allowed.includes(activeRegion)) {
+      setActiveRegion(allowed[0]);
+      setFilterState((p) => ({ ...p, commune: "" }));
+    }
+  }, [isCentral, effectiveMembership?.id, membershipScopes, activeRegion]);
+
+  useEffect(() => {
+    // Para DR (no central): el filtro región debe quedar amarrado a su región efectiva
+    if (!isCentral && activeRegion && activeRegion !== "ALL") {
+      setFilterState((prev) => {
+        // si ya está correcto, no hace nada
+        if (prev.region === activeRegion) return prev;
+        // al cambiar región, resetea comuna para evitar cruces inválidos
+        return { ...prev, region: activeRegion, commune: "" };
+      });
+    }
+  }, [isCentral, activeRegion]);
+
   function doReset(){
     _localSeq=0;
     const cat=buildCatalogSeed();
     const y=Math.max(new Date().getFullYear(),MIN_ELECTION_YEAR);
+    clearSession();
+    setAuthToken(null);
+    setApiUser(null);
+    setMemberships([]);
+    setActiveMembershipState(null);
     setLocalCatalog(cat);
     setCases(makeSeedCases(cat));
     setAuditLog(makeSeedAudit());
     setCurrentUser(null);setView("dashboard");setSelectedCase(null);
     setCrisisMode(false);setSimCases([]);setSimReport(null);
     setSimSurvey({claridad:0,respaldo:0,submitted:false});
-    setLoginForm({username:"director",password:"demo"});
+    setLoginForm({ email: "admin.piloto@scce.local", password: "SCCE-Piloto-2026!" });
+    setLoginErr("");
+    setCtxErr("");
     setElectionConfig({name:`Elecciones Generales ${y}`,date:`${y}-11-15`,year:y});
   }
 
-  function doLogin(){
-    const u=USERS.find(u=>u.username===loginForm.username&&u.password===loginForm.password);
-    if(!u){setLoginErr("Usuario o contraseña incorrectos");return;}
-    setCurrentUser(u as User);
-    if(u.region)setActiveRegion(u.region);
-    setAuditLog(prev=>appendEvent(prev,"LOGIN",u.id,u.role,null,"Inicio de sesión"));
+  async function doLogin() {
     setLoginErr("");
+    setCtxErr("");
+    setAuthBusy(true);
+    try {
+      const res = await apiRequest<{ token: string }>("/auth/login", {
+        method: "POST",
+        body: { email: loginForm.email, password: loginForm.password },
+      });
+
+      if (!res.ok) {
+        setLoginErr(res.error || "No se pudo iniciar sesión.");
+        return;
+      }
+
+      const token = res.data.token;
+      setToken(token);
+      setAuthToken(token);
+
+      await bootstrapSession(token);
+
+      setAuditLog((prev) => appendEvent(prev, "LOGIN", "api", "API", null, "Inicio de sesión (API real)"));
+    } finally {
+      setAuthBusy(false);
+    }
   }
 
   function nowLocalInput() {
-    return nowISO().slice(0, 16);
+    return nowLocalDatetimeInput();
   }
 
   function startNewCase(){
@@ -726,7 +1060,7 @@ export default function App(){
     const fixedCommune = assignedCommuneEffective || "";
     const fixedLocal = assignedLocal?.nombre ?? "";
     setNewCase({
-      region: currentUser.region || activeRegion,
+      region: currentUser.region || (activeRegion === "ALL" ? DEFAULT_REGION : activeRegion),
       commune: fixedCommune,
       local: fixedLocal,
       origin: {
@@ -746,7 +1080,7 @@ export default function App(){
     setStep(1);setView("new_case");
   }
 
-  function submitCase(){
+  async function submitCase(){
     if (!currentUser || !newCase) return;
 
     // 0) Validación base existente (schema)
@@ -785,13 +1119,11 @@ export default function App(){
     if (!detectedAt) {
       return notify("⚠️ Falta la hora de detección del incidente.", "error");
     }
-    const detMs = new Date(detectedAt).getTime();
-    const nowMs = Date.now();
-    if (!Number.isFinite(detMs)) {
+    if (!Number.isFinite(new Date(detectedAt).getTime())) {
       return notify("⚠️ Hora de detección inválida.", "error");
     }
-    if (detMs > nowMs + 5000) {
-      return notify("⚠️ La hora de detección no puede estar en el futuro.", "error");
+    if (isDetectedAtInFuture(detectedAt)) {
+      return notify("⚠️ La hora de detección no puede estar en el futuro (se permite hasta 5 min por desfase de reloj).", "error");
     }
 
     // 4) Local existe y pertenece a la comuna/región seleccionada
@@ -873,6 +1205,63 @@ export default function App(){
     };
 
     c.completeness = calcCompleteness(c as CaseItem);
+
+    const payloadForApi = {
+      summary: newCase.summary,
+      status: c.status,
+      criticality: result.criticality,
+      regionCode: activeRegion === "ALL" ? newCase.region : activeRegion,
+      communeCode: newCase.commune,
+      localCode: newCase.local,
+      localSnapshot: localSnapshot ?? undefined,
+    };
+
+    const token = authToken;
+    const ctx = getActiveMembership();
+    if (token && ctx) {
+      const headers: Record<string, string> = {};
+      if (ctx.id) headers["x-scce-membership-id"] = ctx.id;
+      if (ctx.contextType && ctx.contextId) {
+        headers["x-scce-context-type"] = ctx.contextType;
+        headers["x-scce-context-id"] = ctx.contextId;
+      }
+      const res = await apiRequest<{ id: string; regionCode: string; communeCode: string; localCode: string; localSnapshot?: unknown; status: string; createdAt: string; updatedAt: string }>("/cases", {
+        method: "POST",
+        token,
+        body: payloadForApi,
+        headers: Object.keys(headers).length ? headers : undefined,
+      });
+      if (res.ok) {
+        const apiCase = {
+          ...c,
+          id: res.data.id,
+          region: res.data.regionCode,
+          commune: res.data.communeCode,
+          local: res.data.localCode,
+          localSnapshot: res.data.localSnapshot ?? localSnapshot,
+          status: res.data.status,
+          createdAt: res.data.createdAt,
+          updatedAt: res.data.updatedAt,
+        } as CaseItem;
+        apiCase.completeness = calcCompleteness(apiCase);
+        setCases((prev) => [apiCase, ...prev]);
+        setAuditLog((prev) => {
+          let log = appendEvent(prev, "CASE_CREATED", currentUser.id, currentUser.role, res.data.id, `Caso: ${c.summary.slice(0, 60)}`);
+          if (bypassForm.active) log = appendEvent(log, "BYPASS_USED", currentUser.id, currentUser.role, res.data.id, `Bypass: ${bypassForm.motivo}`);
+          if (bypassFlagged) log = appendEvent(log, "BYPASS_FLAGGED", currentUser.id, currentUser.role, res.data.id, UI_TEXT.errors.excepcionRequiereValidacion);
+          return log;
+        });
+        notify(
+          `Caso ${res.data.id} — ${result.criticality}${bypassFlagged ? " ⚠️ " + UI_TEXT.states.flagged : ""}`,
+          result.criticality === "CRITICA" ? "error" : "success"
+        );
+        setView("dashboard");
+        setNewCase(null);
+        return;
+      }
+      notify(res.error || "Error al crear caso en el servidor.", "error");
+      return;
+    }
 
     setCases((prev) => [c as CaseItem, ...prev]);
 
@@ -1423,7 +1812,19 @@ export default function App(){
       if (cid !== assignedLocalIdEffective) return false;
     }
 
-    if (currentUser?.role !== "NIVEL_CENTRAL" && c.region !== activeRegion) return false;
+    // filtro por región (si el usuario eligió una región, o comuna sin región → usar activeRegion)
+    const regionToFilter = filterState.region || (isCentral && filterState.commune && activeRegion ? activeRegion : null);
+    if (regionToFilter) {
+      const caseRegion =
+        (c as { region?: string; regionCode?: string }).regionCode ??
+        (c as { region?: string; regionCode?: string }).region ??
+        null;
+
+      // si el caso no tiene región, NO debe pasar el filtro
+      if (!caseRegion) return false;
+
+      if (caseRegion !== regionToFilter) return false;
+    }
 
     if (!isFixedLocalRole(currentUser)) {
       if (!canDo("viewAll", currentUser, c)) {
@@ -1432,7 +1833,11 @@ export default function App(){
     }
 
     if (filterState.criticality && c.criticality !== filterState.criticality) return false;
-    if (filterState.status && c.status !== filterState.status) return false;
+    if (filterState.status) {
+      const cs = normalizeStatus(c.status);
+      const fs = normalizeStatus(filterState.status);
+      if (cs !== fs) return false;
+    }
     if (filterState.commune && c.commune !== filterState.commune) return false;
 
     if (filterState.search) {
@@ -1442,56 +1847,109 @@ export default function App(){
     }
 
     return true;
-  }), [cases, currentUser, activeRegion, filterState, fixedLocalRole, assignedLocalIdEffective, localCatalogById]);
+  }), [cases, currentUser, activeRegion, filterState, fixedLocalRole, assignedLocalIdEffective, localCatalogById, isCentral]);
 
   const metrics=useMemo(()=>({
     total:visibleCases.length,
     critica:visibleCases.filter(c=>c.criticality==="CRITICA").length,
     alta:visibleCases.filter(c=>c.criticality==="ALTA").length,
-    open:visibleCases.filter(c=>!["Resuelto","Cerrado"].includes(c.status)).length,
+    open:visibleCases.filter(c=>!["Resuelto","Cerrado"].includes(normalizeStatus(c.status))).length,
     avgComp:visibleCases.length?Math.round(visibleCases.reduce((s,c)=>s+(c.completeness ?? 0),0)/visibleCases.length):0,
     flagged:visibleCases.filter(c=>c.bypassFlagged&&!c.bypassValidated).length,
   }),[visibleCases]);
 
   // ─── SUB-COMPONENTS ───────────────────────────────────────────────────────
-  const SlaBadge=({c}:{c:CaseItem})=>isSlaVencido(c)?<span style={{...S.badge("#ef4444"),fontSize:"9px"}}>SLA VENCIDO</span>:null;
+  const SlaBadge = ({ c }: { c: CaseItem }) =>
+    isSlaVencido(c) ? (
+      <Badge style={{ ...S.badge(themeColor("danger")) }} size="xs">
+        SLA VENCIDO
+      </Badge>
+    ) : null;
 
-  const RecBadge=({c,variant="FULL"}:{c:CaseItem;variant?:"FULL"|"OP"})=>{
-    const rec=getRecommendation(c,variant);
-    const showTip=variant==="FULL";
-    return(
-      <span style={{position:"relative",display:"inline-flex",alignItems:"center"}} className="tipWrap">
-        <span style={{...S.badge(recColor(rec.level as RecLevel)),fontSize:"9px",cursor:showTip?"help":"default"}}>{rec.icon} {rec.label}</span>
-        {showTip&&(
-        <span className="tip" style={{position:"absolute",top:"125%",left:0,background:"#0b1220",color:"#e2e8f0",border:"1px solid #334155",borderRadius:"8px",padding:"10px 12px",width:"220px",fontSize:"11px",lineHeight:1.4,boxShadow:"0 10px 28px rgba(0,0,0,.45)",zIndex:999,display:"none"}}>
-          <div style={{fontWeight:800,marginBottom:4,color:"#fff"}}>{rec.text}</div>
-          <div style={{color:"#94a3b8"}}>{rec.reason}</div>
-        </span>
-        )}
-      </span>
+  const RecBadge = ({
+    c,
+    variant = "FULL",
+  }: {
+    c: CaseItem;
+    variant?: "FULL" | "OP";
+  }) => {
+    const rec = getRecommendation(c, variant);
+    const showTip = variant === "FULL";
+
+    const badgeEl = (
+      <Badge
+        style={{
+          ...S.badge(recColor(rec.level as RecLevel)),
+          cursor: showTip ? "help" : "default",
+        }}
+        size="xs"
+      >
+        {rec.icon} {rec.label}
+      </Badge>
+    );
+
+    if (!showTip) return badgeEl;
+
+    return (
+      <Tooltip
+        placement="bottom-start"
+        maxWidth={280}
+        panelStyle={{
+          background: themeColor("bgSurface"),
+          color: themeColor("textPrimary"),
+          border: "1px solid #e5e7eb",
+        }}
+        content={
+          <div>
+            <div style={{ fontWeight: 800, marginBottom: 4, color: themeColor("white") }}>
+              {rec.text}
+            </div>
+            <div style={{ color: themeColor("mutedAlt") }}>{rec.reason}</div>
+          </div>
+        }
+      >
+        {badgeEl}
+      </Tooltip>
     );
   };
 
-  const DivBadge=({c}:{c:CaseItem})=>{
-    const div=checkLocalDivergence(c,localCatalog);
-    if(!div)return null;
-    return(
-      <span style={{position:"relative",display:"inline-flex",alignItems:"center"}} className="tipWrap">
-        <span style={{...S.badge("#f97316"),fontSize:"9px",cursor:"help"}}>⚡ CAT</span>
-        <span className="tip" style={{position:"absolute",top:"125%",left:0,background:"#0b1220",color:"#e2e8f0",border:"1px solid #f9731644",borderRadius:"8px",padding:"10px 12px",width:"240px",fontSize:"11px",lineHeight:1.4,boxShadow:"0 10px 28px rgba(0,0,0,.45)",zIndex:999,display:"none"}}>
-          <div style={{fontWeight:800,marginBottom:4,color:"#f97316"}}>⚡ Divergencia de catálogo</div>
-          <div style={{color:"#94a3b8"}}>{div.msg}</div>
-          <div style={{color:"#64748b",marginTop:4,fontSize:"10px"}}>El caso es válido. Revisar estado operacional del local.</div>
-        </span>
-      </span>
+  const DivBadge = ({ c }: { c: CaseItem }) => {
+    const div = checkLocalDivergence(c, localCatalog);
+    if (!div) return null;
+
+    return (
+      <Tooltip
+        placement="bottom-start"
+        maxWidth={300}
+        panelStyle={{
+          background: themeColor("orangeBlock"),
+          color: themeColor("textPrimary"),
+          border: "1px solid #f9731644",
+        }}
+        content={
+          <div>
+            <div style={{ fontWeight: 800, marginBottom: 4, color: themeColor("warning") }}>
+              ⚡ Divergencia de catálogo
+            </div>
+            <div style={{ color: themeColor("mutedAlt") }}>{div.msg}</div>
+            <div style={{ color: themeColor("muted"), marginTop: 4, fontSize: "10px" }}>
+              El caso es válido. Revisar estado operacional del local.
+            </div>
+          </div>
+        }
+      >
+        <Badge style={{ ...S.badge(themeColor("warning")), cursor: "help" }} size="xs">
+          ⚡ CAT
+        </Badge>
+      </Tooltip>
     );
   };
 
   const ClosedOverlay=()=>(
     <div style={{position:"absolute",inset:0,background:"rgba(15,17,23,.82)",zIndex:50,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:"6px"}}>
-      <div style={{background:"#1a1d2e",border:"1px solid #374151",borderRadius:"6px",padding:"14px 24px",textAlign:"center"}}>
-        <div style={{fontWeight:700,color:"#94a3b8"}}>🔒 REGISTRO CERRADO</div>
-        <div style={{fontSize:"11px",color:"#475569",marginTop:3}}>Solo lectura</div>
+      <div style={{background:themeColor("bgSurface"),border:"1px solid #e5e7eb",borderRadius:"6px",padding:"14px 24px",textAlign:"center"}}>
+        <div style={{fontWeight:700,color:themeColor("mutedAlt")}}>🔒 REGISTRO CERRADO</div>
+        <div style={{fontSize:"11px",color:themeColor("mutedDark"),marginTop:3}}>Solo lectura</div>
       </div>
     </div>
   );
@@ -1500,25 +1958,34 @@ export default function App(){
     const div=checkLocalDivergence(c,localCatalog);
     return(
       <div style={{...S.card,cursor:"pointer",borderLeft:`3px solid ${critColor(c.criticality)}`,marginBottom:6,position:"relative"}} onClick={onClick}>
-        {div&&<div style={{position:"absolute",top:0,right:0,width:3,bottom:0,background:"#f97316",borderRadius:"0 6px 6px 0"}}/>}
+        {div&&<div style={{position:"absolute",top:0,right:0,width:3,bottom:0,background:themeColor("warning"),borderRadius:"0 6px 6px 0"}}/>}
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3,flexWrap:"wrap",gap:4}}>
-          <span style={{fontSize:"11px",color:"#64748b",fontFamily:"monospace"}}>{c.id}</span>
+          <span style={{fontSize:"11px",color:themeColor("muted"),fontFamily:"monospace"}}>{c.id}</span>
+          <span style={{ opacity: 0.8, marginLeft: 8, fontSize: "11px", color: themeColor("muted") }}>
+            Región: {c.region ?? (c as { regionCode?: string }).regionCode ?? "—"}
+          </span>
           <div style={{display:"flex",gap:4,alignItems:"center",flexWrap:"wrap"}}>
-            {c.bypassFlagged&&!c.bypassValidated&&<span style={{...S.badge("#ef4444"),fontSize:"9px"}}>⚠️ {UI_TEXT.states.modoUrgente}</span>}
-            {c.isSim&&<span style={{...S.badge("#6366f1"),fontSize:"9px"}}>SIM</span>}
+            {c.bypassFlagged&&!c.bypassValidated&&(
+              <Badge style={{...S.badge(themeColor("danger")),fontSize:"9px"}} size="xs">⚠️ {UI_TEXT.states.modoUrgente}</Badge>
+            )}
+            {c.isSim&&(
+              <Badge style={{...S.badge(themeColor("purple")),fontSize:"9px"}} size="xs">SIM</Badge>
+            )}
             <SlaBadge c={c}/><RecBadge c={c}/><DivBadge c={c}/>
-            <span style={S.badge(critColor(c.criticality))}>{c.criticality}</span>
-            <span style={S.badge(statusColor(c.status))}>{c.status}</span>
+            <Badge style={S.badge(critColor(c.criticality))} size="sm">{c.criticality}</Badge>
+            <Badge style={S.badge(statusColor(normalizeStatus(c.status) as CaseStatus))} size="sm">
+              {normalizeStatus(c.status) === "Otros / Desconocido" ? String(c.status) : normalizeStatus(c.status)}
+            </Badge>
           </div>
         </div>
         <div style={{fontWeight:600,marginBottom:4}}>{c.summary}</div>
         <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
-          <span style={{fontSize:"10px",background:"#1e2d3d",color:"#60a5fa",border:"1px solid #1d4ed844",borderRadius:"3px",padding:"1px 7px",fontWeight:600}}>🏫 {c.local||"—"}</span>
-          <span style={{fontSize:"10px",color:"#475569"}}>{(CONFIG.regions as Record<string,{communes?:Record<string,{name?:string}>}>)[c.region]?.communes?.[c.commune]?.name||c.commune}</span>
+          <span style={{fontSize:"10px",background:themeColor("infoBg"),color:themeColor("infoText"),border:"1px solid #93c5fd",borderRadius:"3px",padding:"1px 7px",fontWeight:600}}>🏫 {c.local||"—"}</span>
+          <span style={{fontSize:"10px",color:themeColor("mutedDark")}}>{(CONFIG.regions as Record<string,{communes?:Record<string,{name?:string}>}>)[c.region]?.communes?.[c.commune]?.name||c.commune}</span>
         </div>
-        <div style={{display:"flex",gap:10,color:"#64748b",fontSize:"11px",flexWrap:"wrap",alignItems:"center"}}>
+        <div style={{display:"flex",gap:10,color:themeColor("muted"),fontSize:"11px",flexWrap:"wrap",alignItems:"center"}}>
           <span>🕐 {fmtDate(c.createdAt)}</span>
-          {(()=>{const comp=c.completeness??0;return <span style={{color:comp>=80?"#22c55e":comp>=50?"#eab308":"#ef4444"}}>✓ {comp}%</span>;})()}
+          {(()=>{const comp=c.completeness??0;return <span style={{color:comp>=80?themeColor("success"):comp>=50?themeColor("warningAlt"):themeColor("danger")}}>✓ {comp}%</span>;})()}
           {canDo("recepcionar",currentUser,c)&&c.status==="Nuevo"&&!c.bypass&&(
             <button style={{...S.btn("primary"),fontSize:"10px",padding:"1px 8px"}} onClick={e=>{e.stopPropagation();recepcionar(c.id);}}>Recepcionar</button>
           )}
@@ -1527,75 +1994,208 @@ export default function App(){
     );
   };
 
-  // ─── LOGIN ────────────────────────────────────────────────────────────────
-  if(!currentUser){
-    return(
-      <div style={{...S.app,display:"flex",alignItems:"center",justifyContent:"center"}}>
+  // ─── GATE A: LOGIN ───────────────────────────────────────────────────────
+  if (!authToken) {
+    return (
+      <div style={{ ...S.app, display: "flex", alignItems: "center", justifyContent: "center" }}>
         <style>{`.tipWrap:hover .tip{display:block!important}`}</style>
-        <div style={{...S.card,width:340}}>
-          <div style={{textAlign:"center",marginBottom:16}}>
-            <div style={{fontSize:"24px",fontWeight:800,color:"#3b82f6",letterSpacing:1}}>SCCE</div>
-            <div style={{color:"#475569",fontSize:"12px"}}>Sistema de Comunicación de Contingencias Electorales</div>
-            <div style={{color:"#374151",fontSize:"10px",marginTop:2}}>v{APP_VERSION} · SERVEL Chile</div>
+
+        <div style={{ ...S.card, width: 360 }}>
+          <div style={{ textAlign: "center", marginBottom: 16 }}>
+            <div style={{ fontSize: "24px", fontWeight: 800, color: themeColor("primary"), letterSpacing: 1 }}>SCCE</div>
+            <div style={{ color: themeColor("mutedDark"), fontSize: "12px" }}>Sistema de Comunicación de Contingencias Electorales</div>
+            <div style={{ color: themeColor("mutedDarker"), fontSize: "10px", marginTop: 2 }}>v{APP_VERSION} · SERVEL Chile</div>
+            <div style={{ color: themeColor("muted"), fontSize: "10px", marginTop: 6 }}>
+              API: <span style={{ fontFamily: "monospace" }}>{API_BASE_URL}</span>
+            </div>
           </div>
-          <div style={{marginBottom:8}}>
-            <label style={S.lbl}>Usuario</label>
-            <input style={S.inp} value={loginForm.username} onChange={e=>setLoginForm(p=>({...p,username:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&doLogin()}/>
+
+          <div style={{ marginBottom: 8 }}>
+            <label style={S.lbl}>Email</label>
+            <input
+              style={S.inp}
+              value={loginForm.email}
+              onChange={e => setLoginForm(p => ({ ...p, email: e.target.value }))}
+              onKeyDown={e => e.key === "Enter" && !authBusy && doLogin()}
+            />
           </div>
-          <div style={{marginBottom:12}}>
+
+          <div style={{ marginBottom: 12 }}>
             <label style={S.lbl}>Contraseña</label>
-            <input style={S.inp} type="password" value={loginForm.password} onChange={e=>setLoginForm(p=>({...p,password:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&doLogin()}/>
+            <input
+              style={S.inp}
+              type="password"
+              value={loginForm.password}
+              onChange={e => setLoginForm(p => ({ ...p, password: e.target.value }))}
+              onKeyDown={e => e.key === "Enter" && !authBusy && doLogin()}
+            />
           </div>
-          {loginErr&&<div style={{color:"#ef4444",fontSize:"11px",marginBottom:8}}>{loginErr}</div>}
-          <button style={{...S.btn("primary"),width:"100%",padding:"8px"}} onClick={doLogin}>Ingresar</button>
-          <div style={{marginTop:12,borderTop:"1px solid #2d3748",paddingTop:10}}>
-            <div style={{color:"#475569",fontSize:"10px",marginBottom:4}}>Usuarios demo (password: demo):</div>
-            {USERS.map(u=><div key={u.id} style={{fontSize:"10px",color:"#64748b"}}><span style={{color:"#94a3b8",fontFamily:"monospace"}}>{u.username}</span> — <span style={{color:"#475569"}}>{(ROLE_LABELS as Record<string, string>)[u.role] ?? String(u.role)}</span></div>)}
+
+          {(loginErr || ctxErr) && (
+            <div style={{ color: themeColor("danger"), fontSize: "11px", marginBottom: 8 }}>
+              {loginErr || ctxErr}
+            </div>
+          )}
+
+          <button
+            style={{ ...S.btn("primary"), width: "100%", padding: "8px", opacity: authBusy ? 0.7 : 1 }}
+            disabled={authBusy}
+            onClick={doLogin}
+          >
+            {authBusy ? "Ingresando..." : "Ingresar"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── GATE B: SELECTOR DE CONTEXTO ────────────────────────────────────────
+  if (!activeMembership) {
+    return (
+      <div style={{ ...S.app, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ ...S.card, width: 520 }}>
+          <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 6 }}>Seleccionar contexto</div>
+          <div style={{ color: themeColor("muted"), fontSize: 11, marginBottom: 12 }}>
+            Debes seleccionar un contexto antes de continuar.
+          </div>
+
+          {ctxErr && <div style={{ color: themeColor("danger"), fontSize: "11px", marginBottom: 8 }}>{ctxErr}</div>}
+
+          {memberships.length === 0 ? (
+            <div style={{ color: themeColor("mutedAlt"), fontSize: 11 }}>
+              Cargando contextos...
+            </div>
+          ) : (
+            <div style={{ display: "grid", gap: 8 }}>
+              {memberships.map(m => {
+                const scopeList = m.regionScopeMode === "LIST" && Array.isArray(m.regionScope) && m.regionScope.length
+                  ? m.regionScope
+                  : [];
+                const regionLabels = scopeList.map(code => (CONFIG.regions as Record<string, { name?: string }>)[code]?.name ?? code).join(", ") || (m.regionScopeMode === "ALL" ? "Todas las regiones" : null);
+                const regionText = regionLabels ? ` · ${regionLabels}` : "";
+                return (
+                  <button
+                    key={m.id}
+                    style={{ ...S.btn("dark"), justifyContent: "space-between", display: "flex", alignItems: "center" }}
+                    onClick={() => {
+                      setActiveMembership(m);
+                      setActiveMembershipState(m);
+                      setAuditLog(prev => appendEvent(prev, "CONTEXT_SET", "api", "API", null, `Contexto ${m.contextType}/${m.contextId} (${m.role})`));
+                    }}
+                  >
+                    <span style={{ fontSize: 12, fontWeight: 700 }}>
+                      {m.contextType} / {m.contextId}{regionText}
+                    </span>
+                    <Badge style={{ ...S.badge(themeColor("blueDark")) }} size="xs">
+                    {m.role}
+                  </Badge>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          <div style={{ marginTop: 12, borderTop: "1px solid #e5e7eb", paddingTop: 10, display: "flex", justifyContent: "space-between" }}>
+            <span style={{ color: themeColor("muted"), fontSize: 10 }}>{apiUser?.email ?? ""}</span>
+            <button
+              style={{ ...S.btn("dark"), fontSize: "11px" }}
+              onClick={() => {
+                clearSession();
+                setAuthToken(null);
+                setApiUser(null);
+                setMemberships([]);
+                setActiveMembershipState(null);
+                setCurrentUser(null);
+                setLoginErr("");
+                setCtxErr("");
+              }}
+            >
+              Cerrar sesión
+            </button>
           </div>
         </div>
       </div>
     );
   }
 
+  // currentUser se rellena por useEffect desde apiUser + activeMembership
+  if (!currentUser) {
+    return (
+      <div style={{ ...S.app, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ color: themeColor("mutedAlt"), fontSize: 12 }}>Cargando sesión...</div>
+      </div>
+    );
+  }
+
   // ─── DASHBOARD ────────────────────────────────────────────────────────────
   const regionsMap = CONFIG.regions as Record<string, { name?: string; communes?: Record<string, { name?: string }> }>;
-  const Dashboard=()=>(
+  const Dashboard=()=>{
+    return (
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:6}}>
         <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
           <h2 style={{margin:0,fontSize:"16px"}}>Panel de Operación</h2>
-          {metrics.critica>0&&<span style={S.badge("#ef4444")}>🚨 {metrics.critica} CRÍTICOS</span>}
-          {metrics.flagged>0&&<span style={S.badge("#ef4444")}>⚠️ {metrics.flagged} {UI_TEXT.states.flagged}</span>}
-          {divergencias.length>0&&<span style={{...S.badge("#f97316"),cursor:"pointer"}} onClick={()=>setView("catalog")}>⚡ {divergencias.length} LOCAL(ES) MOD.</span>}
+          {metrics.critica > 0 && (
+          <Badge style={S.badge(themeColor("danger"))} size="sm">
+            🚨 {metrics.critica} CRÍTICOS
+          </Badge>
+        )}
+        {metrics.flagged > 0 && (
+          <Badge style={S.badge(themeColor("danger"))} size="sm">
+            ⚠️ {metrics.flagged} {UI_TEXT.states.flagged}
+          </Badge>
+        )}
+        {divergencias.length > 0 && (
+          <Badge
+            style={{ ...S.badge(themeColor("warning")) }}
+            size="sm"
+            onClick={() => setView("catalog")}
+          >
+            ⚡ {divergencias.length} LOCAL(ES) MOD.
+          </Badge>
+        )}
         </div>
         <button style={S.btn(crisisMode?"danger":"dark")} onClick={()=>setCrisisMode(p=>!p)}>{crisisMode?"🔄 Normal":"⚡ Crisis"}</button>
       </div>
 
       {divergencias.length>0&&(
-        <div style={{...S.card,background:"#1c1408",border:"1px solid #f9731644",marginBottom:10}}>
-          <div style={{color:"#f97316",fontWeight:700,fontSize:"12px",marginBottom:6}}>⚡ Locales modificados en catálogo post-creación ({divergencias.length})</div>
+        <div style={{...S.card,background:themeColor("orangeBlock"),border:"1px solid #f9731644",marginBottom:10}}>
+          <div style={{color:themeColor("warning"),fontWeight:700,fontSize:"12px",marginBottom:6}}>⚡ Locales modificados en catálogo post-creación ({divergencias.length})</div>
           {divergencias.map(x=>(
             <div key={x.caseId} style={{display:"flex",gap:6,alignItems:"center",marginBottom:3,fontSize:"11px",flexWrap:"wrap"}}>
-              <span style={{fontFamily:"monospace",color:"#64748b"}}>{x.caseId}</span>
-              <span style={{color:"#94a3b8"}}>{x.caseSummary.slice(0,40)}</span>
-              <span style={{color:"#f97316"}}>→ {x.div?.msg}</span>
+              <span style={{fontFamily:"monospace",color:themeColor("muted")}}>{x.caseId}</span>
+              <span style={{color:themeColor("mutedAlt")}}>{x.caseSummary.slice(0,40)}</span>
+              <span style={{color:themeColor("warning")}}>→ {x.div?.msg}</span>
               <button style={{...S.btn("dark"),fontSize:"9px",padding:"1px 6px"}} onClick={()=>{const found=cases.find((c:CaseItem)=>c.id===x.caseId)??null;setSelectedCase(found);setView("detail");}}>Ver</button>
             </div>
           ))}
-          <div style={{fontSize:"10px",color:"#64748b",marginTop:4}}>Los casos son válidos. Verificar estado operacional del local.</div>
+          <div style={{fontSize:"10px",color:themeColor("muted"),marginTop:4}}>Los casos son válidos. Verificar estado operacional del local.</div>
         </div>
       )}
 
       <div style={{...S.g4,marginBottom:10}}>
-        {[{l:"Total",v:metrics.total,c:"#3b82f6"},{l:"Abiertos",v:metrics.open,c:"#f97316"},{l:"Críticos+Altos",v:metrics.critica+metrics.alta,c:"#ef4444"},{l:"Completitud",v:metrics.avgComp+"%",c:"#22c55e"}].map(k=>(
-          <div key={k.l} style={S.card}><div style={{color:k.c,fontSize:"22px",fontWeight:700}}>{k.v}</div><div style={{color:"#64748b",fontSize:"11px"}}>{k.l}</div></div>
+        {[{l:"Total",v:metrics.total,c:themeColor("primary")},{l:"Abiertos",v:metrics.open,c:themeColor("warning")},{l:"Críticos+Altos",v:metrics.critica+metrics.alta,c:themeColor("danger")},{l:"Completitud",v:metrics.avgComp+"%",c:themeColor("success")}].map(k=>(
+          <div key={k.l} style={S.card}><div style={{color:k.c,fontSize:"22px",fontWeight:700}}>{k.v}</div><div style={{color:themeColor("muted"),fontSize:"11px"}}>{k.l}</div></div>
         ))}
       </div>
 
       {!crisisMode&&(
         <div style={{...S.card,marginBottom:8,display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
-          <select style={{...S.inp,width:"180px",borderColor:"#3b82f6"}} value={activeRegion} onChange={e=>{setActiveRegion(e.target.value);setFilterState(p=>({...p,commune:""}));}}>
-            {Object.entries(regionsMap).map(([k,v])=><option key={k} value={k}>{v?.name}</option>)}
+          <select
+            style={{ ...S.inp, width: "180px", borderColor: themeColor("primary") }}
+            value={isCentral ? (filterState.region || "ALL") : regionEffective}
+            disabled={!isCentral}
+            onChange={(e) => {
+              if (!isCentral) return;
+              const v = e.target.value;
+              setFilterState((p) => ({ ...p, region: v === "ALL" ? "" : v, commune: "" }));
+            }}
+          >
+            {regionOptions.map((o) => (
+              <option key={o.code} value={o.code}>
+                {o.code} — {o.name}
+              </option>
+            ))}
           </select>
           <input style={{...S.inp,width:"150px"}} placeholder="🔍 ID, resumen, local..." value={filterState.search} onChange={e=>setFilterState(p=>({...p,search:e.target.value}))}/>
           <select style={{...S.inp,width:"120px"}} value={filterState.criticality} onChange={e=>setFilterState(p=>({...p,criticality:e.target.value}))}>
@@ -1604,12 +2204,12 @@ export default function App(){
           <select style={{...S.inp,width:"130px"}} value={filterState.status} onChange={e=>setFilterState(p=>({...p,status:e.target.value}))}>
             {["","Nuevo","Recepcionado por DR","En gestión","Escalado","Mitigado","Resuelto","Cerrado"].map(o=><option key={o} value={o}>{o||"Estado"}</option>)}
           </select>
-          <select style={{...S.inp,width:"150px"}} disabled={fixedLocalRole} value={fixedLocalRole ? (assignedCommuneEffective || "") : filterState.commune} onChange={e=>{if(fixedLocalRole)return;setFilterState(p=>({...p,commune:e.target.value}));}}>
+          <select style={{...S.inp,width:"150px"}} disabled={fixedLocalRole || (isCentral ? !(filterState.region || activeRegion) : !filterState.region)} value={fixedLocalRole ? (assignedCommuneEffective || "") : filterState.commune} onChange={e=>{if(fixedLocalRole)return;const regionForCommune=isCentral?(filterState.region||activeRegion):filterState.region;if(!regionForCommune)return;setFilterState(p=>({...p,commune:e.target.value}));}}>
             <option value="">Todas las comunas</option>
-            {Object.entries(regionsMap[activeRegion]?.communes||{}).map(([k,v])=><option key={k} value={k}>{(v as { name?: string })?.name}</option>)}
+            {Object.entries(regionsMap[(isCentral ? (filterState.region || activeRegion) : regionEffective)]?.communes || {}).map(([k,v])=><option key={k} value={k}>{(v as { name?: string })?.name}</option>)}
           </select>
-          {fixedLocalRole&&<div style={{fontSize:12,opacity:0.85,color:assignedLocal?"#94a3b8":"#f97316"}}>{assignedLocal?`📍 Comuna fijada por local asignado: ${assignedLocal.nombre}`:"⚠️ Sin local asignado válido (no se mostrarán casos)"}</div>}
-          <button style={S.btn("dark")} onClick={()=>setFilterState({criticality:"",status:"",commune:"",search:""})}>✕</button>
+          {fixedLocalRole&&<div style={{fontSize:12,opacity:0.85,color:assignedLocal?themeColor("mutedAlt"):themeColor("warning")}}>{assignedLocal?`📍 Comuna fijada por local asignado: ${assignedLocal.nombre}`:"⚠️ Sin local asignado válido (no se mostrarán casos)"}</div>}
+          <IconButton onClick={()=>setFilterState((p)=>({...p,criticality:"",status:"",commune:"",search:"",region:isCentral?"":regionEffective}))} title="Limpiar filtros">✕</IconButton>
         </div>
       )}
 
@@ -1641,13 +2241,13 @@ export default function App(){
 
       {crisisMode?(
         <div>
-          <div style={{color:"#ef4444",fontWeight:700,marginBottom:8}}>⚡ MODO CRISIS — Críticos y altos activos</div>
-          {visibleCases.filter(c=>["CRITICA","ALTA"].includes(c.criticality)&&!["Resuelto","Cerrado"].includes(c.status)).map(c=>(
+          <div style={{color:themeColor("danger"),fontWeight:700,marginBottom:8}}>⚡ MODO CRISIS — Críticos y altos activos</div>
+          {visibleCases.filter(c=>["CRITICA","ALTA"].includes(c.criticality)&&!["Resuelto","Cerrado"].includes(normalizeStatus(c.status))).map(c=>(
             <div key={c.id} style={{...S.card,borderLeft:`4px solid ${critColor(c.criticality)}`,marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:6}}>
               <div style={{display:"flex",gap:4,alignItems:"center",flexWrap:"wrap"}}>
-                <span style={{fontFamily:"monospace",color:"#64748b",fontSize:"11px"}}>{c.id}</span>
+                <span style={{fontFamily:"monospace",color:themeColor("muted"),fontSize:"11px"}}>{c.id}</span>
                 <span style={{fontWeight:600}}>{c.summary}</span>
-                <span style={S.badge(critColor(c.criticality))}>{c.criticality}</span>
+                <Badge style={S.badge(critColor(c.criticality))} size="sm">{c.criticality}</Badge>
                 <RecBadge c={c}/><DivBadge c={c}/>
               </div>
               <div style={{display:"flex",gap:4}}>
@@ -1659,34 +2259,59 @@ export default function App(){
         </div>
       ):(
         <div>
-          {["Nuevo","Recepcionado por DR","En gestión","Escalado","Mitigado","Resuelto","Cerrado"].map(st=>{
-            const bucket=visibleCases.filter(c=>c.status===st);
-            if(!bucket.length)return null;
-            return(
-              <div key={st} style={{marginBottom:10}}>
-                <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
-                  <div style={{width:8,height:8,borderRadius:"50%",background:statusColor(st as CaseStatus)}}/>
-                  <span style={{fontWeight:600,fontSize:"12px",color:"#94a3b8"}}>{st} ({bucket.length})</span>
-                </div>
-                {bucket.map(c=><CaseCard key={c.id} c={c} onClick={()=>{const found=cases.find(x=>x.id===c.id)??null;setSelectedCase(found);setView("detail");}}/>)}
-              </div>
+          {(()=>{
+            const KNOWN_STATUSES = ["Nuevo","Recepcionado por DR","En gestión","Escalado","Mitigado","Resuelto","Cerrado"];
+            const unknownCases = visibleCases.filter(c => normalizeStatus(c.status) === "Otros / Desconocido");
+
+            return (
+              <>
+                {KNOWN_STATUSES.map(st=>{
+                  const bucket=visibleCases.filter(c=>normalizeStatus(c.status) === st);
+                  if(!bucket.length)return null;
+                  return(
+                    <div key={st} style={{marginBottom:10}}>
+                      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
+                        <div style={{width:8,height:8,borderRadius:"50%",background:statusColor(st as CaseStatus)}}/>
+                        <span style={{fontWeight:600,fontSize:"12px",color:themeColor("mutedAlt")}}>{st} ({bucket.length})</span>
+                      </div>
+                      {bucket.map(c=><CaseCard key={c.id} c={c} onClick={()=>{const found=cases.find(x=>x.id===c.id)??null;setSelectedCase(found);setView("detail");}}/>)}
+                    </div>
+                  );
+                })}
+                {unknownCases.length > 0 && (
+                  <div style={{marginBottom:10}}>
+                    <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
+                      <div style={{width:8,height:8,borderRadius:"50%",background:themeColor("muted")}}/>
+                      <span style={{fontWeight:600,fontSize:"12px",color:themeColor("mutedAlt")}}>Otros / Desconocido ({unknownCases.length})</span>
+                    </div>
+                    {unknownCases.map(c=><CaseCard key={c.id} c={c} onClick={()=>{const found=cases.find(x=>x.id===c.id)??null;setSelectedCase(found);setView("detail");}}/>)}
+                  </div>
+                )}
+              </>
             );
-          })}
-          {!visibleCases.length&&<div style={{color:"#475569",textAlign:"center",padding:40}}>Sin casos para los filtros aplicados</div>}
+          })()}
+          {visibleCases.length === 0 && (
+            <div style={{ ...S.card, padding: 10, opacity: 0.85 }}>
+              No hay casos para los filtros actuales
+              {filterState.region ? ` (Región: ${filterState.region})` : ""}.
+            </div>
+          )}
         </div>
       )}
     </div>
-  );
+    );
+  };
 
   // ─── NEW CASE FORM ────────────────────────────────────────────────────────
   const NewCaseForm=({ hideBack = false }: { hideBack?: boolean })=>{
+    const detailStepRef = useRef<DetailStepContentRef>(null);
     const[lnc,setLnc]=useState<LncDraft>(newCase?{...newCase}:{});
     const[le,setLe]=useState(evalForm);
     const[lb,setLb]=useState(bypassForm);
     const er=calcCriticality(le);
     const maxVar=Math.max(...Object.values(le));
     const rData=regionsMap[lnc.region||"TRP"];
-    const availableLocals=useMemo(()=>getActiveLocals(localCatalog,lnc.region||"TRP",lnc.commune||""),[lnc.region,lnc.commune,localCatalog]);
+    const availableLocals=useMemo(()=>getActiveLocals(localCatalog,lnc.region||"TRP",lnc.commune||""),[lnc.region,lnc.commune]);
 
     const isFixedLocal = Boolean(assignedLocalIdEffective);
     const isFixedCommune = Boolean(assignedCommuneEffective);
@@ -1707,6 +2332,13 @@ export default function App(){
     // eslint-disable-next-line react-hooks/exhaustive-deps
     },[lockCommune, lockLocal, assignedCommuneEffective, assignedLocalIdEffective]);
 
+    // Autoseleccionar local cuando la comuna tiene exactamente 1 local (estado real, no solo visual)
+    useEffect(() => {
+      if (!lockLocal && availableLocals.length === 1) {
+        setLnc((prev) => ({ ...prev, local: availableLocals[0].nombre }));
+      }
+    }, [availableLocals, lockLocal]);
+
     const varDefs=[
       {key:"continuidad",   label:"1. Continuidad del acto",     desc:"0=Sin impacto · 1=Parcial · 2=Mesa suspendida · 3=Local sin funcionar"},
       {key:"integridad",    label:"2. Integridad jurídica",       desc:"0=Sin riesgo · 1=Dudas · 2=Posible nulidad · 3=Nulidad evidente"},
@@ -1724,7 +2356,7 @@ export default function App(){
         </div>
         <div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap"}}>
           {["Identificación","Evaluación","Detalles","Confirmar"].map((st,i)=>(
-            <div key={st} style={{padding:"4px 10px",borderRadius:4,fontSize:"11px",fontWeight:600,background:step===i+1?"#3b82f6":step>i+1?"#1e4a2a":"#1a1d2e",color:step===i+1?"#fff":step>i+1?"#22c55e":"#475569",border:"1px solid "+(step===i+1?"#3b82f6":step>i+1?"#22c55e":"#2d3748")}}>
+            <div key={st} style={{padding:"4px 10px",borderRadius:4,fontSize:"11px",fontWeight:600,background:step===i+1?themeColor("primary"):step>i+1?themeColor("greenLight"):themeColor("stepInactive"),color:step===i+1?themeColor("white"):step>i+1?themeColor("greenText"):themeColor("textSecondary"),border:"1px solid "+(step===i+1?themeColor("primary"):step>i+1?themeColor("success"):themeColor("border"))}}>
               {step>i+1?"✓ ":""}{st}
             </div>
           ))}
@@ -1732,7 +2364,7 @@ export default function App(){
 
         {step===1&&(
           <div style={S.card}>
-            <div style={{color:"#94a3b8",fontSize:"11px",fontWeight:600,marginBottom:10}}>PASO 1 — IDENTIFICACIÓN</div>
+            <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:10}}>PASO 1 — IDENTIFICACIÓN</div>
             <div style={{...S.g2,marginBottom:8}}>
               <div>
                 <label style={S.lbl}>Región</label>
@@ -1756,9 +2388,9 @@ export default function App(){
             <div style={{marginBottom:8}}>
               <label style={S.lbl}>Local de Votación *</label>
               {!lnc.commune?(
-                <div style={{...S.inp,color:"#475569",cursor:"not-allowed"}}>Seleccione una comuna primero</div>
+                <div style={{...S.inp,color:themeColor("mutedDark"),cursor:"not-allowed"}}>Seleccione una comuna primero</div>
               ):availableLocals.length===0?(
-                <div style={{...S.inp,color:"#ef4444",cursor:"not-allowed",borderColor:"#ef444444"}}>⚠️ Sin locales activos — administre el catálogo</div>
+                <div style={{...S.inp,color:themeColor("danger"),cursor:"not-allowed",borderColor:"#ef444444"}}>⚠️ Sin locales activos — administre el catálogo</div>
               ):(
                 <select
                   style={{...S.inp,borderColor:lnc.local?"#22c55e44":"#ef444444"}}
@@ -1770,7 +2402,7 @@ export default function App(){
                   {availableLocals.map(l=><option key={l.idLocal} value={l.nombre}>{l.nombre}</option>)}
                 </select>
               )}
-              {lnc.local&&<div style={{fontSize:"9px",color:"#6366f1",marginTop:2}}>📸 Se guardará snapshot del local al registrar</div>}
+              {lnc.local&&<div style={{fontSize:"9px",color:themeColor("purple"),marginTop:2}}>📸 Se guardará snapshot del local al registrar</div>}
             </div>
             <div style={{...S.g2,marginBottom:8}}>
               <div>
@@ -1780,8 +2412,9 @@ export default function App(){
                 </select>
               </div>
               <div>
-                <label style={S.lbl}>Hora Detección *</label>
+                <label style={S.lbl}>Hora del incidente *</label>
                 <input style={S.inp} type="datetime-local" value={(lnc.origin?.detectedAt||"").slice(0,16)} onChange={e=>setLnc(p=>({...p,origin:{...p.origin,detectedAt:e.target.value}}))}/>
+                <div style={{fontSize:"10px",color:themeColor("muted"),marginTop:2}}>Hora en que ocurrió/detectó. Se permite hasta 5 min por desfase de reloj. La hora de registro se guarda al enviar.</div>
               </div>
             </div>
             <div style={{marginBottom:10}}>
@@ -1789,14 +2422,14 @@ export default function App(){
               <input style={S.inp} placeholder="Ej: Urna sellada incorrectamente en mesa 12" value={lnc.summary||""} onChange={e=>setLnc(p=>({...p,summary:e.target.value}))}/>
             </div>
             {canDo("bypass",currentUser)&&(
-              <div style={{...S.card,background:"#1e1528",border:"1px solid #7c3aed44"}}>
+              <div style={{...S.card,background:themeColor("violetBlock"),border:"1px solid #7c3aed44"}}>
                 <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer"}} title={UI_TEXT.tooltips.modoUrgente}>
                   <input type="checkbox" checked={lb.active} onChange={e=>setLb(p=>({...p,active:e.target.checked,confirmed:false}))}/>
-                  <span style={{color:"#a78bfa",fontWeight:600,fontSize:"12px"}}>⚡ Activar Modo urgente (Excepción operativa)</span>
+                  <span style={{color:themeColor("purpleLight"),fontWeight:600,fontSize:"12px"}}>⚡ Activar Modo urgente (Excepción operativa)</span>
                 </label>
                 {lb.active&&(
                   <div style={{marginTop:8}}>
-                    <div style={{color:"#94a3b8",fontSize:"11px",marginBottom:6}}>Úselo solo si no es posible seguir el procedimiento normal. Queda registrado como excepción.</div>
+                    <div style={{color:themeColor("mutedAlt"),fontSize:"11px",marginBottom:6}}>Úselo solo si no es posible seguir el procedimiento normal. Queda registrado como excepción.</div>
                     <label style={S.lbl}>Causal de la excepción *</label>
                     <select style={S.inp} value={lb.cause} onChange={e=>setLb(p=>({...p,cause:e.target.value as BypassCause}))}>
                       <option value="">Seleccione...</option>
@@ -1826,32 +2459,34 @@ export default function App(){
 
         {step===2&&(
           <div style={S.card}>
-            <div style={{color:"#94a3b8",fontSize:"11px",fontWeight:600,marginBottom:10}}>PASO 2 — FICHA DE EVALUACIÓN (inmutable tras guardar)</div>
+            <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:10}}>PASO 2 — FICHA DE EVALUACIÓN (inmutable tras guardar)</div>
             {varDefs.map(v=>(
-              <div key={v.key} style={{...S.card,background:"#111827",marginBottom:6}}>
+              <div key={v.key} style={{...S.card,background:themeColor("bgSurface"),marginBottom:6}}>
                 <div style={{fontWeight:600,marginBottom:1}}>{v.label}</div>
-                <div style={{color:"#64748b",fontSize:"10px",marginBottom:6}}>{v.desc}</div>
+                <div style={{color:themeColor("muted"),fontSize:"10px",marginBottom:6}}>{v.desc}</div>
                 <div style={{display:"flex",gap:6,alignItems:"center"}}>
                   {[0,1,2,3].map(n=>(
-                    <button key={n} onClick={()=>setLe(p=>({...p,[v.key]:n} as typeof evalForm))} style={{padding:"6px 14px",borderRadius:4,border:"2px solid",cursor:"pointer",fontWeight:700,fontSize:"13px",background:(le as Record<string, number>)[v.key]===n?["#22c55e","#eab308","#f97316","#ef4444"][n]:"transparent",borderColor:["#22c55e44","#eab30844","#f9731644","#ef444444"][n],color:(le as Record<string, number>)[v.key]===n?"#fff":["#22c55e","#eab308","#f97316","#ef4444"][n]}}>{n}</button>
+                    <button key={n} onClick={()=>setLe(p=>({...p,[v.key]:n} as typeof evalForm))} style={{padding:"6px 14px",borderRadius:4,border:"2px solid",cursor:"pointer",fontWeight:700,fontSize:"13px",background:(le as Record<string, number>)[v.key]===n?[themeColor("success"),themeColor("warningAlt"),themeColor("warning"),themeColor("danger")][n]:"transparent",borderColor:["#22c55e44","#eab30844","#f9731644","#ef444444"][n],color:(le as Record<string, number>)[v.key]===n?themeColor("white"):[themeColor("success"),themeColor("warningAlt"),themeColor("warning"),themeColor("danger")][n]}}>{n}</button>
                   ))}
-                  {(le as Record<string, number>)[v.key]===3&&<span style={{color:"#ef4444",fontWeight:700,fontSize:"11px"}}>⚠️ ESCALAR</span>}
+                  {(le as Record<string, number>)[v.key]===3&&<span style={{color:themeColor("danger"),fontWeight:700,fontSize:"11px"}}>⚠️ ESCALAR</span>}
                 </div>
               </div>
             ))}
             {lb.active&&maxVar<3&&lb.cause!=="system_down"&&lb.cause!=="critical_level_3"&&(
-              <div style={{...S.card,background:"#2d0a0a",border:"2px solid #ef4444",marginTop:8}}>
-                <div style={{color:"#ef4444",fontWeight:700,marginBottom:6}}>⚠️ {UI_TEXT.misc.excepcionSinFundamentoObjetivo}</div>
+              <div style={{...S.card,background:themeColor("redBlock"),border:"2px solid #ef4444",marginTop:8}}>
+                <div style={{color:themeColor("danger"),fontWeight:700,marginBottom:6}}>⚠️ {UI_TEXT.misc.excepcionSinFundamentoObjetivo}</div>
                 <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer"}}>
                   <input type="checkbox" checked={lb.confirmed||false} onChange={e=>setLb(p=>({...p,confirmed:e.target.checked}))}/>
-                  <span style={{color:"#ef4444",fontSize:"12px",fontWeight:600}}>{UI_TEXT.misc.confirmarExcepcionOperativa}</span>
+                  <span style={{color:themeColor("danger"),fontSize:"12px",fontWeight:600}}>{UI_TEXT.misc.confirmarExcepcionOperativa}</span>
                 </label>
               </div>
             )}
-            <div style={{...S.card,background:"#111827",border:`2px solid ${critColor(er.criticality as Criticality)}`,marginTop:8}}>
-              <span style={S.badge(critColor(er.criticality as Criticality))}>CRITICIDAD: {er.criticality}</span>
-              <span style={{marginLeft:8,color:"#64748b",fontSize:"11px"}}>Prioridad sugerida: {er.score}/15</span>
-              <div style={{marginTop:6,color:"#94a3b8",fontSize:"12px"}}>{er.recommendation}</div>
+            <div style={{...S.card,background:themeColor("bgSurface"),border:`2px solid ${critColor(er.criticality as Criticality)}`,marginTop:8}}>
+              <Badge style={S.badge(critColor(er.criticality as Criticality))} size="sm">
+                CRITICIDAD: {er.criticality}
+              </Badge>
+              <span style={{marginLeft:8,color:themeColor("muted"),fontSize:"11px"}}>Prioridad sugerida: {er.score}/15</span>
+              <div style={{marginTop:6,color:themeColor("mutedAlt"),fontSize:"12px"}}>{er.recommendation}</div>
             </div>
             <div style={{display:"flex",justifyContent:"space-between",marginTop:10}}>
               <button style={S.btn("dark")} onClick={()=>setStep(1)}>← Atrás</button>
@@ -1861,41 +2496,40 @@ export default function App(){
         )}
 
         {step===3&&(
-          <div style={S.card}>
-            <div style={{color:"#94a3b8",fontSize:"11px",fontWeight:600,marginBottom:10}}>PASO 3 — DETALLES</div>
-            <div style={{marginBottom:8}}>
-              <label style={S.lbl}>Detalle</label>
-              <textarea style={{...S.inp,height:70,resize:"vertical"}} placeholder="Describe el incidente..." value={newCase?.detail||""} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>)=>{const val=e.currentTarget.value;setNewCase(p=>{if(!p)return p;return {...p,detail:val};});}}/>
-            </div>
-            <div>
-              <label style={S.lbl}>Evidencia (Enter para agregar)</label>
-              <input style={S.inp} placeholder="URL o descripción" onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>)=>{const target=e.currentTarget;if(e.key==="Enter"&&target.value){setNewCase(p=>{if(!p)return p;return{...p,evidence:[...(Array.isArray(p.evidence)?p.evidence:[]),target.value]};});target.value="";}}}/>
-              {(newCase?.evidence||[]).map((ev,i)=><div key={i} style={{fontSize:"11px",color:"#94a3b8",marginTop:2}}>📎 {ev}</div>)}
-            </div>
-            <div style={{display:"flex",justifyContent:"space-between",marginTop:10}}>
-              <button style={S.btn("dark")} onClick={()=>setStep(2)}>← Atrás</button>
-              <button style={S.btn("primary")} onClick={()=>setStep(4)}>Confirmar →</button>
-            </div>
-          </div>
+          <DetailStepContent
+            ref={detailStepRef}
+            initialDetail={newCase?.detail ?? ""}
+            newCase={newCase}
+            setNewCase={setNewCase}
+            onConfirm={() => {
+              const d = detailStepRef.current?.getDetail?.() ?? newCase?.detail ?? "";
+              setNewCase((p) => (p ? { ...p, detail: d } : p));
+              setStep(4);
+            }}
+            onBack={() => setStep(2)}
+          />
         )}
 
         {step===4&&(
           <div style={S.card}>
-            <div style={{color:"#94a3b8",fontSize:"11px",fontWeight:600,marginBottom:10}}>PASO 4 — CONFIRMAR Y REGISTRAR</div>
+            <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:10}}>PASO 4 — CONFIRMAR Y REGISTRAR</div>
             <div style={{...S.g2,marginBottom:8}}>
-              <div><span style={{color:"#64748b"}}>Región:</span> {regionsMap[newCase?.region ?? ""]?.name}</div>
-              <div><span style={{color:"#64748b"}}>Comuna:</span> {regionsMap[newCase?.region ?? ""]?.communes?.[newCase?.commune ?? ""]?.name||newCase?.commune}</div>
-              <div><span style={{color:"#64748b"}}>Canal:</span> {newCase?.origin?.channel}</div>
-              <div><span style={{color:"#64748b"}}>Criticidad:</span> <span style={S.badge(critColor(calcCriticality(evalForm).criticality as Criticality))}>{calcCriticality(evalForm).criticality}</span></div>
+              <div><span style={{color:themeColor("muted")}}>Región:</span> {regionsMap[newCase?.region ?? ""]?.name}</div>
+              <div><span style={{color:themeColor("muted")}}>Comuna:</span> {regionsMap[newCase?.region ?? ""]?.communes?.[newCase?.commune ?? ""]?.name||newCase?.commune}</div>
+              <div><span style={{color:themeColor("muted")}}>Canal:</span> {newCase?.origin?.channel}</div>
+              <div>
+              <span style={{color:themeColor("muted")}}>Criticidad:</span>{" "}
+              <Badge style={S.badge(critColor(calcCriticality(evalForm).criticality as Criticality))} size="sm">{calcCriticality(evalForm).criticality}</Badge>
             </div>
-            <div style={{marginBottom:8,padding:"6px 10px",background:"#0f2035",border:"1px solid #1d4ed844",borderRadius:4}}>
-              <span style={{fontSize:"11px",color:"#60a5fa"}}>🏫 Local: </span>
+            </div>
+            <div style={{marginBottom:8,padding:"6px 10px",background:themeColor("infoBg"),border:"1px solid #93c5fd",borderRadius:4}}>
+              <span style={{fontSize:"11px",color:themeColor("infoIcon")}}>🏫 Local: </span>
               <span style={{fontWeight:700}}>{newCase?.local}</span>
-              <div style={{fontSize:"9px",color:"#6366f1",marginTop:2}}>📸 Se registrará snapshot del local</div>
+              <div style={{fontSize:"9px",color:themeColor("purple"),marginTop:2}}>📸 Se registrará snapshot del local</div>
             </div>
-            <div style={{marginBottom:8}}><span style={{color:"#64748b"}}>Resumen:</span> {newCase?.summary}</div>
-            <div style={{...S.card,background:"#111827",marginBottom:8,fontSize:"11px",color:"#64748b"}}>
-              Estado inicial: <strong style={{color:"#a78bfa"}}>{bypassForm.active?"En gestión ("+UI_TEXT.states.modoUrgenteActive+")":"Nuevo → requiere recepción"}</strong>
+            <div style={{marginBottom:8}}><span style={{color:themeColor("muted")}}>Resumen:</span> {newCase?.summary}</div>
+            <div style={{...S.card,background:themeColor("bgSurface"),marginBottom:8,fontSize:"11px",color:themeColor("textSecondary")}}>
+              Estado inicial: <strong style={{color:themeColor("purpleLight")}}>{bypassForm.active?"En gestión ("+UI_TEXT.states.modoUrgenteActive+")":"Nuevo → requiere recepción"}</strong>
             </div>
             <div style={{display:"flex",justifyContent:"space-between",marginTop:10}}>
               <button style={S.btn("dark")} onClick={()=>setStep(3)}>← Atrás</button>
@@ -1917,7 +2551,7 @@ export default function App(){
   // Hooks NO pueden ir después de returns condicionales. Wrapper sin hooks + contenido con hooks.
   const CaseDetail = () => {
     const c = cases.find((x): x is CaseItem => x.id === selectedCase?.id);
-    if (!c) return <div style={{ color: "#475569", padding: 20 }}>Caso no encontrado</div>;
+    if (!c) return <div style={{ color: themeColor("mutedDark"), padding: 20 }}>Caso no encontrado</div>;
     return <CaseDetailContent c={c} />;
   };
 
@@ -1951,14 +2585,20 @@ export default function App(){
     const assignee = USERS.find((u) => u.id === c.assignedTo);
     const div = checkLocalDivergence(c, localCatalog);
     const tlC: Record<string, string> = {
-      DETECTED: "#22c55e", REPORTED: "#3b82f6", FIRST_ACTION: "#f97316", ESCALATED: "#ef4444", RESOLVED: "#22c55e",
-      CLOSED: "#6b7280", BYPASS: "#a78bfa", COMMENT: "#64748b", MITIGATED: "#eab308", RECEPCIONADO: "#a78bfa",
-      REASSESSMENT: "#f97316", IN_MANAGEMENT: "#3b82f6", BYPASS_VALIDATED: "#22c55e", BYPASS_REVOKED: "#ef4444",
+      DETECTED: themeColor("success"), REPORTED: themeColor("primary"), FIRST_ACTION: themeColor("warning"), ESCALATED: themeColor("danger"), RESOLVED: themeColor("success"),
+      CLOSED: themeColor("gray"), BYPASS: themeColor("purpleLight"), COMMENT: themeColor("muted"), MITIGATED: themeColor("warningAlt"), RECEPCIONADO: themeColor("purpleLight"),
+      REASSESSMENT: themeColor("warning"), IN_MANAGEMENT: themeColor("primary"), BYPASS_VALIDATED: themeColor("success"), BYPASS_REVOKED: themeColor("danger"),
     };
+    const insUserId = currentUser?.id ?? null;
+    const insUserRole = (currentUser as { role?: string } | null)?.role ?? null;
+    /* eslint-disable react-hooks/exhaustive-deps -- deps insUserId/insUserRole evitan closure obsoleto; el linter no ve uso directo */
     const instructionsSorted = useMemo(() => {
-      const list = (c.instructions ?? []).filter((ins) => isInstructionForUser(ins, currentUser ?? undefined));
+      const list = (c.instructions ?? []).filter((ins) =>
+        isInstructionForUser(ins, currentUser ?? undefined)
+      );
       return [...list].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    }, [c.id, c.instructions, currentUser]);
+    }, [c.instructions, insUserId, insUserRole]);
+    /* eslint-enable react-hooks/exhaustive-deps */
     const isOpView = uiMode === "OP";
     return (
       <div style={{position:"relative"}}>
@@ -1966,10 +2606,16 @@ export default function App(){
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:6}}>
           <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
             <button style={S.btn("dark")} onClick={()=>setView("dashboard")}>← Volver</button>
-            {!isOpView&&<span style={{fontFamily:"monospace",color:"#64748b",fontSize:"12px"}}>{c.id}</span>}
-            <span style={S.badge(critColor(c.criticality))}>{c.criticality}</span>
-            <span style={S.badge(statusColor(c.status))}>{c.status}</span>
-            {c.bypass&&<span style={S.badge(c.bypassFlagged&&!c.bypassValidated?"#ef4444":"#f97316")}>⚡ {UI_TEXT.states.modoUrgente}{c.bypassFlagged&&!c.bypassValidated?" ⚠️ "+UI_TEXT.states.flaggedShort:""}{c.bypassValidated?" ["+c.bypassValidated+"]":""}</span>}
+            {!isOpView&&<span style={{fontFamily:"monospace",color:themeColor("muted"),fontSize:"12px"}}>{c.id}</span>}
+            <Badge style={S.badge(critColor(c.criticality))} size="sm">{c.criticality}</Badge>
+            <Badge style={S.badge(statusColor(normalizeStatus(c.status) as CaseStatus))} size="sm">
+              {normalizeStatus(c.status) === "Otros / Desconocido" ? String(c.status) : normalizeStatus(c.status)}
+            </Badge>
+            {c.bypass && (
+              <Badge style={S.badge(c.bypassFlagged && !c.bypassValidated ? themeColor("danger") : themeColor("warning"))} size="sm">
+                ⚡ {UI_TEXT.states.modoUrgente}{c.bypassFlagged&&!c.bypassValidated?" ⚠️ "+UI_TEXT.states.flaggedShort:""}{c.bypassValidated?" ["+c.bypassValidated+"]":""}
+              </Badge>
+            )}
             {!isOpView && <SlaBadge c={c}/>}<RecBadge c={c} variant={isOpView?"OP":"FULL"}/>
           </div>
           {!isOpView&&(
@@ -1992,18 +2638,18 @@ export default function App(){
         </div>
 
         {!isOpView && div&&(
-          <div style={{...S.card,background:"#1c1408",border:"2px solid #f97316",marginBottom:8}}>
-            <div style={{color:"#f97316",fontWeight:700,marginBottom:4}}>⚡ Divergencia de catálogo</div>
-            <div style={{fontSize:"12px",color:"#fbd38d",marginBottom:4}}>{div.msg}</div>
-            <div style={{fontSize:"11px",color:"#64748b"}}>Snapshot: <span style={{color:"#94a3b8",fontFamily:"monospace"}}>{c.localSnapshot?.nombre} [{c.localSnapshot?.idLocal}]</span> @ {fmtDate(c.localSnapshot?.snapshotAt)}</div>
-            <div style={{fontSize:"10px",color:"#475569",marginTop:4}}>El caso es jurídicamente válido. Verificar disponibilidad del local y registrar acción si corresponde.</div>
+          <div style={{...S.card,background:themeColor("orangeBlock"),border:"2px solid #f97316",marginBottom:8}}>
+            <div style={{color:themeColor("warning"),fontWeight:700,marginBottom:4}}>⚡ Divergencia de catálogo</div>
+            <div style={{fontSize:"12px",color:themeColor("legacyAmberText"),marginBottom:4}}>{div.msg}</div>
+            <div style={{fontSize:"11px",color:themeColor("muted")}}>Snapshot: <span style={{color:themeColor("mutedAlt"),fontFamily:"monospace"}}>{c.localSnapshot?.nombre} [{c.localSnapshot?.idLocal}]</span> @ {fmtDate(c.localSnapshot?.snapshotAt)}</div>
+            <div style={{fontSize:"10px",color:themeColor("mutedDark"),marginTop:4}}>El caso es jurídicamente válido. Verificar disponibilidad del local y registrar acción si corresponde.</div>
           </div>
         )}
 
         {c.bypassFlagged&&!c.bypassValidated&&(
-          <div style={{...S.card,background:"#2d0a0a",border:"2px solid #ef4444",marginBottom:8}}>
-            <div style={{color:"#ef4444",fontWeight:700,marginBottom:4}}>⚠️ {UI_TEXT.states.modoUrgente} — {UI_TEXT.misc.validacionExpost}</div>
-            <div style={{fontSize:"11px",color:"#f87171",marginBottom:8}}>Motivo: {c.bypassMotivo||"—"}</div>
+          <div style={{...S.card,background:themeColor("redBlock"),border:"2px solid #ef4444",marginBottom:8}}>
+            <div style={{color:themeColor("danger"),fontWeight:700,marginBottom:4}}>⚠️ {UI_TEXT.states.modoUrgente} — {UI_TEXT.misc.validacionExpost}</div>
+            <div style={{fontSize:"11px",color:themeColor("legacyRedText"),marginBottom:8}}>Motivo: {c.bypassMotivo||"—"}</div>
             {canDo("validateBypass",currentUser)&&(
               <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
                 <select style={{...S.inp,width:"auto"}} value={bvForm.decision} onChange={e=>setBvForm(p=>({...p,decision:e.target.value}))}>
@@ -2021,23 +2667,25 @@ export default function App(){
           <div>
             <div style={{...S.card,marginBottom:8}}>
               <div style={{fontWeight:700,fontSize:"14px",marginBottom:4}}>{c.summary}</div>
-              <div style={{display:"flex",alignItems:"flex-start",gap:6,marginBottom:8,padding:"5px 8px",background:"#0f2035",border:"1px solid #1d4ed844",borderRadius:4}}>
+              <div style={{display:"flex",alignItems:"flex-start",gap:6,marginBottom:8,padding:"5px 8px",background:themeColor("infoBg"),border:"1px solid #93c5fd",borderRadius:4}}>
                 <div>
                   <div style={{display:"flex",alignItems:"center",gap:4}}>
-                    <span style={{fontSize:"11px",color:"#60a5fa",fontWeight:700}}>🏫 Local:</span>
+                    <span style={{fontSize:"11px",color:themeColor("infoIcon"),fontWeight:700}}>🏫 Local:</span>
                     <span style={{fontWeight:600}}>{c.local||"—"}</span>
-                    {div&&<span style={{...S.badge("#f97316"),fontSize:"8px"}}>⚡ MODIF.</span>}
+                    {div && (
+                      <Badge style={{...S.badge(themeColor("warning")),fontSize:"8px"}} size="xs">⚡ MODIF.</Badge>
+                    )}
                   </div>
-                  {c.localSnapshot&&<div style={{fontSize:"9px",color:"#475569",marginTop:1}}>📸 {c.localSnapshot.idLocal} · {fmtDate(c.localSnapshot.snapshotAt)}</div>}
+                  {c.localSnapshot&&<div style={{fontSize:"9px",color:themeColor("mutedDark"),marginTop:1}}>📸 {c.localSnapshot.idLocal} · {fmtDate(c.localSnapshot.snapshotAt)}</div>}
                 </div>
               </div>
-              <div style={{color:"#94a3b8",fontSize:"12px",marginBottom:8}}>
+              <div style={{color:themeColor("mutedAlt"),fontSize:"12px",marginBottom:8}}>
                 {c.detail || "—"}
               </div>
 
               {/* EVIDENCIA */}
               <div style={{marginBottom:8}}>
-                <div style={{color:"#94a3b8",fontSize:"11px",fontWeight:600,marginBottom:6}}>
+                <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:6}}>
                   {UI_TEXT.labels.evidenceTitle}
                 </div>
 
@@ -2048,18 +2696,18 @@ export default function App(){
                     </div>
                   ))
                 ) : (
-                  <div style={{fontSize:"12px",color:"#94a3b8"}}>—</div>
+                  <div style={{fontSize:"12px",color:themeColor("mutedAlt")}}>—</div>
                 )}
               </div>
               <div style={S.g2}>
-                <div><span style={{color:"#64748b"}}>Región:</span> {regionsMap[c.region]?.name}</div>
-                <div><span style={{color:"#64748b"}}>Comuna:</span> {regionsMap[c.region]?.communes?.[c.commune]?.name||c.commune}</div>
-                <div><span style={{color:"#64748b"}}>Canal:</span> {c.origin?.channel}</div>
-                <div><span style={{color:"#64748b"}}>Asignado:</span> {assignee?.name||"—"}</div>
+                <div><span style={{color:themeColor("muted")}}>Región:</span> {regionsMap[c.region]?.name}</div>
+                <div><span style={{color:themeColor("muted")}}>Comuna:</span> {regionsMap[c.region]?.communes?.[c.commune]?.name||c.commune}</div>
+                <div><span style={{color:themeColor("muted")}}>Canal:</span> {c.origin?.channel}</div>
+                <div><span style={{color:themeColor("muted")}}>Asignado:</span> {assignee?.name||"—"}</div>
                 {!isOpView&&(
                   <>
-                    <div><span style={{color:"#64748b"}}>SLA:</span> {c.slaMinutes} min</div>
-                    {(()=>{const comp=c.completeness??0;return <div><span style={{color:"#64748b"}}>Complet.:</span> <span style={{color:comp>=80?"#22c55e":comp>=50?"#eab308":"#ef4444"}}>{comp}%</span></div>;})()}
+                    <div><span style={{color:themeColor("muted")}}>SLA:</span> {c.slaMinutes} min</div>
+                    {(()=>{const comp=c.completeness??0;return <div><span style={{color:themeColor("muted")}}>Complet.:</span> <span style={{color:comp>=80?themeColor("success"):comp>=50?themeColor("warningAlt"):themeColor("danger")}}>{comp}%</span></div>;})()}
                   </>
                 )}
               </div>
@@ -2067,19 +2715,21 @@ export default function App(){
 
             {!isClosed&&(canDo("close",currentUser,c)||c.status==="Resuelto")&&(
               <div style={{...S.card,marginBottom:8,border:"1px solid #22c55e44"}}>
-                <div style={{color:"#94a3b8",fontSize:"11px",fontWeight:600,marginBottom:6}}>MOTIVO DE CIERRE</div>
+                <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:6}}>MOTIVO DE CIERRE</div>
                 <textarea style={{...S.inp,height:50,resize:"vertical"}} value={motDraft} onChange={e=>setMotDraft(e.target.value)} placeholder="Fundamento formal..."/>
                 <button style={{...S.btn("success"),marginTop:4,fontSize:"11px"}} onClick={()=>{if(!motDraft)return notify("Ingresa el motivo","error");setCases(prev=>prev.map(x=>x.id!==c.id?x:{...x,closingMotivo:motDraft,updatedAt:nowISO()}));setAuditLog(prev=>appendEvent(prev,"CASE_UPDATED",currentUser.id,currentUser.role,c.id,"Motivo de cierre registrado"));notify("Motivo guardado","success");}}>{c.closingMotivo?"✓ Actualizar":"Guardar motivo"}</button>
-                {c.closingMotivo&&<div style={{marginTop:4,fontSize:"11px",color:"#22c55e"}}>✓ {c.closingMotivo.slice(0,60)}</div>}
+                {c.closingMotivo&&<div style={{marginTop:4,fontSize:"11px",color:themeColor("success")}}>✓ {c.closingMotivo.slice(0,60)}</div>}
               </div>
             )}
 
             {!isOpView&&(
             <div style={{...S.card,marginBottom:8}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                <div style={{color:"#94a3b8",fontSize:"11px",fontWeight:600}}>FICHA EVALUACIÓN</div>
+                <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600}}>FICHA EVALUACIÓN</div>
                 <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                  <span style={{...S.badge("#22c55e"),fontSize:"9px"}}>🔒 BLOQUEADA</span>
+                  <Badge style={{...S.badge(themeColor("success")),fontSize:"9px"}} size="xs">
+                    🔒 BLOQUEADA
+                  </Badge>
                   {!isClosed&&canDo("update",currentUser,c)&&(
                     <button style={{...S.btn("dark"),fontSize:"10px",padding:"2px 8px"}} onClick={()=>setShowRA(p=>!p)}>{showRA?"✕":"✏ Reevaluar"}</button>
                   )}
@@ -2087,17 +2737,17 @@ export default function App(){
               </div>
               {(()=>{const ev=(c.evaluation??{}) as Record<string, number>;return Object.entries({continuidad:"Continuidad",integridad:"Integridad jurídica",seguridad:"Seguridad",exposicion:"Exposición",capacidadLocal:"Capacidad local"}).map(([k,lbl])=>(
                 <div key={k} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
-                  <span style={{color:"#94a3b8",fontSize:"11px"}}>{lbl}</span>
+                  <span style={{color:themeColor("mutedAlt"),fontSize:"11px"}}>{lbl}</span>
                   <div style={{display:"flex",gap:3,alignItems:"center"}}>
-                    {[0,1,2,3].map(n=><div key={n} style={{width:14,height:14,borderRadius:2,background:(ev[k]??0)>=n?["#22c55e","#eab308","#f97316","#ef4444"][n]:"#1e2535"}}/>)}
-                    <span style={{marginLeft:4,color:["#22c55e","#eab308","#f97316","#ef4444"][ev[k]??0],fontWeight:700}}>{ev[k]??0}</span>
+                    {[0,1,2,3].map(n=><div key={n} style={{width:14,height:14,borderRadius:2,background:(ev[k]??0)>=n?[themeColor("success"),themeColor("warningAlt"),themeColor("warning"),themeColor("danger")][n]:themeColor("border")}}/>)}
+                    <span style={{marginLeft:4,color:[themeColor("success"),themeColor("warningAlt"),themeColor("warning"),themeColor("danger")][ev[k]??0],fontWeight:700}}>{ev[k]??0}</span>
                   </div>
                 </div>
               ));})()}
               <div
                 style={{
                   marginTop: 6,
-                  borderTop: "1px solid #2d3748",
+                  borderTop: "1px solid #e5e7eb",
                   paddingTop: 6,
                   display: "flex",
                   justifyContent: "space-between",
@@ -2105,7 +2755,7 @@ export default function App(){
               >
                 {!isOpView ? (
                   <>
-                    <span style={{ color: "#64748b", fontSize: "11px" }}>
+                    <span style={{ color: themeColor("muted"), fontSize: "11px" }}>
                       Nivel:
                     </span>
                     <span
@@ -2119,7 +2769,7 @@ export default function App(){
                   </>
                 ) : (
                   <>
-                    <span style={{ color: "#64748b", fontSize: "11px" }}>
+                    <span style={{ color: themeColor("muted"), fontSize: "11px" }}>
                       Criticidad:
                     </span>
                     <span
@@ -2134,13 +2784,13 @@ export default function App(){
                 )}
               </div>
               {showRA&&(
-                <div style={{...S.card,background:"#111827",marginTop:8,border:"1px solid #f9731644"}}>
-                  <div style={{color:"#f97316",fontSize:"11px",fontWeight:600,marginBottom:8}}>REEVALUACIÓN</div>
+                <div style={{...S.card,background:themeColor("bgSurface"),marginTop:8,border:"1px solid #f9731644"}}>
+                  <div style={{color:themeColor("warning"),fontSize:"11px",fontWeight:600,marginBottom:8}}>REEVALUACIÓN</div>
                   {Object.entries({continuidad:"Continuidad",integridad:"Integridad",seguridad:"Seguridad",exposicion:"Exposición",capacidadLocal:"Cap. Local"}).map(([k,lbl])=>(
                     <div key={k} style={{marginBottom:6,display:"flex",gap:6,alignItems:"center"}}>
-                      <span style={{color:"#94a3b8",fontSize:"11px",width:90,flexShrink:0}}>{lbl}</span>
+                      <span style={{color:themeColor("mutedAlt"),fontSize:"11px",width:90,flexShrink:0}}>{lbl}</span>
                       {[0,1,2,3].map(n=>(
-                        <button key={n} onClick={()=>setRaEval(p=>({...p,[k]:n}))} style={{padding:"3px 9px",borderRadius:3,border:"1px solid",cursor:"pointer",fontWeight:700,fontSize:"12px",background:raEval[k]===n?["#22c55e","#eab308","#f97316","#ef4444"][n]:"transparent",borderColor:["#22c55e44","#eab30844","#f9731644","#ef444444"][n],color:raEval[k]===n?"#fff":["#22c55e","#eab308","#f97316","#ef4444"][n]}}>{n}</button>
+                        <button key={n} onClick={()=>setRaEval(p=>({...p,[k]:n}))} style={{padding:"3px 9px",borderRadius:3,border:"1px solid",cursor:"pointer",fontWeight:700,fontSize:"12px",background:raEval[k]===n?[themeColor("success"),themeColor("warningAlt"),themeColor("warning"),themeColor("danger")][n]:"transparent",borderColor:["#22c55e44","#eab30844","#f9731644","#ef444444"][n],color:raEval[k]===n?themeColor("white"):[themeColor("success"),themeColor("warningAlt"),themeColor("warning"),themeColor("danger")][n]}}>{n}</button>
                       ))}
                     </div>
                   ))}
@@ -2154,11 +2804,11 @@ export default function App(){
 
             {!isOpView&&(
             <div style={S.card}>
-              <div style={{color:"#94a3b8",fontSize:"11px",fontWeight:600,marginBottom:6}}>MÉTRICAS</div>
+              <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:6}}>MÉTRICAS</div>
               {[["T. Activación",timeDiff(c.origin?.detectedAt,c.reportedAt)],["T. 1ª Acción",timeDiff(c.reportedAt,c.firstActionAt)],["T. Escalamiento",timeDiff(c.reportedAt,c.escalatedAt)],["T. Resolución",timeDiff(c.reportedAt,c.resolvedAt)]].map(([l,v])=>(
                 <div key={l} style={{display:"flex",justifyContent:"space-between",marginBottom:3,fontSize:"12px"}}>
-                  <span style={{color:"#64748b"}}>{l}</span>
-                  <span style={{color:v!=null?"#e2e8f0":"#475569"}}>{v!=null?`${v} min`:"—"}</span>
+                  <span style={{color:themeColor("muted")}}>{l}</span>
+                  <span style={{color:v!=null?themeColor("legacySlate"):themeColor("mutedDark")}}>{v!=null?`${v} min`:"—"}</span>
                 </div>
               ))}
             </div>
@@ -2167,15 +2817,15 @@ export default function App(){
 
           <div>
             <div style={{...S.card,marginBottom:8}}>
-              <div style={{color:"#94a3b8",fontSize:"11px",fontWeight:600,marginBottom:8}}>LÍNEA DE TIEMPO</div>
+              <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:8}}>LÍNEA DE TIEMPO</div>
               <div style={{maxHeight:200,overflowY:"auto"}}>
                 {(c.timeline??[]).map((t,i)=>{const u=USERS.find(u=>u.id===t.actor);const te=t as typeof t & { eventId?: string; kind?: string; refInstructionId?: string };const eventKey=te.eventId??`${t.at}_${t.actor}_${i}`;const formalLabels: Record<string, string> = { INSTRUCTION_CREATED: UI_TEXT.labels.instructionCreated, INSTRUCTION_ACK: UI_TEXT.labels.instructionAck, INSTRUCTION_CLOSED: UI_TEXT.labels.instructionClosed };const formalLabel=te.kind&&formalLabels[te.kind];const isReply=te.kind==="INSTRUCTION_REPLY"&&te.refInstructionId;const ins=isReply?(c.instructions??[]).find(ins=>ins.id===te.refInstructionId):null;const impact=ins?.impactLevel??"L1";const scopeFLabel={OPERACIONES:UI_TEXT.labels.scopeOperaciones,FISCALIZACION:UI_TEXT.labels.scopeFiscalizacion,SEGURIDAD:UI_TEXT.labels.scopeSeguridad,TI:UI_TEXT.labels.scopeTI,INFRAESTRUCTURA:UI_TEXT.labels.scopeInfraestructura,OTRO:UI_TEXT.labels.scopeOtro}[ins?.scopeFunctional??"OPERACIONES"]??ins?.scopeFunctional??"";const replyPrefix=ins?`Respuesta a instrucción ${impact} ${scopeFLabel} (${fmtTime(ins.createdAt)}): `:(isReply?`${UI_TEXT.labels.instructionUnavailable}: `:"");const displayNote=formalLabel?(t.note??""):replyPrefix?(replyPrefix+(t.note??"")):(t.note??"");const typeLabel=formalLabel??(isReply?UI_TEXT.labels.instructionReplyLabel:t.type);return(
-                  <div key={eventKey} style={{display:"flex",gap:8,alignItems:"flex-start",paddingBottom:8,borderBottom:"1px solid #1e2535"}}>
-                    <div style={{width:6,height:6,borderRadius:"50%",background:tlC[t.type]||"#64748b",marginTop:5,flexShrink:0}}/>
+                  <div key={eventKey} style={{display:"flex",gap:8,alignItems:"flex-start",paddingBottom:8,borderBottom:"1px solid #e5e7eb"}}>
+                    <div style={{width:6,height:6,borderRadius:"50%",background:tlC[t.type]||themeColor("muted"),marginTop:5,flexShrink:0}}/>
                     <div>
-                      <div style={{fontSize:"10px",color:"#475569"}}>{fmtDate(t.at)}</div>
-                      <div style={{fontSize:"11px",color:tlC[t.type]||"#64748b",fontWeight:600}}>{typeLabel}</div>
-                      <div style={{fontSize:"11px",color:"#94a3b8"}}>{displayNote}{u&&<span style={{color:"#475569"}}> — {u.name}</span>}</div>
+                      <div style={{fontSize:"10px",color:themeColor("mutedDark")}}>{fmtDate(t.at)}</div>
+                      <div style={{fontSize:"11px",color:tlC[t.type]||themeColor("muted"),fontWeight:600}}>{typeLabel}</div>
+                      <div style={{fontSize:"11px",color:themeColor("mutedAlt")}}>{displayNote}{u&&<span style={{color:themeColor("mutedDark")}}> — {u.name}</span>}</div>
                     </div>
                   </div>
                 );})}
@@ -2183,16 +2833,16 @@ export default function App(){
             </div>
 
             <div style={{...S.card,marginBottom:8}}>
-              <div style={{color:"#94a3b8",fontSize:"11px",fontWeight:600,marginBottom:6}}>ACCIONES</div>
+              <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:6}}>ACCIONES</div>
               {((c.actions??[]) as { id?: string; action?: string; responsible?: string; at?: string; result?: string }[]).map((a)=>{const u=USERS.find(u=>u.id===a.responsible);return(
-                <div key={a.id ?? ""} style={{...S.card,background:"#111827",marginBottom:4}}>
+                <div key={a.id ?? ""} style={{...S.card,background:themeColor("bgSurface"),marginBottom:4}}>
                   <div style={{fontWeight:600,fontSize:"12px"}}>{a.action}</div>
-                  <div style={{fontSize:"10px",color:"#475569"}}>{u?.name} | {fmtDate(a.at)}</div>
-                  {a.result&&<div style={{fontSize:"11px",color:"#22c55e",marginTop:2}}>→ {a.result}</div>}
+                  <div style={{fontSize:"10px",color:themeColor("mutedDark")}}>{u?.name} | {fmtDate(a.at)}</div>
+                  {a.result&&<div style={{fontSize:"11px",color:themeColor("success"),marginTop:2}}>→ {a.result}</div>}
                 </div>
               );})}
               {!isClosed&&canDo("update",currentUser,c)&&(
-                <div style={{marginTop:6,borderTop:"1px solid #2d3748",paddingTop:6}}>
+                <div style={{marginTop:6,borderTop:"1px solid #e5e7eb",paddingTop:6}}>
                   <input style={{...S.inp,marginBottom:4}} placeholder="Acción..." value={aForm.action} onChange={e=>setAForm(p=>({...p,action:e.target.value}))}/>
                   <div style={{...S.g2,marginBottom:4}}>
                     <select style={S.inp} value={aForm.responsible} onChange={e=>setAForm(p=>({...p,responsible:e.target.value}))}>
@@ -2206,10 +2856,10 @@ export default function App(){
             </div>
 
             <div style={{...S.card,marginBottom:8}}>
-              <div style={{color:"#94a3b8",fontSize:"11px",fontWeight:600,marginBottom:6}}>DECISIONES</div>
+              <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:6}}>DECISIONES</div>
               {((c.decisions??[]) as { who?: string; fundament?: string }[]).map((d,i)=>{const u=USERS.find(u=>u.id===d.who);return(
-                <div key={i} style={{fontSize:"11px",marginBottom:4,padding:4,background:"#111827",borderRadius:3}}>
-                  <span style={{color:"#64748b"}}>{u?.name}: </span>{d.fundament}
+                <div key={i} style={{fontSize:"11px",marginBottom:4,padding:4,background:themeColor("legacyGrayBg"),borderRadius:3}}>
+                  <span style={{color:themeColor("muted")}}>{u?.name}: </span>{d.fundament}
                 </div>
               );})}
               {!isClosed&&(canDo("update",currentUser,c)||canDo("close",currentUser,c))&&(
@@ -2219,10 +2869,10 @@ export default function App(){
                 </div>
               )}
               {canDo("close",currentUser,c)&&c.status!=="Cerrado"&&(
-                <div style={{marginTop:8,padding:6,background:"#111827",borderRadius:4,fontSize:"10px"}}>
-                  <div style={{color:"#64748b",fontWeight:600,marginBottom:3}}>PRE-REQUISITOS DE CIERRE:</div>
+                <div style={{marginTop:8,padding:6,background:themeColor("legacyGrayBg"),borderRadius:4,fontSize:"10px"}}>
+                  <div style={{color:themeColor("muted"),fontWeight:600,marginBottom:3}}>PRE-REQUISITOS DE CIERRE:</div>
                   {[[c.actions?.length,"Al menos 1 acción"],[c.decisions?.length,"Al menos 1 decisión"],[c.status==="Resuelto","Estado = Resuelto"],[!!c.closingMotivo,"Motivo guardado"],[!c.bypassFlagged||!!c.bypassValidated,"Bypass resuelto"]].map(([ok,lbl],idx)=>(
-                    <div key={`req-${idx}-${String(lbl)}`} style={{color:ok?"#22c55e":"#ef4444"}}>{ok?"✓":"✕"} {lbl}</div>
+                    <div key={`req-${idx}-${String(lbl)}`} style={{color:ok?themeColor("success"):themeColor("danger")}}>{ok?"✓":"✕"} {lbl}</div>
                   ))}
                 </div>
               )}
@@ -2230,9 +2880,9 @@ export default function App(){
 
             {/* INSTRUCCIONES — lista */}
             <div style={{...S.card,marginBottom:8}}>
-              <div style={{color:"#94a3b8",fontSize:"11px",fontWeight:600,marginBottom:8}}>{UI_TEXT.labels.instructionsTitle}</div>
+              <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:8}}>{UI_TEXT.labels.instructionsTitle}</div>
               {instructionsSorted.length === 0 ? (
-                <div style={{fontSize:"12px",color:"#64748b"}}>{UI_TEXT.labels.instructionsEmpty}</div>
+                <div style={{fontSize:"12px",color:themeColor("muted")}}>{UI_TEXT.labels.instructionsEmpty}</div>
               ) : (
                 <div style={{display:"flex",flexDirection:"column",gap:8}}>
                   {instructionsSorted.map((ins) => {
@@ -2243,23 +2893,35 @@ export default function App(){
                     const scopeFLabel = { OPERACIONES: UI_TEXT.labels.scopeOperaciones, FISCALIZACION: UI_TEXT.labels.scopeFiscalizacion, SEGURIDAD: UI_TEXT.labels.scopeSeguridad, TI: UI_TEXT.labels.scopeTI, INFRAESTRUCTURA: UI_TEXT.labels.scopeInfraestructura, OTRO: UI_TEXT.labels.scopeOtro }[scopeF] ?? scopeF;
                     const hasBypass = ins.bypass?.enabled === true;
                     return (
-                      <div key={ins.id} style={{...S.card,background:"#111827",padding:8}}>
-                        <div style={{fontSize:"11px",color:"#64748b",marginBottom:4,display:"flex",flexWrap:"wrap",gap:6,alignItems:"center"}}>
+                      <div key={ins.id} style={{...S.card,background:themeColor("bgSurface"),padding:8}}>
+                        <div style={{fontSize:"11px",color:themeColor("muted"),marginBottom:4,display:"flex",flexWrap:"wrap",gap:6,alignItems:"center"}}>
                           <span>{ins.scope} · {ins.audience} · {fmtDate(ins.createdAt)}</span>
-                          <span style={S.badge(impact === "L3" ? "#ef4444" : impact === "L2" ? "#f97316" : "#64748b")}>{impact}</span>
-                          <span style={{color:"#94a3b8"}}>{scopeFLabel}</span>
-                          {hasBypass && <span style={S.badge("#7f1d1d")} title={ins.bypass?.reason}>{UI_TEXT.labels.instructionBypassBadge}</span>}
+                          <Badge style={S.badge(impact === "L3" ? themeColor("danger") : impact === "L2" ? themeColor("warning") : themeColor("muted"))} size="sm">
+                            {impact}
+                          </Badge>
+                          <span style={{color:themeColor("mutedAlt")}}>{scopeFLabel}</span>
+                          {hasBypass && (
+                            <Tooltip content={ins.bypass?.reason || ""}>
+                              <Badge style={{ ...S.badge(themeColor("legacyRedDark")), cursor:"help" }} size="sm">
+                                {UI_TEXT.labels.instructionBypassBadge}
+                              </Badge>
+                            </Tooltip>
+                          )}
                         </div>
-                        <div style={{fontSize:"10px",color:"#475569",marginBottom:2}}>{USERS.find(u=>u.id===ins.createdBy)?.name ?? ins.createdBy}</div>
+                        <div style={{fontSize:"10px",color:themeColor("mutedDark"),marginBottom:2}}>{USERS.find(u=>u.id===ins.createdBy)?.name ?? ins.createdBy}</div>
                         <div style={{fontWeight:600,fontSize:"12px",marginBottom:4}}>{ins.summary}</div>
-                        {ins.details && <div style={{fontSize:"11px",color:"#94a3b8",marginBottom:4}}>{ins.details}</div>}
+                        {ins.details && <div style={{fontSize:"11px",color:themeColor("mutedAlt"),marginBottom:4}}>{ins.details}</div>}
                         {ins.cc?.length ? (
-                          <div style={{fontSize:10,color:"#64748b",marginBottom:4}}>{UI_TEXT.labelsCc?.ccReadOnly ?? "Con copia:"} {ins.cc.map(x=>x.label).join(", ")}</div>
+                          <div style={{fontSize:10,color:themeColor("muted"),marginBottom:4}}>{UI_TEXT.labelsCc?.ccReadOnly ?? "Con copia:"} {ins.cc.map(x=>x.label).join(", ")}</div>
                         ) : null}
                         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:4}}>
-                          <span style={S.badge(acked ? "#22c55e" : "#eab308")}>{acked ? UI_TEXT.labels.statusAcked : UI_TEXT.labels.statusPending}</span>
-                          {isClosedStatus(ins.status) && <span style={S.badge("#64748b")}>Cerrada</span>}
-                          {last && <span style={{fontSize:"10px",color:"#64748b"}}>Acusado: {USERS.find(u=>u.id===last.userId)?.name ?? last.userId} @ {fmtDate(last.at)}</span>}
+                          <Badge style={S.badge(acked ? themeColor("success") : themeColor("warningAlt"))} size="sm">
+                            {acked ? UI_TEXT.labels.statusAcked : UI_TEXT.labels.statusPending}
+                          </Badge>
+                          {isClosedStatus(ins.status) && (
+                            <Badge style={S.badge(themeColor("muted"))} size="sm">Cerrada</Badge>
+                          )}
+                          {last && <span style={{fontSize:"10px",color:themeColor("muted")}}>Acusado: {USERS.find(u=>u.id===last.userId)?.name ?? last.userId} @ {fmtDate(last.at)}</span>}
                           {!acked && currentUser?.id && ins.ackRequired && (
                             <button style={{...S.btn("primary"),fontSize:"10px",padding:"4px 8px"}} title={UI_TEXT.tooltips.ackConfirmReceipt} disabled={!!busyAction[`ack_${c.id}_${ins.id}`]} onClick={()=>withBusy(`ack_${c.id}_${ins.id}`,()=>ackInstruction(c.id,ins.id))}>{UI_TEXT.buttons.ackConfirmReceipt}</button>
                           )}
@@ -2269,7 +2931,7 @@ export default function App(){
                         </div>
                         {/* Fase 3.5 — Responder a instrucción (COMMENT en timeline con refInstructionId) */}
                         {currentUser?.id && (
-                          <div style={{marginTop:6,borderTop:"1px solid #1e293b",paddingTop:6}}>
+                          <div style={{marginTop:6,borderTop:"1px solid #e5e7eb",paddingTop:6}}>
                             {replyingToInstructionId !== ins.id ? (
                               <button style={{...S.btn("dark"),fontSize:"10px",padding:"4px 8px"}} onClick={()=>{setReplyingToInstructionId(ins.id);setReplyDraft("");}}>{UI_TEXT.buttons.replyToInstruction}</button>
                             ) : (
@@ -2293,7 +2955,7 @@ export default function App(){
             {/* CREAR INSTRUCCIÓN — solo si instruct */}
             {canDo("instruct", currentUser) && (
               <div style={{...S.card,marginBottom:8}}>
-                <div style={{color:"#94a3b8",fontSize:"11px",fontWeight:600,marginBottom:8}}>{UI_TEXT.labels.instructionCreateTitle}</div>
+                <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:8}}>{UI_TEXT.labels.instructionCreateTitle}</div>
                 <div style={S.g2}>
                   <label style={S.lbl}>{UI_TEXT.labels.scopeLabel}</label>
                   <select style={S.inp} value={insScope} onChange={e=>setInsScope(e.target.value)}>
@@ -2324,7 +2986,7 @@ export default function App(){
                   </select>
                 </div>
                 {isNivelCentral(currentUser?.id ?? "") && (insAudience === "PESE" || insAudience === "DELEGADO") && (
-                  <div style={{marginBottom:8,padding:8,background:"rgba(245,158,11,0.15)",border:"1px solid rgba(245,158,11,0.5)",borderRadius:4,fontSize:11,color:"#fcd34d"}}>
+                  <div style={{marginBottom:8,padding:8,background:"rgba(245,158,11,0.15)",border:"1px solid rgba(245,158,11,0.5)",borderRadius:4,fontSize:11,color:themeColor("legacyAmberBadge")}}>
                     {UI_TEXT.warnings?.centralToPeseOrDelegado ?? "Advertencia: instrucción desde Nivel Central a PESE/DELEGADO."}
                   </div>
                 )}
@@ -2357,7 +3019,7 @@ export default function App(){
 
             {/* COMENTARIO */}
             <div style={S.card}>
-              <div style={{color:"#94a3b8",fontSize:"11px",fontWeight:600,marginBottom:6}}>{UI_TEXT.labels.commentTitle}</div>
+              <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:6}}>{UI_TEXT.labels.commentTitle}</div>
               <textarea style={{...S.inp,height:50,resize:"vertical"}} value={cmtTxt} onChange={e=>setCmtTxt(e.target.value)} placeholder={UI_TEXT.misc.commentPlaceholder}/>
               <button style={{...S.btn("dark"),marginTop:4}} onClick={()=>{if(!cmtTxt)return;addComment(c.id, cmtTxt);setCmtTxt("");notify("Registrado");}}>+ {UI_TEXT.buttons.addComment}</button>
             </div>
@@ -2367,17 +3029,24 @@ export default function App(){
         {!isOpView&&(
         <div style={{...S.card,marginTop:10}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-            <div style={{color:"#94a3b8",fontSize:"11px",fontWeight:600}}>AUDITORÍA ({ca.length} eventos)</div>
-            <span style={S.badge(chainResult.ok?"#22c55e":"#ef4444")}>{chainResult.ok?"🔗 Cadena íntegra":"⚠️ Comprometida"}</span>
+            <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600}}>AUDITORÍA ({ca.length} eventos)</div>
+            <Tooltip content={chainResult.ok ? "Cadena íntegra (hashes coinciden)" : "Cadena comprometida (revisar eventos y hash previo)"}>
+              <Badge
+                style={{ ...S.badge(chainResult.ok ? themeColor("success") : themeColor("danger")), cursor:"help" }}
+                size="sm"
+              >
+                {chainResult.ok ? "🔗 Cadena íntegra" : "⚠️ Comprometida"}
+              </Badge>
+            </Tooltip>
           </div>
           <div style={{maxHeight:140,overflowY:"auto"}}>
-            {ca.map((e,i)=>{const u=USERS.find(u=>u.id===e.actor);const tc: Record<string, string> = {CASE_CREATED:"#22c55e",BYPASS_USED:"#f97316",BYPASS_FLAGGED:"#ef4444",INSTRUCTION_BYPASS_USED:"#b91c1c",ESCALATED:"#ef4444",STATUS_CHANGED:"#eab308",ACTION_ADDED:"#94a3b8",EXPORT_DONE:"#6366f1",COMMENT_ADDED:"#64748b",REASSESSMENT:"#f97316",DECISION_ADDED:"#3b82f6",ASSIGNED:"#a78bfa"};
-              return<div key={i} style={{display:"flex",gap:6,fontSize:"10px",padding:"3px 0",borderBottom:"1px solid #1e2535",flexWrap:"wrap"}}>
-                <span style={{color:"#475569",flexShrink:0,width:108}}>{fmtDate(e.at)}</span>
-                <span style={{color:tc[e.type]||"#64748b",fontWeight:600,flexShrink:0,width:130}}>{e.type}</span>
-                <span style={{color:"#64748b",flexShrink:0,width:100}}>{u?.name||e.actor}</span>
-                <span style={{color:"#94a3b8",flexGrow:1}}>{e.summary}</span>
-                <span style={{color:"#2d3748",fontFamily:"monospace",fontSize:"9px"}}>{e.hash}</span>
+            {ca.map((e,i)=>{const u=USERS.find(u=>u.id===e.actor);const tc: Record<string, string> = {CASE_CREATED:themeColor("success"),BYPASS_USED:themeColor("warning"),BYPASS_FLAGGED:themeColor("danger"),INSTRUCTION_BYPASS_USED:themeColor("legacyRedDarkText"),ESCALATED:themeColor("danger"),STATUS_CHANGED:themeColor("warningAlt"),ACTION_ADDED:themeColor("mutedAlt"),EXPORT_DONE:themeColor("purple"),COMMENT_ADDED:themeColor("muted"),REASSESSMENT:themeColor("warning"),DECISION_ADDED:themeColor("primary"),ASSIGNED:themeColor("purpleLight")};
+              return<div key={i} style={{display:"flex",gap:6,fontSize:"10px",padding:"3px 0",borderBottom:"1px solid #e5e7eb",flexWrap:"wrap"}}>
+                <span style={{color:themeColor("mutedDark"),flexShrink:0,width:108}}>{fmtDate(e.at)}</span>
+                <span style={{color:tc[e.type]||themeColor("muted"),fontWeight:600,flexShrink:0,width:130}}>{e.type}</span>
+                <span style={{color:themeColor("muted"),flexShrink:0,width:100}}>{u?.name||e.actor}</span>
+                <span style={{color:themeColor("mutedAlt"),flexGrow:1}}>{e.summary}</span>
+                <span style={{color:themeColor("legacyGrayBorder"),fontFamily:"monospace",fontSize:"9px"}}>{e.hash}</span>
               </div>;
             })}
           </div>
@@ -2394,58 +3063,60 @@ export default function App(){
     const[newNombre,setNewNombre]=useState("");
     const[showInactive,setShowInactive]=useState(false);
     const[searchCat,setSearchCat]=useState("");
-    const violations=useMemo(()=>catalogSelfCheck(localCatalog),[localCatalog]);
+    const violations=useMemo(()=>catalogSelfCheck(localCatalog),[]);
     const filtered=useMemo(()=>localCatalog.filter(l=>{
-      if(l.region!==catRegion)return false;
+      if(catRegion!=="ALL"&&l.region!==catRegion)return false;
       if(catCommune&&l.commune!==catCommune)return false;
       if(!showInactive&&!l.activoGlobal)return false;
       if(searchCat&&!l.nombre.toLowerCase().includes(searchCat.toLowerCase()))return false;
       return true;
-    }),[localCatalog,catRegion,catCommune,showInactive,searchCat]);
-    const rData=regionsMap[catRegion];
+    }),[catRegion,catCommune,showInactive,searchCat]);
+    const rData=catRegion==="ALL"?undefined:regionsMap[catRegion];
     return(
       <div>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:6}}>
           <h2 style={{margin:0,fontSize:"16px"}}>🗂 Catálogo Maestro de Locales</h2>
-          <span style={{...S.badge("#374151"),fontSize:"9px"}}>v1.9 · Modelo B + Snapshots</span>
+          <Badge style={{ ...S.badge(themeColor("mutedDarker")), fontSize: "9px" }} size="xs">
+            v1.9 · Modelo B + Snapshots
+          </Badge>
         </div>
         {violations.length>0&&(
-          <div style={{...S.card,background:"#2d0a0a",border:"2px solid #ef4444",marginBottom:10}}>
-            <div style={{color:"#ef4444",fontWeight:700,marginBottom:4}}>⛔ INVARIANTES VIOLADAS ({violations.length})</div>
-            {violations.map((v,i)=><div key={i} style={{fontSize:"11px",color:"#f87171"}}>{v}</div>)}
+          <div style={{...S.card,background:themeColor("redBlock"),border:"2px solid #ef4444",marginBottom:10}}>
+            <div style={{color:themeColor("danger"),fontWeight:700,marginBottom:4}}>⛔ INVARIANTES VIOLADAS ({violations.length})</div>
+            {violations.map((v,i)=><div key={i} style={{fontSize:"11px",color:themeColor("legacyRedText")}}>{v}</div>)}
           </div>
         )}
         {divergencias.length>0&&(
-          <div style={{...S.card,background:"#1c1408",border:"1px solid #f9731644",marginBottom:10}}>
-            <div style={{color:"#f97316",fontWeight:700,fontSize:"12px",marginBottom:4}}>⚡ {divergencias.length} caso(s) abierto(s) afectado(s) por cambios en catálogo</div>
+          <div style={{...S.card,background:themeColor("orangeBlock"),border:"1px solid #f9731644",marginBottom:10}}>
+            <div style={{color:themeColor("warning"),fontWeight:700,fontSize:"12px",marginBottom:4}}>⚡ {divergencias.length} caso(s) abierto(s) afectado(s) por cambios en catálogo</div>
             {divergencias.map(x=>(
-              <div key={x.caseId} style={{fontSize:"11px",color:"#94a3b8",marginBottom:2}}>
-                <span style={{fontFamily:"monospace",color:"#64748b"}}>{x.caseId}</span> — {x.div?.msg}
+              <div key={x.caseId} style={{fontSize:"11px",color:themeColor("mutedAlt"),marginBottom:2}}>
+                <span style={{fontFamily:"monospace",color:themeColor("muted")}}>{x.caseId}</span> — {x.div?.msg}
               </div>
             ))}
           </div>
         )}
         <div style={{...S.g4,marginBottom:10}}>
-          {[{l:"Total",v:localCatalog.length,c:"#3b82f6"},{l:"Activos global",v:localCatalog.filter(l=>l.activoGlobal).length,c:"#22c55e"},{l:"Activos elección",v:localCatalog.filter(l=>l.activoEnEleccionActual).length,c:"#a78bfa"},{l:"Inactivos (SD)",v:localCatalog.filter(l=>!l.activoGlobal).length,c:"#ef4444"}].map(k=>(
-            <div key={k.l} style={S.card}><div style={{color:k.c,fontSize:"20px",fontWeight:700}}>{k.v}</div><div style={{color:"#64748b",fontSize:"11px"}}>{k.l}</div></div>
+          {[{l:"Total",v:localCatalog.length,c:themeColor("primary")},{l:"Activos global",v:localCatalog.filter(l=>l.activoGlobal).length,c:themeColor("success")},{l:"Activos elección",v:localCatalog.filter(l=>l.activoEnEleccionActual).length,c:themeColor("purpleLight")},{l:"Inactivos (SD)",v:localCatalog.filter(l=>!l.activoGlobal).length,c:themeColor("danger")}].map(k=>(
+            <div key={k.l} style={S.card}><div style={{color:k.c,fontSize:"20px",fontWeight:700}}>{k.v}</div><div style={{color:themeColor("muted"),fontSize:"11px"}}>{k.l}</div></div>
           ))}
         </div>
         <div style={{...S.card,marginBottom:8,display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
           <select style={{...S.inp,width:"180px"}} value={catRegion} onChange={e=>{setCatRegion(e.target.value);setCatCommune("");}}>
-            {Object.entries(regionsMap).map(([k,v])=><option key={k} value={k}>{v?.name}</option>)}
+            {regionOptions.map((o)=><option key={o.code} value={o.code}>{o.name}</option>)}
           </select>
-          <select style={{...S.inp,width:"160px"}} value={catCommune} onChange={e=>setCatCommune(e.target.value)}>
+          <select style={{...S.inp,width:"160px"}} value={catCommune} onChange={e=>setCatCommune(e.target.value)} disabled={catRegion==="ALL"}>
             <option value="">Todas las comunas</option>
-            {Object.entries(rData?.communes||{}).map(([k,v])=><option key={k} value={k}>{v.name}</option>)}
+            {Object.entries(rData?.communes||{}).map(([k,v])=><option key={k} value={k}>{(v as { name?: string }).name}</option>)}
           </select>
           <input style={{...S.inp,width:"160px"}} placeholder="🔍 Buscar local..." value={searchCat} onChange={e=>setSearchCat(e.target.value)}/>
-          <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:"12px",color:"#94a3b8",whiteSpace:"nowrap"}}>
+          <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:"12px",color:themeColor("mutedAlt"),whiteSpace:"nowrap"}}>
             <input type="checkbox" checked={showInactive} onChange={e=>setShowInactive(e.target.checked)}/>
             Ver inactivos
           </label>
         </div>
         <div style={{...S.card,marginBottom:10,border:"1px solid #22c55e44"}}>
-          <div style={{color:"#94a3b8",fontSize:"11px",fontWeight:600,marginBottom:8}}>+ AGREGAR LOCAL</div>
+          <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:8}}>+ AGREGAR LOCAL</div>
           <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"flex-end"}}>
             <div style={{flex:1,minWidth:150}}>
               <label style={S.lbl}>Región</label>
@@ -2468,27 +3139,29 @@ export default function App(){
           </div>
         </div>
         <div style={S.card}>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 110px 80px 80px 70px 120px",gap:6,padding:"4px 0",borderBottom:"1px solid #2d3748",fontSize:"10px",color:"#475569",fontWeight:700}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 110px 80px 80px 70px 120px",gap:6,padding:"4px 0",borderBottom:"1px solid #e5e7eb",fontSize:"10px",color:themeColor("mutedDark"),fontWeight:700}}>
             <span>LOCAL</span><span>CÓDIGO</span><span>GLOBAL</span><span>ELECCIÓN</span><span>ORIGEN</span><span>ACCIONES</span>
           </div>
           <div style={{maxHeight:400,overflowY:"auto"}}>
-            {filtered.length===0&&<div style={{color:"#475569",textAlign:"center",padding:20}}>Sin locales para los filtros</div>}
+            {filtered.length===0&&<div style={{color:themeColor("mutedDark"),textAlign:"center",padding:20}}>Sin locales para los filtros</div>}
             {filtered.map(l=>{
               const hasDivCase=divergencias.some(d=>cases.find(c=>c.id===d.caseId)?.localSnapshot?.idLocal===l.idLocal);
               return(
-                <div key={l.idLocal} style={{display:"grid",gridTemplateColumns:"1fr 110px 80px 80px 70px 120px",gap:6,padding:"5px 0",borderBottom:"1px solid #1e2535",alignItems:"center",opacity:l.activoGlobal?1:0.5}}>
+                <div key={l.idLocal} style={{display:"grid",gridTemplateColumns:"1fr 110px 80px 80px 70px 120px",gap:6,padding:"5px 0",borderBottom:"1px solid #e5e7eb",alignItems:"center",opacity:l.activoGlobal?1:0.5}}>
                   <div>
-                    <div style={{fontWeight:600,fontSize:"12px",color:l.activoGlobal?"#e2e8f0":"#475569",display:"flex",alignItems:"center",gap:4}}>
+                    <div style={{fontWeight:600,fontSize:"12px",color:l.activoGlobal?themeColor("legacySlate"):themeColor("mutedDark"),display:"flex",alignItems:"center",gap:4}}>
                       {l.nombre}
-                      {hasDivCase&&<span style={{...S.badge("#f97316"),fontSize:"8px"}}>⚡ caso activo</span>}
+                      {hasDivCase && (
+                        <Badge style={{ ...S.badge(themeColor("warning")), fontSize: "8px" }} size="xs">⚡ caso activo</Badge>
+                      )}
                     </div>
-                    <div style={{fontSize:"10px",color:"#475569"}}>{regionsMap[l.region]?.communes?.[l.commune]?.name||l.commune}</div>
-                    {l.fechaDesactivacion&&<div style={{fontSize:"9px",color:"#ef4444"}}>SD: {fmtDate(l.fechaDesactivacion)}</div>}
+                    <div style={{fontSize:"10px",color:themeColor("mutedDark")}}>{regionsMap[l.region]?.communes?.[l.commune]?.name||l.commune}</div>
+                    {l.fechaDesactivacion&&<div style={{fontSize:"9px",color:themeColor("danger")}}>SD: {fmtDate(l.fechaDesactivacion)}</div>}
                   </div>
-                  <span style={{fontFamily:"monospace",fontSize:"10px",color:"#475569"}}>{l.idLocal}</span>
-                  <span style={S.badge(l.activoGlobal?"#22c55e":"#ef4444")}>{l.activoGlobal?"Activo":"Inactivo"}</span>
-                  <span style={S.badge(l.activoEnEleccionActual?"#a78bfa":"#374151")}>{l.activoEnEleccionActual?"Sí":"No"}</span>
-                  <span style={{fontSize:"10px",color:"#475569"}}>{l.origenSeed?"Seed":"Manual"}</span>
+                  <span style={{fontFamily:"monospace",fontSize:"10px",color:themeColor("mutedDark")}}>{l.idLocal}</span>
+                  <Badge style={S.badge(l.activoGlobal ? themeColor("success") : themeColor("danger"))} size="sm">{l.activoGlobal ? "Activo" : "Inactivo"}</Badge>
+                  <Badge style={S.badge(l.activoEnEleccionActual ? themeColor("purpleLight") : themeColor("mutedDarker"))} size="sm">{l.activoEnEleccionActual ? "Sí" : "No"}</Badge>
+                  <span style={{fontSize:"10px",color:themeColor("mutedDark")}}>{l.origenSeed?"Seed":"Manual"}</span>
                   <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
                     {l.activoGlobal?(
                       <>
@@ -2505,20 +3178,20 @@ export default function App(){
           </div>
         </div>
         <div style={{...S.card,marginTop:10}}>
-          <div style={{color:"#94a3b8",fontSize:"11px",fontWeight:600,marginBottom:6}}>AUDITORÍA DE CATÁLOGO</div>
+          <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:6}}>AUDITORÍA DE CATÁLOGO</div>
           <div style={{maxHeight:130,overflowY:"auto"}}>
             {[...auditLog].filter(e=>["LOCAL_CREATED","LOCAL_DEACTIVATED","LOCAL_REACTIVATED","LOCAL_ELECTION_TOGGLED"].includes(e.type)).slice(-20).reverse().map((e,i)=>{
               const u=USERS.find(u=>u.id===e.actor);
-              const tc: Record<string, string> = {LOCAL_CREATED:"#22c55e",LOCAL_DEACTIVATED:"#ef4444",LOCAL_REACTIVATED:"#f97316",LOCAL_ELECTION_TOGGLED:"#a78bfa"};
-              return<div key={i} style={{display:"flex",gap:6,fontSize:"10px",padding:"3px 0",borderBottom:"1px solid #1e2535",flexWrap:"wrap"}}>
-                <span style={{color:"#475569",width:108,flexShrink:0}}>{fmtDate(e.at)}</span>
-                <span style={{color:tc[e.type]||"#64748b",fontWeight:600,width:160,flexShrink:0}}>{e.type}</span>
-                <span style={{color:"#64748b",width:100,flexShrink:0}}>{u?.name||e.actor}</span>
-                <span style={{color:"#94a3b8",flexGrow:1}}>{e.summary}</span>
+              const tc: Record<string, string> = {LOCAL_CREATED:themeColor("success"),LOCAL_DEACTIVATED:themeColor("danger"),LOCAL_REACTIVATED:themeColor("warning"),LOCAL_ELECTION_TOGGLED:themeColor("purpleLight")};
+              return<div key={i} style={{display:"flex",gap:6,fontSize:"10px",padding:"3px 0",borderBottom:"1px solid #e5e7eb",flexWrap:"wrap"}}>
+                <span style={{color:themeColor("mutedDark"),width:108,flexShrink:0}}>{fmtDate(e.at)}</span>
+                <span style={{color:tc[e.type]||themeColor("muted"),fontWeight:600,width:160,flexShrink:0}}>{e.type}</span>
+                <span style={{color:themeColor("muted"),width:100,flexShrink:0}}>{u?.name||e.actor}</span>
+                <span style={{color:themeColor("mutedAlt"),flexGrow:1}}>{e.summary}</span>
               </div>;
             })}
             {!auditLog.some(e=>["LOCAL_CREATED","LOCAL_DEACTIVATED","LOCAL_REACTIVATED","LOCAL_ELECTION_TOGGLED"].includes(e.type))&&(
-              <div style={{color:"#475569",textAlign:"center",padding:12}}>Sin operaciones de catálogo</div>
+              <div style={{color:themeColor("mutedDark"),textAlign:"center",padding:12}}>Sin operaciones de catálogo</div>
             )}
           </div>
         </div>
@@ -2541,28 +3214,28 @@ export default function App(){
       <div>
         <h2 style={{margin:"0 0 12px",fontSize:"16px"}}>Respaldos y reportes</h2>
         <div style={{...S.g4,marginBottom:10}}>
-          {[{l:"Total casos",v:cases.length,c:"#3b82f6"},{l:"Críticos",v:cases.filter(c=>c.criticality==="CRITICA").length,c:"#ef4444"},{l:"Bypass Flagged",v:cases.filter(c=>c.bypassFlagged&&!c.bypassValidated).length,c:"#f97316"},{l:"Con Snapshot",v:cases.filter(c=>c.localSnapshot).length,c:"#6366f1"}].map(k=>(
-            <div key={k.l} style={S.card}><div style={{color:k.c,fontSize:"22px",fontWeight:700}}>{k.v}</div><div style={{color:"#64748b",fontSize:"11px"}}>{k.l}</div></div>
+          {[{l:"Total casos",v:cases.length,c:themeColor("primary")},{l:"Críticos",v:cases.filter(c=>c.criticality==="CRITICA").length,c:themeColor("danger")},{l:"Bypass Flagged",v:cases.filter(c=>c.bypassFlagged&&!c.bypassValidated).length,c:themeColor("warning")},{l:"Con Snapshot",v:cases.filter(c=>c.localSnapshot).length,c:themeColor("purple")}].map(k=>(
+            <div key={k.l} style={S.card}><div style={{color:k.c,fontSize:"22px",fontWeight:700}}>{k.v}</div><div style={{color:themeColor("muted"),fontSize:"11px"}}>{k.l}</div></div>
           ))}
         </div>
         <div style={{...S.g2,marginBottom:10}}>
           <div style={S.card}>
-            <div style={{color:"#94a3b8",fontSize:"11px",fontWeight:600,marginBottom:8}}>MÉTRICAS</div>
+            <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:8}}>MÉTRICAS</div>
             {metricas.map(([l,v,u])=>(
               <div key={l} style={{display:"flex",justifyContent:"space-between",marginBottom:4,fontSize:"12px"}}>
-                <span style={{color:"#64748b"}}>{l}</span>
-                <span style={{color:v!=null?"#e2e8f0":"#475569",fontWeight:600}}>{v!=null?`${v} ${u}`:"—"}</span>
+                <span style={{color:themeColor("muted")}}>{l}</span>
+                <span style={{color:v!=null?themeColor("legacySlate"):themeColor("mutedDark"),fontWeight:600}}>{v!=null?`${v} ${u}`:"—"}</span>
               </div>
             ))}
           </div>
           <div style={S.card}>
-            <div style={{color:"#94a3b8",fontSize:"11px",fontWeight:600,marginBottom:8}}>CRITICIDAD</div>
+            <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:8}}>CRITICIDAD</div>
             {(["CRITICA","ALTA","MEDIA","BAJA"] as Criticality[]).map(cr=>{const n=cases.filter(c=>c.criticality===cr).length;return(
               <div key={cr} style={{marginBottom:6}}>
                 <div style={{display:"flex",justifyContent:"space-between",fontSize:"11px",marginBottom:2}}>
-                  <span style={{color:critColor(cr)}}>{cr}</span><span style={{color:"#94a3b8"}}>{n}</span>
+                  <span style={{color:critColor(cr)}}>{cr}</span><span style={{color:themeColor("mutedAlt")}}>{n}</span>
                 </div>
-                <div style={{height:4,background:"#1e2535",borderRadius:2}}>
+                <div style={{height:4,background:themeColor("legacyDark3"),borderRadius:2}}>
                   <div style={{height:"100%",width:cases.length?`${n/cases.length*100}%`:"0%",background:critColor(cr),borderRadius:2}}/>
                 </div>
               </div>
@@ -2570,7 +3243,7 @@ export default function App(){
           </div>
         </div>
         <div id="reports-export" style={{...S.card,marginBottom:10,scrollMarginTop:80}}>
-          <div style={{color:"#64748b",fontSize:"11px",fontWeight:700,marginBottom:8}}>RESPALDOS</div>
+          <div style={{color:themeColor("muted"),fontSize:"11px",fontWeight:700,marginBottom:8}}>RESPALDOS</div>
           <input ref={importJsonInputRef} type="file" accept="application/json,.json" style={{display:"none"}} onChange={importJSONSelected} />
           <input ref={importFileRef} type="file" accept="application/json" style={{display:"none"}} onChange={(e)=>{const f=e.target.files?.[0];e.currentTarget.value="";if(f)void onImportStateFile(f);}} />
           <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
@@ -2579,16 +3252,16 @@ export default function App(){
             <span id="reports-import">{canDo("export",currentUser)&&<button style={S.btn("primary")} onClick={importJSONClick}>⬆️ Cargar respaldo</button>}</span>
             {canDo("export",currentUser)&&<button style={S.btn("dark")} onClick={exportAuditCSV}>📑 Excel — Historial</button>}
           </div>
-          <div style={{fontSize:"11px",color:"#64748b",marginTop:8}}>Puedes descargar un respaldo del sistema o cargar uno oficial cuando sea necesario.</div>
+          <div style={{fontSize:"11px",color:themeColor("muted"),marginTop:8}}>Puedes descargar un respaldo del sistema o cargar uno oficial cuando sea necesario.</div>
         </div>
         {divergencias.length>0&&(
           <div style={{...S.card,border:"1px solid #f9731644"}}>
-            <div style={{color:"#f97316",fontWeight:700,fontSize:"12px",marginBottom:8}}>⚡ Divergencias catálogo activas ({divergencias.length})</div>
+            <div style={{color:themeColor("warning"),fontWeight:700,fontSize:"12px",marginBottom:8}}>⚡ Divergencias catálogo activas ({divergencias.length})</div>
             {divergencias.map(x=>(
-              <div key={x.caseId} style={{display:"flex",gap:8,alignItems:"center",marginBottom:4,fontSize:"11px",padding:"4px 0",borderBottom:"1px solid #1e2535"}}>
-                <span style={{fontFamily:"monospace",color:"#64748b",flexShrink:0}}>{x.caseId}</span>
-                <span style={{color:"#94a3b8",flex:1}}>{x.caseSummary.slice(0,50)}</span>
-                <span style={{color:"#f97316"}}>{x.div?.msg}</span>
+              <div key={x.caseId} style={{display:"flex",gap:8,alignItems:"center",marginBottom:4,fontSize:"11px",padding:"4px 0",borderBottom:"1px solid #e5e7eb"}}>
+                <span style={{fontFamily:"monospace",color:themeColor("muted"),flexShrink:0}}>{x.caseId}</span>
+                <span style={{color:themeColor("mutedAlt"),flex:1}}>{x.caseSummary.slice(0,50)}</span>
+                <span style={{color:themeColor("warning")}}>{x.div?.msg}</span>
               </div>
             ))}
           </div>
@@ -2605,12 +3278,19 @@ export default function App(){
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:6}}>
           <h2 style={{margin:0,fontSize:"16px"}}>Auditoría — Cadena Hash</h2>
           <div style={{display:"flex",gap:6,alignItems:"center"}}>
-            <span style={S.badge(ok?"#22c55e":"#ef4444")}>{ok?`🔗 Íntegra (${auditLog.length} eventos)`:`⚠️ Comprometida en evento ${failIndex}`}</span>
+            <Tooltip content={ok ? "Cadena íntegra (hashes coinciden)" : "Cadena comprometida (revisar integridad desde el índice indicado)"}>
+              <Badge
+                style={{ ...S.badge(ok ? themeColor("success") : themeColor("danger")), cursor: "help" }}
+                size="sm"
+              >
+                {ok ? `🔗 Íntegra (${auditLog.length} eventos)` : `⚠️ Comprometida en evento ${failIndex}`}
+              </Badge>
+            </Tooltip>
             {canDo("export",currentUser)&&<button style={S.btn("dark")} onClick={exportAuditCSV}>⬇ CSV</button>}
           </div>
         </div>
         <div style={S.card}>
-          <div style={{display:"grid",gridTemplateColumns:"110px 150px 100px 100px 1fr 80px",gap:4,padding:"4px 0",borderBottom:"1px solid #2d3748",fontSize:"10px",color:"#475569",fontWeight:700}}>
+          <div style={{display:"grid",gridTemplateColumns:"110px 150px 100px 100px 1fr 80px",gap:4,padding:"4px 0",borderBottom:"1px solid #e5e7eb",fontSize:"10px",color:themeColor("mutedDark"),fontWeight:700}}>
             <span>TIMESTAMP</span><span>TIPO</span><span>ACTOR</span><span>CASO</span><span>RESUMEN</span><span>HASH</span>
           </div>
           <div style={{maxHeight:500,overflowY:"auto"}}>
@@ -2618,14 +3298,14 @@ export default function App(){
               const u=USERS.find(u=>u.id===e.actor);
               const realIdx=auditLog.length-1-i;
               const isFail=!ok&&realIdx===failIndex;
-              const tc: Record<string, string> = {CASE_CREATED:"#22c55e",BYPASS_USED:"#f97316",BYPASS_FLAGGED:"#ef4444",ESCALATED:"#ef4444",STATUS_CHANGED:"#eab308",ACTION_ADDED:"#94a3b8",EXPORT_DONE:"#6366f1",LOCAL_CREATED:"#22c55e",LOCAL_DEACTIVATED:"#ef4444",LOCAL_REACTIVATED:"#f97316",LOCAL_ELECTION_TOGGLED:"#a78bfa"};
-              return<div key={i} style={{display:"grid",gridTemplateColumns:"110px 150px 100px 100px 1fr 80px",gap:4,padding:"4px 0",borderBottom:"1px solid #1e2535",fontSize:"10px",background:isFail?"#2d0a0a":"transparent"}}>
-                <span style={{color:"#475569"}}>{fmtDate(e.at)}</span>
-                <span style={{color:tc[e.type]||"#64748b",fontWeight:600}}>{e.type}</span>
-                <span style={{color:"#64748b"}}>{u?.name||e.actor}</span>
-                <span style={{color:"#475569",fontFamily:"monospace"}}>{e.caseId?.slice(-10)||"—"}</span>
-                <span style={{color:"#94a3b8"}}>{e.summary}</span>
-                <span style={{color:isFail?"#ef4444":"#2d3748",fontFamily:"monospace"}}>{e.hash}</span>
+              const tc: Record<string, string> = {CASE_CREATED:themeColor("success"),BYPASS_USED:themeColor("warning"),BYPASS_FLAGGED:themeColor("danger"),ESCALATED:themeColor("danger"),STATUS_CHANGED:themeColor("warningAlt"),ACTION_ADDED:themeColor("mutedAlt"),EXPORT_DONE:themeColor("purple"),LOCAL_CREATED:themeColor("success"),LOCAL_DEACTIVATED:themeColor("danger"),LOCAL_REACTIVATED:themeColor("warning"),LOCAL_ELECTION_TOGGLED:themeColor("purpleLight")};
+              return<div key={i} style={{display:"grid",gridTemplateColumns:"110px 150px 100px 100px 1fr 80px",gap:4,padding:"4px 0",borderBottom:"1px solid #e5e7eb",fontSize:"10px",background:isFail?themeColor("legacyRedBlock"):"transparent"}}>
+                <span style={{color:themeColor("mutedDark")}}>{fmtDate(e.at)}</span>
+                <span style={{color:tc[e.type]||themeColor("muted"),fontWeight:600}}>{e.type}</span>
+                <span style={{color:themeColor("muted")}}>{u?.name||e.actor}</span>
+                <span style={{color:themeColor("mutedDark"),fontFamily:"monospace"}}>{e.caseId?.slice(-10)||"—"}</span>
+                <span style={{color:themeColor("mutedAlt")}}>{e.summary}</span>
+                <span style={{color:isFail?themeColor("danger"):themeColor("legacyGrayBorder"),fontFamily:"monospace"}}>{e.hash}</span>
               </div>;
             })}
           </div>
@@ -2639,7 +3319,7 @@ export default function App(){
     <div>
       <h2 style={{margin:"0 0 12px",fontSize:"16px"}}>Simulación de Día de Elección</h2>
       <div style={{...S.card,marginBottom:10,border:"1px solid #6366f144"}}>
-        <div style={{color:"#94a3b8",fontSize:"11px",marginBottom:8}}>Genera 10 incidentes para entrenamiento. Los casos incluyen snapshot de local (v1.9).</div>
+        <div style={{color:themeColor("mutedAlt"),fontSize:"11px",marginBottom:8}}>Genera 10 incidentes para entrenamiento. Los casos incluyen snapshot de local (v1.9).</div>
         <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
           <button style={S.btn("primary")} onClick={runSimulation}>▶ Generar Simulación</button>
           {simCases.length>0&&<button style={S.btn("warning")} onClick={loadSimCases}>Cargar en Dashboard</button>}
@@ -2647,8 +3327,8 @@ export default function App(){
       </div>
       {simReport&&(
         <div style={{...S.g4,marginBottom:10}}>
-          {[{l:"Total",v:simReport.total,c:"#3b82f6"},{l:"Críticos",v:simReport.critica,c:"#ef4444"},{l:"Altos",v:simReport.alta,c:"#f97316"},{l:"Score prom.",v:simReport.avgScore,c:"#eab308"}].map(k=>(
-            <div key={k.l} style={S.card}><div style={{color:k.c,fontSize:"22px",fontWeight:700}}>{k.v}</div><div style={{color:"#64748b",fontSize:"11px"}}>{k.l}</div></div>
+          {[{l:"Total",v:simReport.total,c:themeColor("primary")},{l:"Críticos",v:simReport.critica,c:themeColor("danger")},{l:"Altos",v:simReport.alta,c:themeColor("warning")},{l:"Score prom.",v:simReport.avgScore,c:themeColor("warningAlt")}].map(k=>(
+            <div key={k.l} style={S.card}><div style={{color:k.c,fontSize:"22px",fontWeight:700}}>{k.v}</div><div style={{color:themeColor("muted"),fontSize:"11px"}}>{k.l}</div></div>
           ))}
         </div>
       )}
@@ -2656,26 +3336,26 @@ export default function App(){
         <div key={c.id} style={{...S.card,borderLeft:`3px solid ${critColor(c.criticality)}`,marginBottom:4}}>
           <div style={{display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:4}}>
             <div style={{display:"flex",gap:4,alignItems:"center",flexWrap:"wrap"}}>
-              <span style={{fontFamily:"monospace",color:"#64748b",fontSize:"10px"}}>{c.id}</span>
-              <span style={S.badge(critColor(c.criticality))}>{c.criticality}</span>
+              <span style={{fontFamily:"monospace",color:themeColor("muted"),fontSize:"10px"}}>{c.id}</span>
+              <Badge style={S.badge(critColor(c.criticality))} size="sm">{c.criticality}</Badge>
               <span style={{fontSize:"11px",fontWeight:600}}>{c.summary}</span>
             </div>
             <div style={{display:"flex",gap:4,alignItems:"center"}}>
-              <span style={{fontSize:"10px",color:"#60a5fa"}}>🏫 {c.local}</span>
-              {c.localSnapshot&&<span style={{fontSize:"9px",color:"#6366f1"}}>📸</span>}
+              <span style={{fontSize:"10px",color:themeColor("infoIcon")}}>🏫 {c.local}</span>
+              {c.localSnapshot&&<span style={{fontSize:"9px",color:themeColor("purple")}}>📸</span>}
             </div>
           </div>
         </div>
       ))}
       {simCases.length>0&&!simSurvey.submitted&&(
         <div style={{...S.card,marginTop:10,border:"1px solid #6366f144"}}>
-          <div style={{color:"#94a3b8",fontSize:"11px",fontWeight:600,marginBottom:8}}>Encuesta post-simulación</div>
+          <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:8}}>Encuesta post-simulación</div>
           {[{key:"claridad",label:"¿El sistema fue claro bajo presión?"},{key:"respaldo",label:"¿Los snapshots de local aportan confianza?"}].map(q=>(
             <div key={q.key} style={{marginBottom:8}}>
-              <div style={{fontSize:"12px",color:"#94a3b8",marginBottom:4}}>{q.label}</div>
+              <div style={{fontSize:"12px",color:themeColor("mutedAlt"),marginBottom:4}}>{q.label}</div>
               <div style={{display:"flex",gap:4}}>
                 {[1,2,3,4,5].map(n=>(
-                  <button key={n} onClick={()=>setSimSurvey(p=>({...p,[q.key]:n}))} style={{padding:"4px 10px",borderRadius:3,border:"1px solid",cursor:"pointer",background:(simSurvey as Record<string, number|boolean>)[q.key]===n?"#3b82f6":"transparent",borderColor:(simSurvey as Record<string, number|boolean>)[q.key]===n?"#3b82f6":"#374151",color:(simSurvey as Record<string, number|boolean>)[q.key]===n?"#fff":"#64748b"}}>{n}</button>
+                  <button key={n} onClick={()=>setSimSurvey(p=>({...p,[q.key]:n}))} style={{padding:"4px 10px",borderRadius:3,border:"1px solid",cursor:"pointer",background:(simSurvey as Record<string, number|boolean>)[q.key]===n?themeColor("primary"):"transparent",borderColor:(simSurvey as Record<string, number|boolean>)[q.key]===n?themeColor("primary"):themeColor("mutedDarker"),color:(simSurvey as Record<string, number|boolean>)[q.key]===n?themeColor("white"):themeColor("muted")}}>{n}</button>
                 ))}
               </div>
             </div>
@@ -2683,7 +3363,7 @@ export default function App(){
           <button style={S.btn("success")} onClick={()=>setSimSurvey(p=>({...p,submitted:true}))}>Enviar</button>
         </div>
       )}
-      {simSurvey.submitted&&<div style={{...S.card,marginTop:10,color:"#22c55e",fontWeight:600}}>✓ Encuesta registrada — Claridad: {simSurvey.claridad}/5 · Snapshots: {simSurvey.respaldo}/5</div>}
+      {simSurvey.submitted&&<div style={{...S.card,marginTop:10,color:themeColor("success"),fontWeight:600}}>✓ Encuesta registrada — Claridad: {simSurvey.claridad}/5 · Snapshots: {simSurvey.respaldo}/5</div>}
     </div>
   );
 
@@ -2710,15 +3390,17 @@ export default function App(){
       <div>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
           <h2 style={{margin:0,fontSize:"16px"}}>Checklist Electoral</h2>
-          <span style={S.badge(done===items.length?"#22c55e":"#3b82f6")}>{done}/{items.length}</span>
+          <Badge style={S.badge(done===items.length?themeColor("success"):themeColor("primary"))} size="sm">
+            {done}/{items.length}
+          </Badge>
         </div>
         {cats.map(cat=>(
           <div key={cat} style={{...S.card,marginBottom:8}}>
-            <div style={{color:"#94a3b8",fontSize:"11px",fontWeight:600,marginBottom:6}}>{cat.toUpperCase()}</div>
+            <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:6}}>{cat.toUpperCase()}</div>
             {items.filter(i=>i.cat===cat).map(it=>(
               <label key={it.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,cursor:"pointer"}}>
                 <input type="checkbox" checked={!!checks[it.id]} onChange={e=>setChecks(p=>({...p,[it.id]:e.target.checked}))}/>
-                <span style={{color:checks[it.id]?"#22c55e":"#e2e8f0",fontSize:"12px",textDecoration:checks[it.id]?"line-through":"none"}}>{it.text}</span>
+                <span style={{color:checks[it.id]?themeColor("success"):themeColor("legacySlate"),fontSize:"12px",textDecoration:checks[it.id]?"line-through":"none"}}>{it.text}</span>
               </label>
             ))}
           </div>
@@ -2749,7 +3431,7 @@ export default function App(){
       <div>
         <h2 style={{margin:"0 0 12px",fontSize:"16px"}}>Configuración</h2>
         <div style={{...S.card,marginBottom:10}}>
-          <div style={{color:"#94a3b8",fontSize:"11px",fontWeight:600,marginBottom:10}}>DATOS DE LA ELECCIÓN</div>
+          <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:10}}>DATOS DE LA ELECCIÓN</div>
           <div style={{...S.g2,marginBottom:8}}>
             <div>
               <label style={S.lbl}>Nombre del proceso</label>
@@ -2767,12 +3449,12 @@ export default function App(){
                 onChange={e=>{const y=parseInt(e.target.value);if(y>=MIN_ELECTION_YEAR&&y<=2099){setDraft(p=>({...p,year:y,name:`Elecciones Generales ${y}`,date:`${y}-11-15`}));setConfirmYear(false);}}}
               />
               {yearChanged&&(
-                <div style={{...S.card,background:"#1c1408",border:"1px solid #f9731644",padding:"8px 10px",flex:1}}>
-                  <div style={{color:"#f97316",fontSize:"11px",fontWeight:600,marginBottom:4}}>⚠️ Cambio: {electionConfig.year} → {draft.year}</div>
-                  <div style={{color:"#64748b",fontSize:"10px",marginBottom:6}}>{activeCatalogCount} local(es) activos en elección actual. Snapshots existentes quedan intactos.</div>
+                <div style={{...S.card,background:themeColor("orangeBlock"),border:"1px solid #f9731644",padding:"8px 10px",flex:1}}>
+                  <div style={{color:themeColor("warning"),fontSize:"11px",fontWeight:600,marginBottom:4}}>⚠️ Cambio: {electionConfig.year} → {draft.year}</div>
+                  <div style={{color:themeColor("muted"),fontSize:"10px",marginBottom:6}}>{activeCatalogCount} local(es) activos en elección actual. Snapshots existentes quedan intactos.</div>
                   <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}>
                     <input type="checkbox" checked={confirmYear} onChange={e=>setConfirmYear(e.target.checked)}/>
-                    <span style={{fontSize:"11px",color:"#f97316",fontWeight:600}}>Confirmo el cambio de año</span>
+                    <span style={{fontSize:"11px",color:themeColor("warning"),fontWeight:600}}>Confirmo el cambio de año</span>
                   </label>
                 </div>
               )}
@@ -2781,17 +3463,17 @@ export default function App(){
           <button style={S.btn("success")} onClick={applyConfig}>Guardar configuración</button>
         </div>
         <div style={{...S.card,marginBottom:10}}>
-          <div style={{color:"#94a3b8",fontSize:"11px",fontWeight:600,marginBottom:6}}>INFORMACIÓN DEL SISTEMA</div>
-          <div style={{fontSize:"12px",color:"#64748b"}}>
+          <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:6}}>INFORMACIÓN DEL SISTEMA</div>
+          <div style={{fontSize:"12px",color:themeColor("muted")}}>
             {[["Versión",`SCCE v${APP_VERSION}`],["Elección activa",electionConfig.name],["Año electoral",electionConfig.year],["Locales en catálogo",localCatalog.length],["Activos en elección",activeCatalogCount],["Cadena auditoría",chainResult.ok?"ÍNTEGRA ✓":"COMPROMETIDA ⚠️"],["Divergencias activas",divergencias.length]].map(([l,v])=>(
-              <div key={l} style={{marginBottom:3}}><span style={{color:"#475569"}}>{l}:</span> <span style={{color:"#94a3b8"}}>{String(v)}</span></div>
+              <div key={l} style={{marginBottom:3}}><span style={{color:themeColor("mutedDark")}}>{l}:</span> <span style={{color:themeColor("mutedAlt")}}>{String(v)}</span></div>
             ))}
-            <div style={{marginTop:6,color:"#374151",fontSize:"10px"}}>Sin backend · Sin BD · Auditoría append-only · Snapshots v1.9</div>
+            <div style={{marginTop:6,color:themeColor("mutedDarker"),fontSize:"10px"}}>Sin backend · Sin BD · Auditoría append-only · Snapshots v1.9</div>
           </div>
         </div>
         <div id="config-reset" style={{...S.card,scrollMarginTop:80}}>
-          <div style={{color:"#94a3b8",fontSize:"11px",fontWeight:600,marginBottom:6}}>RESETEAR SISTEMA</div>
-          <div style={{color:"#64748b",fontSize:"11px",marginBottom:6}}>Restaura datos de demostración. No reversible.</div>
+          <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:6}}>RESETEAR SISTEMA</div>
+          <div style={{color:themeColor("muted"),fontSize:"11px",marginBottom:6}}>Restaura datos de demostración. No reversible.</div>
           <button style={S.btn("danger")} onClick={()=>{if(window.confirm("¿Resetear todo el sistema?"))doReset();}}>Reset Demo</button>
         </div>
       </div>
@@ -2811,7 +3493,9 @@ export default function App(){
       try {
         await crypto.subtle.digest("SHA-256", new Uint8Array(1));
         cryptoAvailable = true;
-      } catch {}
+      } catch {
+        cryptoAvailable = false;
+      }
       const hasKey = await hasSigningKey();
       const entries = await getTrustedEntries();
       const trustedCount = entries.length;
@@ -2849,7 +3533,9 @@ export default function App(){
       try {
         atob(pub.replace(/\s/g, ""));
         if (pub.length >= 40 && pub.length <= 500) validB64 = true;
-      } catch {}
+      } catch {
+        validB64 = false;
+      }
       if (!validB64) return notify(UI_TEXT.errors.trustAddInvalid ?? "Revisa alias, clave pública y motivo.", "error");
       try {
         await addTrustedKey({ publicKeyB64: pub, alias, reason });
@@ -2891,10 +3577,10 @@ export default function App(){
         <button style={{ ...S.btn("dark"), marginBottom: 12 }} onClick={() => setView("dashboard")}>← Volver</button>
 
         <div style={{ ...S.card, marginBottom: 10 }}>
-          <div style={{ color: "#94a3b8", fontSize: "11px", fontWeight: 600, marginBottom: 8 }}>
+          <div style={{ color: themeColor("mutedAlt"), fontSize: "11px", fontWeight: 600, marginBottom: 8 }}>
             {UI_TEXT.labels.trustStatusTitle ?? "Estado de verificación"}
           </div>
-          <div style={{ fontSize: "12px", color: "#e2e8f0" }}>
+          <div style={{ fontSize: "12px", color: themeColor("legacySlate") }}>
             <div style={{ marginBottom: 4 }}>
               La verificación de autoría está:{" "}
               <strong>{status?.cryptoAvailable ? (UI_TEXT.misc.trustVerificationAvailable ?? "Disponible") : (UI_TEXT.misc.trustVerificationUnavailable ?? "No disponible")}</strong>
@@ -2906,20 +3592,20 @@ export default function App(){
             <div style={{ marginBottom: 4 }}>
               Firmantes confiables: <strong>{status?.trustedCount ?? 0}</strong>
             </div>
-            <div style={{ marginTop: 6, color: "#94a3b8" }}>{recommendation}</div>
+            <div style={{ marginTop: 6, color: themeColor("mutedAlt") }}>{recommendation}</div>
           </div>
         </div>
 
         <div style={{ ...S.card, marginBottom: 10 }}>
-          <div style={{ color: "#94a3b8", fontSize: "11px", fontWeight: 600, marginBottom: 8 }}>
+          <div style={{ color: themeColor("mutedAlt"), fontSize: "11px", fontWeight: 600, marginBottom: 8 }}>
             {UI_TEXT.labels.trustTrustedListTitle ?? "Firmantes confiables"}
           </div>
           {entriesWithFp.length === 0 ? (
-            <div style={{ color: "#64748b", fontSize: "12px" }}>Ninguno. Agrega uno más abajo.</div>
+            <div style={{ color: themeColor("muted"), fontSize: "12px" }}>Ninguno. Agrega uno más abajo.</div>
           ) : (
             <table style={{ width: "100%", fontSize: "12px", borderCollapse: "collapse" }}>
               <thead>
-                <tr style={{ textAlign: "left", borderBottom: "1px solid #2d3748" }}>
+                <tr style={{ textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>
                   <th style={{ padding: "6px 8px" }}>{UI_TEXT.labels.trustAliasLabel ?? "Alias"}</th>
                   <th style={{ padding: "6px 8px" }}>{UI_TEXT.labels.trustFingerprintLabel ?? "Huella"}</th>
                   <th style={{ padding: "6px 8px" }}>Agregada</th>
@@ -2931,7 +3617,7 @@ export default function App(){
                   <tr key={e.publicKeyB64} style={{ borderBottom: "1px solid #1e293b" }}>
                     <td style={{ padding: "6px 8px" }}>{e.alias}</td>
                     <td style={{ padding: "6px 8px", fontFamily: "monospace", fontSize: "11px" }}>{e.fingerprint}</td>
-                    <td style={{ padding: "6px 8px", color: "#64748b" }}>{e.addedAt.slice(0, 10)}</td>
+                    <td style={{ padding: "6px 8px", color: themeColor("muted") }}>{e.addedAt.slice(0, 10)}</td>
                     <td style={{ padding: "6px 8px" }}>
                       <button type="button" style={{ ...S.btn("danger"), fontSize: "10px", padding: "2px 8px" }} onClick={() => handleRemove(e.publicKeyB64, e.alias, e.fingerprint)}>🗑 Quitar</button>
                     </td>
@@ -2943,7 +3629,7 @@ export default function App(){
         </div>
 
         <div style={{ ...S.card, marginBottom: 10 }}>
-          <div style={{ color: "#94a3b8", fontSize: "11px", fontWeight: 600, marginBottom: 8 }}>
+          <div style={{ color: themeColor("mutedAlt"), fontSize: "11px", fontWeight: 600, marginBottom: 8 }}>
             {UI_TEXT.labels.trustAddTitle ?? "Agregar firmante confiable"}
           </div>
           <div style={{ marginBottom: 8 }}>
@@ -2967,13 +3653,14 @@ export default function App(){
   };
 
   const OpHome = ({ onNew: _onNew }: { onNew: () => void }) => {
+    void _onNew;
     return (
       <div>
         <div style={{ ...S.card, marginBottom: 10 }}>
           <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 8 }}>
             Respuestas recibidas
           </div>
-          <div style={{ color: "#94a3b8", fontSize: 12 }}>
+          <div style={{ color: themeColor("mutedAlt"), fontSize: 12 }}>
             Sin respuestas nuevas.
           </div>
         </div>
@@ -2999,7 +3686,19 @@ export default function App(){
           setSelectedCase(null);
         }}
         onLogout={() => {
+          clearSession();
+          setAuthToken(null);
+          setApiUser(null);
+          setMemberships([]);
+          setActiveMembershipState(null);
           setCurrentUser(null);
+          setLoginErr("");
+          setCtxErr("");
+        }}
+        membershipsCount={memberships.length}
+        onSwitchContext={() => {
+          clearActiveMembership();
+          setActiveMembershipState(null);
         }}
         isCrisisMode={crisisMode}
       >
@@ -3026,21 +3725,21 @@ export default function App(){
       </TerrainShell>
     ) : (
     <div style={S.app}>
-      <style>{`.tipWrap:hover .tip{display:block!important}input,select,textarea{color:#e2e8f0!important}::-webkit-scrollbar{width:4px;height:4px}::-webkit-scrollbar-track{background:#0f1117}::-webkit-scrollbar-thumb{background:#374151;border-radius:2px}`}</style>
+      <style>{`.tipWrap:hover .tip{display:block!important}input,select,textarea{color:var(--text-primary)!important}::-webkit-scrollbar{width:4px;height:4px}::-webkit-scrollbar-track{background:#0f1117}::-webkit-scrollbar-thumb{background:#374151;border-radius:2px}`}</style>
       <div style={S.nav}>
-        <span style={{fontWeight:800,color:"#3b82f6",fontSize:"13px",marginRight:4,letterSpacing:.5}}>SCCE</span>
-        <span style={{color:"#374151",fontSize:"10px",marginRight:8}}>v{APP_VERSION}</span>
+        <span style={{fontWeight:800,color:themeColor("primary"),fontSize:"13px",marginRight:4,letterSpacing:.5}}>SCCE</span>
+        <span style={{color:themeColor("mutedDarker"),fontSize:"10px",marginRight:8}}>v{APP_VERSION}</span>
         {(["dashboard","catalog","audit","reports","simulation","checklist","config"] as const).map(v=>(
           <button key={v} style={S.nBtn(view===v)} onClick={()=>setView(v)}>
             {v==="dashboard"?"Dashboard":v==="catalog"?"🗂 Catálogo":v==="audit"?"🔗 Auditoría":v==="reports"?"Reportes":v==="simulation"?"Simulación":v==="checklist"?"Checklist":"Config"}
           </button>
         ))}
-        <button style={{background:"#16a34a",color:"#fff",border:"1px solid #22c55e66",padding:"5px 12px",borderRadius:"4px",cursor:"pointer",fontSize:"12px",fontWeight:700,boxShadow:"0 0 8px #16a34a44"}} onClick={startNewCase}>+ Incidente</button>
+        <button style={{background:themeColor("greenText"),color:themeColor("white"),border:"1px solid #22c55e66",padding:"5px 12px",borderRadius:"4px",cursor:"pointer",fontSize:"12px",fontWeight:700,boxShadow:"0 0 8px #16a34a44"}} onClick={startNewCase}>+ Incidente</button>
         <div style={{marginLeft:"auto",display:"flex",gap:6,alignItems:"center"}}>
           <div data-actions-menu style={{position:"relative",display:"flex",alignItems:"center"}}>
             <button type="button" onClick={()=>setActionsOpen(v=>!v)} title="Acciones globales: Exportar / Importar / Reset Demo" style={S.nBtn(false)} aria-label="Abrir acciones globales" aria-expanded={actionsOpen}>Acciones ▾</button>
             {actionsOpen&&(
-              <div style={{position:"absolute",right:0,top:"calc(100% + 6px)",minWidth:220,background:"#fff",border:"1px solid rgba(0,0,0,0.12)",borderRadius:12,boxShadow:"0 12px 30px rgba(0,0,0,0.18)",padding:6,zIndex:1200}} role="menu" aria-label="Acciones globales">
+              <div style={{position:"absolute",right:0,top:"calc(100% + 6px)",minWidth:220,background:themeColor("white"),border:"1px solid rgba(0,0,0,0.12)",borderRadius:12,boxShadow:"0 12px 30px rgba(0,0,0,0.18)",padding:6,zIndex:1200}} role="menu" aria-label="Acciones globales">
                 <div style={{fontSize:10,opacity:0.7,padding:"6px 8px"}}>Atajos: Ctrl+E Export · Ctrl+I Import</div>
                 <button type="button" role="menuitem" onClick={onExportState} style={{width:"100%",textAlign:"left",padding:"8px 10px",borderRadius:10,border:"0",background:"transparent",cursor:"pointer",fontSize:12,fontWeight:800}}>
                   📤 {UI_TEXT.buttons.exportState ?? "Exportar"}
@@ -3069,21 +3768,52 @@ export default function App(){
             )}
           </div>
           <button type="button" onClick={()=>setHelpOpen(true)} title="Ayuda del módulo actual" style={S.nBtn(false)} aria-label="Abrir ayuda">?</button>
-          {divergencias.length>0&&<span style={{...S.badge("#f97316"),fontSize:"9px",cursor:"pointer"}} onClick={()=>setView("catalog")}>⚡ {divergencias.length}</span>}
+          {divergencias.length > 0 && (
+          <Badge
+            style={{ ...S.badge(themeColor("warning")) }}
+            size="xs"
+            onClick={() => setView("catalog")}
+          >
+            ⚡ {divergencias.length}
+          </Badge>
+        )}
           <div style={{ display: "flex", gap: 4, alignItems: "center", marginRight: 6 }}>
-            <span style={{ color: "#94a3b8", fontSize: "11px", fontWeight: 700 }}>Vista:</span>
+            <span style={{ color: themeColor("mutedAlt"), fontSize: "11px", fontWeight: 700 }}>Vista:</span>
             <button type="button" style={S.nBtn(uiMode === "OP")} onClick={() => setUiModeAndPersist("OP")} title="Vista operativa (terreno)">Operativa</button>
             <button type="button" style={S.nBtn(uiMode === "FULL")} onClick={() => setUiModeAndPersist("FULL")} title="Vista completa (central)">Completa</button>
           </div>
-          <span style={{fontSize:"10px",color:"#475569"}}>{electionConfig.name}</span>
-          <span style={S.badge("#374151")}>{currentUser.name}</span>
-          <span style={{...S.badge("#1e40af"),fontSize:"9px"}}>{ROLE_LABELS[currentUser.role]}</span>
-          <button style={{...S.btn("dark"),fontSize:"11px"}} onClick={()=>{setCurrentUser(null);}}>Salir</button>
+          <span style={{fontSize:"10px",color:themeColor("mutedDark")}}>{electionConfig.name}</span>
+          {activeMembership && (
+            <Badge style={{ ...S.badge(themeColor("legacyGreenDark")) }} size="xs">
+              {activeMembership.contextType}/{activeMembership.contextId}
+            </Badge>
+          )}
+          <Badge style={S.badge(themeColor("mutedDarker"))} size="sm">
+            {currentUser.name}
+          </Badge>
+          <Badge style={{ ...S.badge(themeColor("blueDark")) }} size="xs">
+            {ROLE_LABELS[currentUser.role]}
+          </Badge>
+          <button
+            style={{ ...S.btn("dark"), fontSize: "11px" }}
+            onClick={() => {
+              clearSession();
+              setAuthToken(null);
+              setApiUser(null);
+              setMemberships([]);
+              setActiveMembershipState(null);
+              setCurrentUser(null);
+              setLoginErr("");
+              setCtxErr("");
+            }}
+          >
+            Salir
+          </button>
         </div>
       </div>
 
       {notification&&(
-        <div style={{background:{error:"#ef4444",success:"#22c55e",warning:"#f97316",info:"#3b82f6"}[notification.type]||"#3b82f6",color:"#fff",padding:"8px 16px",fontSize:"12px",fontWeight:600,position:"sticky",top:0,zIndex:100}}>
+        <div style={{background:{error:themeColor("danger"),success:themeColor("success"),warning:themeColor("warning"),info:themeColor("primary")}[notification.type]||themeColor("primary"),color:themeColor("white"),padding:"8px 16px",fontSize:"12px",fontWeight:600,position:"sticky",top:0,zIndex:100}}>
           {notification.msg}
         </div>
       )}

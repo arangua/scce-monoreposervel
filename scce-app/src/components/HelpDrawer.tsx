@@ -1,6 +1,21 @@
 // src/components/HelpDrawer.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import type { HelpBlock } from "../helpContent";
+import { themeColor, type ThemeColorKey } from "../theme";
+
+function hexToRgb(hex: string): { r: number; g: number; b: number } {
+  const normalized = hex.replace("#", "").trim();
+  const full = normalized.length === 3
+    ? normalized.split("").map((c) => c + c).join("")
+    : normalized;
+  const n = Number.parseInt(full, 16);
+  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+}
+
+function rgbaFromKey(key: ThemeColorKey, alpha: number): string {
+  const { r, g, b } = hexToRgb(themeColor(key));
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
 
 type Props = {
   open: boolean;
@@ -31,7 +46,7 @@ export function HelpDrawer({ open, onClose, content }: Props) {
     const overlay: React.CSSProperties = {
       position: "fixed",
       inset: 0,
-      background: "rgba(0,0,0,0.35)",
+      background: rgbaFromKey("legacyDark1", 0.35),
       display: open ? "block" : "none",
       zIndex: 999
     };
@@ -42,8 +57,8 @@ export function HelpDrawer({ open, onClose, content }: Props) {
       right: 0,
       height: "100vh",
       width: isMobile ? "100vw" : 380,
-      background: "#fff",
-      boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
+      background: themeColor("white"),
+      boxShadow: `0 10px 30px ${rgbaFromKey("legacyDark1", 0.25)}`,
       zIndex: 1000,
       transform: open ? "translateX(0)" : "translateX(110%)",
       transition: "transform 180ms ease-out",
@@ -56,7 +71,7 @@ export function HelpDrawer({ open, onClose, content }: Props) {
       alignItems: "center",
       justifyContent: "space-between",
       padding: "12px 14px",
-      borderBottom: "1px solid rgba(0,0,0,0.08)"
+      borderBottom: `1px solid ${rgbaFromKey("legacyDark1", 0.08)}`
     };
 
     const body: React.CSSProperties = {
@@ -68,31 +83,31 @@ export function HelpDrawer({ open, onClose, content }: Props) {
       margin: 0,
       fontSize: 17,
       fontWeight: 800,
-      color: "#0f172a"
+      color: themeColor("legacyDark1")
     };
     const h2: React.CSSProperties = {
       margin: "18px 0 8px",
       fontSize: 13,
       fontWeight: 800,
-      color: "#1e293b",
+      color: themeColor("legacyDark4"),
       letterSpacing: 0.3
     };
     const p: React.CSSProperties = {
       margin: "6px 0 0",
       fontSize: 13,
       lineHeight: 1.45,
-      color: "#334155"
+      color: themeColor("mutedDarker")
     };
     const ul: React.CSSProperties = {
       margin: "8px 0 0",
       paddingLeft: 18,
       fontSize: 13,
       lineHeight: 1.45,
-      color: "#334155"
+      color: themeColor("mutedDarker")
     };
     const closeBtn: React.CSSProperties = {
-      border: "1px solid rgba(0,0,0,0.15)",
-      background: "#fff",
+      border: `1px solid ${rgbaFromKey("legacyDark1", 0.15)}`,
+      background: themeColor("white"),
       padding: "6px 10px",
       borderRadius: 10,
       cursor: "pointer",
@@ -126,7 +141,7 @@ export function HelpDrawer({ open, onClose, content }: Props) {
         <div style={S.header}>
           <div>
             <div style={S.h1}>Ayuda — {content.title}</div>
-            <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>
+            <div style={{ fontSize: 11, color: themeColor("muted"), marginTop: 2 }}>
               {isMobile ? "Modo móvil" : "Modo escritorio"}
             </div>
           </div>
