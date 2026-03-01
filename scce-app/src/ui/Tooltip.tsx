@@ -16,7 +16,7 @@ export function Tooltip({
   panelStyle,
   openOnClick = true, // clave para móvil
 }: Readonly<{
-  children: React.ReactElement;
+  children: React.ReactElement<React.HTMLAttributes<HTMLElement>>;
   content: React.ReactNode;
   placement?: TooltipPlacement;
   maxWidth?: number;

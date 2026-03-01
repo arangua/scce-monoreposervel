@@ -103,6 +103,27 @@ function assertPlainObject(name: string, v: unknown): Record<string, unknown> {
   return v as Record<string, unknown>;
 }
 
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null;
+}
+
+function isLocalSnapshot(v: unknown): v is {
+  idLocal: string;
+  nombre: string;
+  region: string;
+  commune: string;
+  snapshotAt: string;
+} {
+  if (!isRecord(v)) return false;
+  return (
+    typeof v.idLocal === "string" &&
+    typeof v.nombre === "string" &&
+    typeof v.region === "string" &&
+    typeof v.commune === "string" &&
+    typeof v.snapshotAt === "string"
+  );
+}
+
 function assertUnknownItemKind(name: string, v: unknown): void {
   if (typeof v === "string") {
     if (v.trim().length > MAX_LONG) importFail(`Import fail-closed: "${name}" string excede máximo (${MAX_LONG}).`);
@@ -864,15 +885,18 @@ export default function App(){
   async function bootstrapSession(token: string) {
     const meRes = await apiRequest<{ user: ApiUser; memberships?: Array<{ id: string; regionCode?: string | null; regionScopeMode?: string; regionScope?: string[] }> }>("/me", { token });
     console.log("ME (crudo):", meRes);
+
+    const meMembershipsForLog = meRes.ok ? (meRes.data.memberships ?? []) : [];
     console.log(
       "ME memberships resumido:",
-      (meRes?.data?.memberships || []).map((m: { id: string; regionCode?: string | null; regionScopeMode?: string; regionScope?: string[] }) => ({
+      meMembershipsForLog.map((m: { id: string; regionCode?: string | null; regionScopeMode?: string; regionScope?: string[] }) => ({
         id: m.id,
         regionCode: m.regionCode,
         regionScopeMode: m.regionScopeMode,
         regionScope: m.regionScope,
       }))
     );
+
     if (!meRes.ok) {
       clearSession();
       setAuthToken(null);
@@ -1232,13 +1256,15 @@ export default function App(){
         headers: Object.keys(headers).length ? headers : undefined,
       });
       if (res.ok) {
+        const ls = isLocalSnapshot(res.data.localSnapshot) ? res.data.localSnapshot : localSnapshot;
+
         const apiCase = {
           ...c,
           id: res.data.id,
           region: res.data.regionCode,
           commune: res.data.communeCode,
           local: res.data.localCode,
-          localSnapshot: res.data.localSnapshot ?? localSnapshot,
+          localSnapshot: ls,
           status: res.data.status,
           createdAt: res.data.createdAt,
           updatedAt: res.data.updatedAt,

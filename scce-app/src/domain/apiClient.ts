@@ -3,6 +3,10 @@ import { API_BASE_URL } from "../config/runtime";
 
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; error: string; status?: number };
 
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null;
+}
+
 async function safeJson(res: Response): Promise<unknown> {
   const txt = await res.text();
   try { return txt ? JSON.parse(txt) : null; } catch { return txt; }
@@ -40,10 +44,14 @@ export async function apiRequest<T>(
   const payload = await safeJson(res);
 
   if (!res.ok) {
-    const msg =
-      (payload && (payload.message || payload.error)) ||
-      `Error HTTP ${res.status}`;
-    return { ok: false, error: String(msg), status: res.status };
+    let msg: unknown = undefined;
+
+    if (isRecord(payload)) {
+      msg = payload.message ?? payload.error;
+    }
+
+    const finalMsg = msg ?? `Error HTTP ${res.status}`;
+    return { ok: false, error: String(finalMsg), status: res.status };
   }
 
   return { ok: true, data: payload as T };
