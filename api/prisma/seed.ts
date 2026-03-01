@@ -4,9 +4,12 @@ import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
 
+/** Password única de piloto (temporal); rotar o individualizar después. */
+const SEED_PASSWORD = "SCCE-Piloto-2026!";
+
 /**
- * Regiones: deja IDs simples "01".."16".
- * Si ya tienes una codificación propia SCCE (RegionCode), la ajustamos después.
+ * Regiones (tabla Region): IDs "01".."16" para FK si aplica.
+ * Códigos de catálogo/front: AYP, TRP, ANT, ATA, COQ, VAL, OHI, MAU, NUB, BIO, ARA, LRI, LLA, AIS, MAG, MET.
  */
 const REGIONS: { id: string; name: string }[] = [
   { id: "01", name: "Tarapacá" },
@@ -27,8 +30,11 @@ const REGIONS: { id: string; name: string }[] = [
   { id: "16", name: "Arica y Parinacota" }
 ];
 
+/** Códigos de región del catálogo (front). Un DR por región. */
+const REGION_CODES = ["AYP", "TRP", "ANT", "ATA", "COQ", "VAL", "OHI", "MAU", "NUB", "BIO", "ARA", "LRI", "LLA", "AIS", "MAG", "MET"] as const;
+
 async function main() {
-  // 1) Regiones
+  // 1) Regiones (tabla Region)
   for (const r of REGIONS) {
     await prisma.region.upsert({
       where: { id: r.id },
@@ -37,36 +43,92 @@ async function main() {
     });
   }
 
-  // 2) Admin piloto (credenciales iniciales)
-  const adminEmail = "admin.piloto@scce.local";
-  const adminPass = "SCCE-Piloto-2026!";
-  const passwordHash = await bcrypt.hash(adminPass, 12);
+  const passwordHash = await bcrypt.hash(SEED_PASSWORD, 12);
 
+  // 2) 16 usuarios DR (uno por Director Regional)
+  for (const code of REGION_CODES) {
+    const email = `dr.${code.toLowerCase()}@scce.local`;
+    const user = await prisma.user.upsert({
+      where: { email },
+      update: { passwordHash, isActive: true },
+      create: { email, passwordHash, isActive: true }
+    });
+    const existing = await prisma.membership.findFirst({
+      where: { userId: user.id, contextType: "OPERACION", contextId: "GLOBAL", regionCode: code }
+    });
+    if (existing) {
+      await prisma.membership.update({
+        where: { id: existing.id },
+        data: { regionScopeMode: "LIST", regionScope: [code] }
+      });
+    } else {
+      await prisma.membership.create({
+        data: {
+          userId: user.id,
+          contextType: "OPERACION",
+          contextId: "GLOBAL",
+          regionCode: code,
+          role: "DR",
+          regionScopeMode: "LIST",
+          regionScope: [code]
+        }
+      });
+    }
+  }
+
+  // 3) Admin piloto: 1 usuario, solo 2 memberships (DR TRP + ADMIN_PILOTO global)
+  const adminEmail = "admin.piloto@scce.local";
   const admin = await prisma.user.upsert({
     where: { email: adminEmail },
     update: { passwordHash, isActive: true },
     create: { email: adminEmail, passwordHash, isActive: true }
   });
 
-  // Membership global: OPERACION + contextId="GLOBAL" + regionCode
-  const existing = await prisma.membership.findFirst({
-    where: { userId: admin.id, contextType: "OPERACION", contextId: "GLOBAL", regionCode: "TRP" }
+  // Quitar memberships viejos de admin para que solo queden los 2 del piloto
+  await prisma.membership.deleteMany({
+    where: { userId: admin.id }
   });
-  if (!existing) {
-    await prisma.membership.create({
-      data: {
-        userId: admin.id,
-        contextType: "OPERACION",
-        contextId: "GLOBAL",
-        regionCode: "TRP",
-        role: "ADMIN_PILOTO"
-      }
+
+  const adminMemberships: Array<{
+    regionCode: string;
+    role: "DR" | "ADMIN_PILOTO";
+    regionScopeMode: "ALL" | "LIST";
+    regionScope: string[];
+  }> = [
+    { regionCode: "TRP", role: "DR", regionScopeMode: "LIST", regionScope: ["TRP"] },
+    { regionCode: "ADM", role: "ADMIN_PILOTO", regionScopeMode: "ALL", regionScope: [] }
+  ];
+
+  for (const m of adminMemberships) {
+    const existing = await prisma.membership.findFirst({
+      where: { userId: admin.id, contextType: "OPERACION", contextId: "GLOBAL", regionCode: m.regionCode }
     });
+    if (existing) {
+      await prisma.membership.update({
+        where: { id: existing.id },
+        data: { regionScopeMode: m.regionScopeMode, regionScope: m.regionScope, role: m.role }
+      });
+    } else {
+      await prisma.membership.create({
+        data: {
+          userId: admin.id,
+          contextType: "OPERACION",
+          contextId: "GLOBAL",
+          regionCode: m.regionCode,
+          role: m.role,
+          regionScopeMode: m.regionScopeMode,
+          regionScope: m.regionScope
+        }
+      });
+    }
   }
 
-  console.log("✅ Seed OK");
-  console.log("ADMIN:", adminEmail);
-  console.log("PASS :", adminPass);
+  console.log("✅ Seed OK — Piloto 16 DR + admin");
+  console.log("Password (temporal):", SEED_PASSWORD);
+  console.log("--- 16 Directores Regionales (1 membership cada uno, scope = su región) ---");
+  REGION_CODES.forEach(code => console.log("  ", `dr.${code.toLowerCase()}@scce.local`));
+  console.log("--- Admin piloto (2 memberships: DR TRP + ADMIN_PILOTO) ---");
+  console.log("  ", adminEmail);
 }
 
 main()
