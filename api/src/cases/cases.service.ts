@@ -63,7 +63,7 @@ function computeEventHash(input: {
 export class CasesService {
   constructor(private prisma: PrismaService) {}
 
-  async list(ctx: ScceCtx) {
+  async list(ctx: ScceCtx, pagination: { take: number; skip: number }) {
     return this.prisma.case.findMany({
       where: {
         contextType: ctx.contextType,
@@ -71,6 +71,8 @@ export class CasesService {
         ...regionWhere(ctx),
       },
       orderBy: { createdAt: "desc" },
+      take: pagination.take,
+      skip: pagination.skip,
     });
   }
 
