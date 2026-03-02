@@ -11,6 +11,22 @@ import { PrismaService } from "../prisma.service";
 
 type AuthedUser = { userId: string; email: string };
 
+type MembershipSelection = {
+  id: true;
+  contextType: true;
+  contextId: true;
+  regionScopeMode: true;
+  regionScope: true;
+};
+
+const membershipSelect: MembershipSelection = {
+  id: true,
+  contextType: true,
+  contextId: true,
+  regionScopeMode: true,
+  regionScope: true,
+};
+
 declare module "express-serve-static-core" {
   interface Request {
     scceContext?: { contextType: ContextType; contextId: string };
@@ -43,28 +59,21 @@ export class ContextGuard implements CanActivate {
     if (membershipId) {
       const m = await this.prisma.membership.findFirst({
         where: { id: membershipId, userId: user.userId },
-        select: {
-          id: true,
-          contextType: true,
-          contextId: true,
-          regionScopeMode: true,
-          regionScope: true,
-        } as { id: boolean; contextType: boolean; contextId: boolean; regionScopeMode: boolean; regionScope: boolean },
+        select: membershipSelect,
       });
 
       if (!m) {
         throw new ForbiddenException("Invalid or inactive membership");
       }
 
-      const row = m as typeof m & { regionScopeMode?: "ALL" | "LIST"; regionScope?: string[] };
-      req.scceMembershipId = row.id;
-      req.scceContext = { contextType: row.contextType, contextId: row.contextId };
+      req.scceMembershipId = m.id;
+      req.scceContext = { contextType: m.contextType, contextId: m.contextId };
       req.scceMembership = {
-        id: row.id,
-        contextType: row.contextType,
-        contextId: row.contextId,
-        regionScopeMode: row.regionScopeMode ?? "LIST",
-        regionScope: row.regionScope ?? [],
+        id: m.id,
+        contextType: m.contextType,
+        contextId: m.contextId,
+        regionScopeMode: m.regionScopeMode,
+        regionScope: m.regionScope,
       };
       return true;
     }
@@ -88,9 +97,8 @@ export class ContextGuard implements CanActivate {
       return true;
     }
 
-    req.scceMembershipId = null;
-    req.scceMembership = undefined;
-    req.scceContext = { contextType: ContextType.OPERACION, contextId: "GLOBAL" };
-    return true;
+    throw new ForbiddenException(
+      "Context required: provide x-scce-membership-id or explicit context headers"
+    );
   }
 }
