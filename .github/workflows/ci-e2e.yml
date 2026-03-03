@@ -48,40 +48,6 @@ jobs:
           fi
           ls -la api/node_modules/@prisma/client/package.json
 
-      - name: Debug jest e2e files
-        working-directory: api
-        run: |
-          ls -la test || true
-          cat jest-e2e.json || true
-          node -p "require('./package.json').devDependencies.jest"
-          node -p "require('./package.json').devDependencies['ts-jest']"
-
-      - name: Verify tsconfig files exist
-        run: |
-          ls -la api/tsconfig.json
-          ls -la api/tsconfig.build.json
-          cat api/tsconfig.json | head -n 5
-
-      - name: Verify e2e setup file exists (api cwd)
-        working-directory: api
-        run: |
-          pwd
-          ls -la
-          ls -la test
-          ls -la test/jest-e2e.setup.ts
-          cat jest-e2e.json
-
-      - name: Debug paths (api)
-        working-directory: api
-        run: |
-          pwd
-          ls -la
-          ls -la src || true
-          ls -la src/app.module.ts || true
-          find src -maxdepth 3 -type f -name "app.module.*" -print || true
-          node -p "require('fs').existsSync('src/app.module.ts')"
-          cat jest-e2e.json
-
       - name: Run E2E
         working-directory: api
         env:
