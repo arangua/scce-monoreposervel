@@ -4,8 +4,9 @@ import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
 
-/** Password única de piloto (temporal); rotar o individualizar después. */
-const SEED_PASSWORD = "SCCE-Piloto-2026!";
+const SEED_PASSWORD: string = process.env.SEED_PASSWORD ?? (() => {
+  throw new Error("Falta SEED_PASSWORD (no debe ir en el código; debe ir en variables de entorno).");
+})();
 
 /**
  * Regiones (tabla Region): IDs "01".."16" para FK si aplica.
@@ -124,7 +125,6 @@ async function main() {
   }
 
   console.log("✅ Seed OK — Piloto 16 DR + admin");
-  console.log("Password (temporal):", SEED_PASSWORD);
   console.log("--- 16 Directores Regionales (1 membership cada uno, scope = su región) ---");
   REGION_CODES.forEach(code => console.log("  ", `dr.${code.toLowerCase()}@scce.local`));
   console.log("--- Admin piloto (2 memberships: DR TRP + ADMIN_PILOTO) ---");
