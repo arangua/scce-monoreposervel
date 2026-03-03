@@ -4,10 +4,6 @@ import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
 
-const SEED_PASSWORD: string = process.env.SEED_PASSWORD ?? (() => {
-  throw new Error("Falta SEED_PASSWORD (no debe ir en el código; debe ir en variables de entorno).");
-})();
-
 /**
  * Regiones (tabla Region): IDs "01".."16" para FK si aplica.
  * Códigos de catálogo/front: AYP, TRP, ANT, ATA, COQ, VAL, OHI, MAU, NUB, BIO, ARA, LRI, LLA, AIS, MAG, MET.
@@ -44,7 +40,14 @@ async function main() {
     });
   }
 
-  const passwordHash = await bcrypt.hash(SEED_PASSWORD, 12);
+  // --- SEED_PASSWORD obligatorio (no hardcode, no logs) ---
+  const seedPassword = process.env.SEED_PASSWORD;
+  if (!seedPassword || seedPassword.trim().length < 12) {
+    throw new Error(
+      "SEED_PASSWORD no está definido (o es muy corto). Define SEED_PASSWORD en el entorno antes de ejecutar el seed."
+    );
+  }
+  const passwordHash = await bcrypt.hash(seedPassword, 12);
 
   // 2) 16 usuarios DR (uno por Director Regional)
   for (const code of REGION_CODES) {
@@ -81,8 +84,15 @@ async function main() {
   const adminEmail = "admin.piloto@scce.local";
   const admin = await prisma.user.upsert({
     where: { email: adminEmail },
-    update: { passwordHash, isActive: true },
-    create: { email: adminEmail, passwordHash, isActive: true }
+    update: {
+      isActive: true,
+      // NO actualizar passwordHash: la contraseña se fija solo al crear
+    },
+    create: {
+      email: adminEmail,
+      passwordHash,
+      isActive: true,
+    },
   });
 
   // Quitar memberships viejos de admin para que solo queden los 2 del piloto
