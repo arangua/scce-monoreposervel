@@ -87,13 +87,13 @@ async function main() {
     }
   }
 
-  // 3) Admin piloto: 1 usuario, solo 2 memberships (DR TRP + ADMIN_PILOTO global)
+  // 3) Admin piloto: si existe, actualiza passwordHash; si no existe, lo crea.
   const adminEmail = "admin.piloto@scce.local";
   const admin = await prisma.user.upsert({
     where: { email: adminEmail },
     update: {
+      passwordHash,
       isActive: true,
-      // NO actualizar passwordHash: la contraseña se fija solo al crear
     },
     create: {
       email: adminEmail,
