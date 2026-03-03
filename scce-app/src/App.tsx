@@ -774,7 +774,7 @@ export default function App(){
   const [simCases,setSimCases]=useState<CaseItem[]>([]);
   const [simReport, setSimReport] = useState<SimReport>(null);
   const [simSurvey,setSimSurvey]=useState({claridad:0,respaldo:0,submitted:false});
-  const [loginForm, setLoginForm] = useState({ email: "admin.piloto@scce.local", password: "SCCE-Piloto-2026!" });
+  const [loginForm, setLoginForm] = useState({ email: "", password: "" });
   const [loginErr, setLoginErr] = useState<string>("");
   const [ctxErr, setCtxErr] = useState<string>("");
   const [authBusy, setAuthBusy] = useState(false);
@@ -1042,7 +1042,7 @@ export default function App(){
     setCurrentUser(null);setView("dashboard");setSelectedCase(null);
     setCrisisMode(false);setSimCases([]);setSimReport(null);
     setSimSurvey({claridad:0,respaldo:0,submitted:false});
-    setLoginForm({ email: "admin.piloto@scce.local", password: "SCCE-Piloto-2026!" });
+    setLoginForm({ email: "", password: "" });
     setLoginErr("");
     setCtxErr("");
     setElectionConfig({name:`Elecciones Generales ${y}`,date:`${y}-11-15`,year:y});
