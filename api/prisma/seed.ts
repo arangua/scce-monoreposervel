@@ -42,7 +42,13 @@ async function main() {
 
   // --- SEED_PASSWORD obligatorio (no hardcode, no logs) ---
   const seedPassword = process.env.SEED_PASSWORD;
-  if (!seedPassword || seedPassword.trim().length < 12) {
+  if (!seedPassword) throw new Error("SEED_PASSWORD missing");
+
+  // Huella: no muestra la clave, solo longitud y últimos 2 caracteres
+  const tail2 = seedPassword.slice(-2);
+  console.log(`SEED_PASSWORD len=${seedPassword.length} tail2=${tail2}`);
+
+  if (seedPassword.trim().length < 12) {
     throw new Error(
       "SEED_PASSWORD no está definido (o es muy corto). Define SEED_PASSWORD en el entorno antes de ejecutar el seed."
     );
