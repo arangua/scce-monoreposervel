@@ -775,6 +775,7 @@ export default function App(){
   const [simReport, setSimReport] = useState<SimReport>(null);
   const [simSurvey,setSimSurvey]=useState({claridad:0,respaldo:0,submitted:false});
   const [loginForm, setLoginForm] = useState({ email: "", password: "" });
+  const [showPassword, setShowPassword] = useState(false);
   const [loginErr, setLoginErr] = useState<string>("");
   const [ctxErr, setCtxErr] = useState<string>("");
   const [authBusy, setAuthBusy] = useState(false);
@@ -2048,13 +2049,35 @@ export default function App(){
 
           <div style={{ marginBottom: 12 }}>
             <label style={S.lbl}>Contraseña</label>
-            <input
-              style={S.inp}
-              type="password"
-              value={loginForm.password}
-              onChange={e => setLoginForm(p => ({ ...p, password: e.target.value }))}
-              onKeyDown={e => e.key === "Enter" && !authBusy && doLogin()}
-            />
+            <div style={{ display: "flex", alignItems: "stretch", gap: 6 }}>
+              <input
+                style={{ ...S.inp, flex: 1, minWidth: 0 }}
+                type={showPassword ? "text" : "password"}
+                value={loginForm.password}
+                onChange={e => setLoginForm(p => ({ ...p, password: e.target.value }))}
+                onKeyDown={e => e.key === "Enter" && !authBusy && doLogin()}
+              />
+              <button
+                type="button"
+                aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                style={{
+                  ...S.inp,
+                  width: 44,
+                  minWidth: 44,
+                  padding: "6px 8px",
+                  flexShrink: 0,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "18px",
+                }}
+                onClick={() => setShowPassword(prev => !prev)}
+                title={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+              >
+                {showPassword ? "🙈" : "👁"}
+              </button>
+            </div>
           </div>
 
           {(loginErr || ctxErr) && (
