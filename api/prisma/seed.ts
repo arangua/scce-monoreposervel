@@ -54,8 +54,15 @@ async function main() {
     const email = `dr.${code.toLowerCase()}@scce.local`;
     const user = await prisma.user.upsert({
       where: { email },
-      update: { passwordHash, isActive: true },
-      create: { email, passwordHash, isActive: true }
+      update: {
+        isActive: true,
+        // NO actualizar passwordHash: la contraseña se fija solo al crear
+      },
+      create: {
+        email,
+        passwordHash,
+        isActive: true,
+      },
     });
     const existing = await prisma.membership.findFirst({
       where: { userId: user.id, contextType: "OPERACION", contextId: "GLOBAL", regionCode: code }
