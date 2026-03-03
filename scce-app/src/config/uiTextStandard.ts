@@ -5,6 +5,7 @@
 
 export const UI_TEXT = {
   states: {
+    porRecepcionar: "Por recepcionar",
     flagged: "Requiere atención prioritaria",
     flaggedShort: "Requiere atención",
     modoUrgente: "Modo urgente",
@@ -167,6 +168,38 @@ export const UI_TEXT = {
     importSignedTrustedOkShort: "Import con autoría verificada (confiable).",
     importUnsignedWarningShort: "Import permitido sin verificación de autoría.",
     trustAddButton: "➕ Agregar a confianza",
+  },
+  // --- Contrato para ViewKey / paneles ---
+  view: {
+    instructionReplyPlaceholder: "Escribe tu respuesta…",
+    instructionReplySaved: "Respuesta registrada",
+    sendReply: "Enviar respuesta",
+    labelsCc: "CC",
+    addCc: "Agregar CC",
+    removeCc: "Quitar CC",
+    warnings: "Advertencias",
+    trustPanelTitle: "Confianza y verificación",
+    trustStatusTitle: "Estado de confianza",
+    trustVerificationAvailable: "Verificación disponible",
+    trustVerificationUnavailable: "Verificación no disponible",
+    trustLocalKeyConfigured: "Clave local configurada",
+    trustLocalKeyNotConfigured: "Clave local no configurada",
+    trustTrustedListTitle: "Lista de confiables",
+    trustAliasLabel: "Alias",
+    trustFingerprintLabel: "Huella",
+    trustPublicKeyLabel: "Clave pública",
+    trustReasonLabel: "Motivo",
+    trustAddTitle: "Agregar a confiables",
+    trustAddButton: "Agregar",
+    trustAddedOk: "Agregado correctamente",
+    trustAddFailed: "No se pudo agregar",
+    trustRemovedOk: "Eliminado correctamente",
+    trustRemoveFailed: "No se pudo eliminar",
+    trustRecommendationNoSupport: "No hay soporte verificable",
+    trustRecommendationNoKey: "No hay clave configurada",
+    trustRecommendationOk: "Recomendación verificable",
+    exportState: "Exportar estado",
+    importState: "Importar estado",
   },
 
   recommendation: {
