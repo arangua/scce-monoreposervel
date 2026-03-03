@@ -1,15 +1,25 @@
-﻿# Node
+# Node
 **/node_modules/
 **/dist/
-*.log
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Editor/IDE
+# Editor / tooling
+.cursor/
 .vscode/
 .idea/
+
+# Backups locales
+_backup_mono_20260224/
+
+# Env de test local (no versionar secretos)
+api/.env.test
+
+# Logs / temporales
+*.log
+*.tmp
 
 # Auditoría/Evidencia (se versiona, pero NO binarios grandes)
 # (deja audit/ incluido)

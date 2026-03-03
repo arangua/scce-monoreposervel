@@ -16,11 +16,27 @@ export type CaseStatus =
 
 export type Criticality = "CRITICA" | "ALTA" | "MEDIA" | "BAJA";
 
+/** Fase 3.5/3.8 — comentario libre, respuesta, o eventos formales del ciclo de instrucción */
+export type CaseEventKind =
+  | "COMMENT"
+  | "INSTRUCTION_REPLY"
+  | "INSTRUCTION_CREATED"
+  | "INSTRUCTION_ACK"
+  | "INSTRUCTION_CLOSED";
+
 export type CaseEvent = {
+  /** Fase 3.9 — id estable para key UI y rehidratación (opcional, eventos antiguos sin él). */
+  eventId?: string;
   type: string;
   at: string;
   actor: string;
   note?: string;
+  /** Fase 3.5 — id de la instrucción a la que responde este COMMENT */
+  refInstructionId?: string;
+  /** Fase 3.5 — COMMENT = libre, INSTRUCTION_REPLY = respuesta de terreno */
+  kind?: CaseEventKind;
+  /** Opcional futuro: CASE | INTERNAL */
+  visibility?: "CASE" | "INTERNAL";
 };
 
 export type InstructionAck = {
@@ -67,6 +83,8 @@ export type InstructionItem = {
   scopeFunctional?: ScopeFunctional;
   /** Fase 3.4 — destinatario (label obligatorio) */
   to?: { role?: string; userId?: string; label: string };
+  /** Fase 3.6 — con copia (CC) opcional */
+  cc?: { role?: string; userId?: string; label: string }[];
   /** Fase 3.4 — bypass con motivo obligatorio si enabled */
   bypass?: InstructionBypass;
 };

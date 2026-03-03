@@ -6,9 +6,10 @@ import { HealthController } from "./health.controller";
 import { PrismaModule } from "./prisma.module";
 import { ContextsController } from "./contexts.controller";
 import { CasesModule } from "./cases/cases.module";
+import { AdminModule } from "./admin/admin.module";
 
 @Module({
-  imports: [PrismaModule, AuthModule, CasesModule],
+  imports: [PrismaModule, AuthModule, CasesModule, AdminModule],
   controllers: [AppController, HealthController, ContextsController],
   providers: [AppService],
 })

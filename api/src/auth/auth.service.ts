@@ -27,6 +27,22 @@ export class AuthService {
       where: { id: userId },
       select: { id: true, email: true, isActive: true, createdAt: true },
     });
-    return user;
+
+    if (!user) return null;
+
+    const memberships = await this.prisma.membership.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        contextType: true,
+        contextId: true,
+        regionCode: true,
+        regionScopeMode: true,
+        regionScope: true,
+      },
+      orderBy: { createdAt: "asc" },
+    });
+
+    return { user, memberships };
   }
 }
