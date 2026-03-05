@@ -31,6 +31,8 @@ export type CaseEvent = {
   at: string;
   actor: string;
   note?: string;
+  /** OPERATIONAL_VALIDATION: result OK | OBSERVATIONS | FAIL */
+  result?: "OK" | "OBSERVATIONS" | "FAIL";
   /** Fase 3.5 — id de la instrucción a la que responde este COMMENT */
   refInstructionId?: string;
   /** Fase 3.5 — COMMENT = libre, INSTRUCTION_REPLY = respuesta de terreno */

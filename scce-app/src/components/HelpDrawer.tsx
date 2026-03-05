@@ -1,6 +1,7 @@
 // src/components/HelpDrawer.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import type { HelpBlock } from "../helpContent";
+import type { CaseItem } from "../domain/types";
 import { themeColor, type ThemeColorKey } from "../theme";
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } {
@@ -21,6 +22,7 @@ type Props = {
   open: boolean;
   onClose: () => void;
   content: HelpBlock;
+  caseContext?: CaseItem | null;
 };
 
 function useIsMobile(breakpointPx = 768) {
@@ -38,7 +40,15 @@ function useIsMobile(breakpointPx = 768) {
   return isMobile;
 }
 
-export function HelpDrawer({ open, onClose, content }: Props) {
+function getStepDone(checkKey: string, caseItem: CaseItem | null | undefined): boolean {
+  if (!caseItem) return false;
+  if (checkKey === "operational_validation") {
+    return (caseItem.timeline ?? []).some((ev) => ev.type === "OPERATIONAL_VALIDATION");
+  }
+  return false;
+}
+
+export function HelpDrawer({ open, onClose, content, caseContext }: Props) {
   const isMobile = useIsMobile(768);
 
   // Estilos mínimos (CSS-in-JS inline) para no depender de Tailwind
@@ -161,6 +171,34 @@ export function HelpDrawer({ open, onClose, content }: Props) {
               <li key={i}>{x}</li>
             ))}
           </ul>
+
+          {content.flowSteps?.length ? (
+            <>
+              <div style={S.h2}>Guía SCCE — Pasos</div>
+              {content.flowSteps.map((fs) => {
+                const done = getStepDone(fs.checkKey, caseContext);
+                return (
+                  <div key={fs.step} style={{ marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 14 }}>{done ? "✅" : "○"}</span>
+                    <span style={{ flex: 1 }}>Paso {fs.step}: {fs.label}</span>
+                    {fs.scrollToId && fs.actionLabel && (
+                      <button
+                        type="button"
+                        style={{ fontSize: 11, padding: "4px 8px", borderRadius: 6, border: "1px solid #e5e7eb", background: themeColor("white"), cursor: "pointer", fontWeight: 600 }}
+                        onClick={() => {
+                          onClose();
+                          const el = document.getElementById(fs.scrollToId!);
+                          el?.scrollIntoView({ behavior: "smooth", block: "center" });
+                        }}
+                      >
+                        {fs.actionLabel}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </>
+          ) : null}
 
           {content.commonIssues?.length ? (
             <>

@@ -42,6 +42,7 @@ export class CreateCaseDto {
 export const ALLOWED_EVENT_TYPES = [
   "COMMENT_ADDED",
   "INSTRUCTION_CREATED",
+  "OPERATIONAL_VALIDATION",
   "CASE_CLOSED",
 ] as const;
 

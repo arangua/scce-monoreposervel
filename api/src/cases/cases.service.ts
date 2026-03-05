@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ConflictException,
   ForbiddenException,
+  BadRequestException,
 } from "@nestjs/common";
 import { ContextType, Prisma } from "@prisma/client";
 
@@ -204,6 +205,16 @@ export class CasesService {
       throw new ConflictException("Caso cerrado: no admite nuevos eventos");
     }
 
+    // OPERATIONAL_VALIDATION solo cuando caso está Resuelto
+    if (dto.eventType === "OPERATIONAL_VALIDATION") {
+      const resolvedStatuses = ["RESOLVED", "Resuelto"];
+      if (!resolvedStatuses.includes(c.status)) {
+        throw new BadRequestException(
+          "Validación operativa solo permitida cuando el caso está en Resuelto"
+        );
+      }
+    }
+
     return this.prisma.$transaction(
       async (tx) => {
         // Último evento del caso para encadenar prevHash
@@ -217,6 +228,23 @@ export class CasesService {
 
         // Payload libre, pero si es cierre forzamos lo mínimo
         let payloadJson: Record<string, any> = (dto.payloadJson ?? {}) as any;
+
+        if (dto.eventType === "OPERATIONAL_VALIDATION") {
+          const result = payloadJson?.result;
+          const note = payloadJson?.note;
+          const validResults = ["OK", "OBSERVATIONS", "FAIL"];
+          if (!validResults.includes(result)) {
+            throw new BadRequestException(
+              "payloadJson.result debe ser OK, OBSERVATIONS o FAIL"
+            );
+          }
+          if (result !== "OK" && (!note || String(note).trim().length === 0)) {
+            throw new BadRequestException(
+              "payloadJson.note es obligatorio cuando result es OBSERVATIONS o FAIL"
+            );
+          }
+          payloadJson = { result, ...(note ? { note: String(note).trim() } : {}) };
+        }
 
         if (dto.eventType === "CASE_CLOSED") {
           payloadJson = {

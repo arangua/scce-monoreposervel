@@ -11,11 +11,20 @@ export type ViewKey =
   | "new_case"
   | "detail";
 
+export type FlowStep = {
+  step: number;
+  label: string;
+  checkKey: string;
+  scrollToId?: string;
+  actionLabel?: string;
+};
+
 export type HelpBlock = {
   title: string;
   purpose: string;
   quickSteps: string[];
   commonIssues?: string[];
+  flowSteps?: FlowStep[];
 };
 
 export const helpByView: Record<ViewKey, HelpBlock> = {
@@ -134,7 +143,10 @@ export const helpByView: Record<ViewKey, HelpBlock> = {
       "Revisa el historial y decisiones.",
       "Verifica evidencia y responsables.",
       "Actualiza estado si corresponde."
-    ]
+    ],
+    flowSteps: [
+      { step: 7, label: "Validación operativa", checkKey: "operational_validation", scrollToId: "btn-operational-validate", actionLabel: "Ir a Validar operación" },
+    ],
   },
 
   trust: {

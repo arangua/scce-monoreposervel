@@ -1327,6 +1327,8 @@ export default function App(){
       if(!c.actions?.length)return notify("❌ "+UI_TEXT.errors.alMenosUnaAccion,"error");
       if(!c.decisions?.length)return notify("❌ "+UI_TEXT.errors.alMenosUnaDecision,"error");
       if(c.status!=="Resuelto")return notify("❌ "+UI_TEXT.errors.casoDebeEstarResuelto,"error");
+      const hasOpVal=(c.timeline??[]).some((ev)=>ev.type==="OPERATIONAL_VALIDATION");
+      if(!hasOpVal)return notify("❌ "+UI_TEXT.errors.faltaValidacionOperativa,"error");
       if(!c.closingMotivo)return notify("❌ "+UI_TEXT.errors.ingresaMotivoCierre,"error");
     }
     const tlMap: Record<CaseStatus, string> = {Escalado:"ESCALATED",Mitigado:"MITIGATED",Resuelto:"RESOLVED",Cerrado:"CLOSED","En gestión":"IN_MANAGEMENT","Recepcionado por DR":"RECEPCIONADO",Nuevo:"DETECTED"};
@@ -1353,6 +1355,40 @@ export default function App(){
     }));
     setAuditLog(prev=>appendEvent(prev,validated?"BYPASS_VALIDATED":"BYPASS_REVOKED",currentUser.id,currentUser.role,caseId,fundament.slice(0,80)));
     notify(`Excepción ${validated?"validada":"revocada"}`,"success");
+  }
+
+  async function addOperationalValidation(caseId: string, result: "OK" | "OBSERVATIONS" | "FAIL", note: string) {
+    if (!currentUser) return;
+    const ev: CaseEvent = {
+      eventId: newEventId("ev"),
+      type: "OPERATIONAL_VALIDATION",
+      at: nowISO(),
+      actor: currentUser.id,
+      result,
+      ...(note ? { note } : {}),
+    };
+    setCases((prev) =>
+      prev.map((x) =>
+        x.id !== caseId ? x : { ...x, timeline: pushTimelineEvent(x.timeline ?? [], ev), updatedAt: nowISO() } as CaseItem
+      )
+    );
+    setAuditLog((prev) => appendEvent(prev, "OPERATIONAL_VALIDATION", currentUser.id, currentUser.role, caseId, `${result}${note ? ": " + note.slice(0, 40) : ""}`));
+    if (authToken && effectiveMembership) {
+      const headers: Record<string, string> = {};
+      if (effectiveMembership.id) headers["x-scce-membership-id"] = effectiveMembership.id;
+      if (effectiveMembership.contextType && effectiveMembership.contextId) {
+        headers["x-scce-context-type"] = effectiveMembership.contextType;
+        headers["x-scce-context-id"] = effectiveMembership.contextId;
+      }
+      const res = await apiRequest<unknown>(`/cases/${caseId}/events`, {
+        method: "POST",
+        token: authToken,
+        headers: Object.keys(headers).length ? headers : undefined,
+        body: { eventType: "OPERATIONAL_VALIDATION", payloadJson: { result, ...(note ? { note } : {}) } },
+      });
+      if (!res.ok) console.warn("[SCCE] Operational validation API sync failed:", res.error);
+    }
+    notify("Validación operativa registrada", "success");
   }
 
   function requestReassessment(caseId: string, newEval: Record<string, number>, justification: string){
@@ -2624,8 +2660,18 @@ export default function App(){
     const [replyingToInstructionId, setReplyingToInstructionId] = useState<string | null>(null);
     const [replyDraft, setReplyDraft] = useState("");
     const [draftCc, setDraftCc] = useState<{ role?: string; userId?: string; label: string }[]>([]);
+    const [showOpValDialog, setShowOpValDialog] = useState(false);
+    const [opValForm, setOpValForm] = useState<{ result: "OK" | "OBSERVATIONS" | "FAIL"; note: string }>({ result: "OK", note: "" });
+    const [opValBusy, setOpValBusy] = useState(false);
+    const [isMobile, setIsMobile] = useState(() => (typeof window !== "undefined" ? window.innerWidth <= 768 : false));
+    useEffect(() => {
+      const onResize = () => setIsMobile(window.innerWidth <= 768);
+      window.addEventListener("resize", onResize);
+      return () => window.removeEventListener("resize", onResize);
+    }, []);
 
     const isClosed = c.status === "Cerrado";
+    const hasOperationalValidation = (c.timeline ?? []).some((ev) => ev.type === "OPERATIONAL_VALIDATION");
     const canAssign =
       !isClosed &&
       canDo("assign", currentUser, c) &&
@@ -2637,6 +2683,7 @@ export default function App(){
       DETECTED: themeColor("success"), REPORTED: themeColor("primary"), FIRST_ACTION: themeColor("warning"), ESCALATED: themeColor("danger"), RESOLVED: themeColor("success"),
       CLOSED: themeColor("gray"), BYPASS: themeColor("purpleLight"), COMMENT: themeColor("muted"), MITIGATED: themeColor("warningAlt"), RECEPCIONADO: themeColor("purpleLight"),
       REASSESSMENT: themeColor("warning"), IN_MANAGEMENT: themeColor("primary"), BYPASS_VALIDATED: themeColor("success"), BYPASS_REVOKED: themeColor("danger"),
+      OPERATIONAL_VALIDATION: themeColor("success"),
     };
     const insUserId = currentUser?.id ?? null;
     const insUserRole = (currentUser as { role?: string } | null)?.role ?? null;
@@ -2676,6 +2723,17 @@ export default function App(){
                 <option value="">Asignar a...</option>
                 {USERS.filter(u=>u.region===c.region||!u.region).map(u=><option key={u.id} value={u.id}>{u.name}</option>)}
               </select>
+            )}
+            {c.status==="Resuelto"&&(
+              hasOperationalValidation ? (
+                <button id="btn-operational-validate" type="button" style={{...S.btn("dark"),opacity:0.8,cursor:"default"}} disabled title={UI_TEXT.buttons.operationalValidated}>
+                  {UI_TEXT.buttons.operationalValidated}
+                </button>
+              ) : (
+                <button id="btn-operational-validate" type="button" style={S.btn("primary")} onClick={()=>setShowOpValDialog(true)}>
+                  {UI_TEXT.buttons.operationalValidate}
+                </button>
+              )
             )}
             {(canDo("update",currentUser,c)||canDo("close",currentUser,c))&&(
               <select style={{...S.inp,width:"auto"}} value={c.status} onChange={e=>changeStatus(c.id,e.target.value as CaseStatus)}>
@@ -2868,7 +2926,7 @@ export default function App(){
             <div style={{...S.card,marginBottom:8}}>
               <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:8}}>LÍNEA DE TIEMPO</div>
               <div style={{maxHeight:200,overflowY:"auto"}}>
-                {(c.timeline??[]).map((t,i)=>{const u=USERS.find(u=>u.id===t.actor);const te=t as typeof t & { eventId?: string; kind?: string; refInstructionId?: string };const eventKey=te.eventId??`${t.at}_${t.actor}_${i}`;const formalLabels: Record<string, string> = { INSTRUCTION_CREATED: UI_TEXT.labels.instructionCreated, INSTRUCTION_ACK: UI_TEXT.labels.instructionAck, INSTRUCTION_CLOSED: UI_TEXT.labels.instructionClosed };const formalLabel=te.kind&&formalLabels[te.kind];const isReply=te.kind==="INSTRUCTION_REPLY"&&te.refInstructionId;const ins=isReply?(c.instructions??[]).find(ins=>ins.id===te.refInstructionId):null;const impact=ins?.impactLevel??"L1";const scopeFLabel={OPERACIONES:UI_TEXT.labels.scopeOperaciones,FISCALIZACION:UI_TEXT.labels.scopeFiscalizacion,SEGURIDAD:UI_TEXT.labels.scopeSeguridad,TI:UI_TEXT.labels.scopeTI,INFRAESTRUCTURA:UI_TEXT.labels.scopeInfraestructura,OTRO:UI_TEXT.labels.scopeOtro}[ins?.scopeFunctional??"OPERACIONES"]??ins?.scopeFunctional??"";const replyPrefix=ins?`Respuesta a instrucción ${impact} ${scopeFLabel} (${fmtTime(ins.createdAt)}): `:(isReply?`${UI_TEXT.labels.instructionUnavailable}: `:"");const displayNote=formalLabel?(t.note??""):replyPrefix?(replyPrefix+(t.note??"")):(t.note??"");const typeLabel=formalLabel??(isReply?UI_TEXT.labels.instructionReplyLabel:t.type);return(
+                {(c.timeline??[]).map((t,i)=>{const u=USERS.find(u=>u.id===t.actor);const te=t as typeof t & { eventId?: string; kind?: string; refInstructionId?: string };const eventKey=te.eventId??`${t.at}_${t.actor}_${i}`;const formalLabels: Record<string, string> = { INSTRUCTION_CREATED: UI_TEXT.labels.instructionCreated, INSTRUCTION_ACK: UI_TEXT.labels.instructionAck, INSTRUCTION_CLOSED: UI_TEXT.labels.instructionClosed };const formalLabel=te.kind&&formalLabels[te.kind];const typeLabels: Record<string, string> = { OPERATIONAL_VALIDATION: "Validación operativa" };const typeLabelOverride=typeLabels[te.type];const isReply=te.kind==="INSTRUCTION_REPLY"&&te.refInstructionId;const ins=isReply?(c.instructions??[]).find(ins=>ins.id===te.refInstructionId):null;const impact=ins?.impactLevel??"L1";const scopeFLabel={OPERACIONES:UI_TEXT.labels.scopeOperaciones,FISCALIZACION:UI_TEXT.labels.scopeFiscalizacion,SEGURIDAD:UI_TEXT.labels.scopeSeguridad,TI:UI_TEXT.labels.scopeTI,INFRAESTRUCTURA:UI_TEXT.labels.scopeInfraestructura,OTRO:UI_TEXT.labels.scopeOtro}[ins?.scopeFunctional??"OPERACIONES"]??ins?.scopeFunctional??"";const replyPrefix=ins?`Respuesta a instrucción ${impact} ${scopeFLabel} (${fmtTime(ins.createdAt)}): `:(isReply?`${UI_TEXT.labels.instructionUnavailable}: `:"");const ovResult=(te as { result?: string }).result;const ovNote=te.type==="OPERATIONAL_VALIDATION"?`${ovResult||""}${(t.note||"")?`: ${t.note}`:""}`:"";const displayNote=te.type==="OPERATIONAL_VALIDATION"?ovNote:formalLabel?(t.note??""):replyPrefix?(replyPrefix+(t.note??"")):(t.note??"");const typeLabel=formalLabel??typeLabelOverride??(isReply?UI_TEXT.labels.instructionReplyLabel:t.type);return(
                   <div key={eventKey} style={{display:"flex",gap:8,alignItems:"flex-start",paddingBottom:8,borderBottom:"1px solid #e5e7eb"}}>
                     <div style={{width:6,height:6,borderRadius:"50%",background:tlC[t.type]||themeColor("muted"),marginTop:5,flexShrink:0}}/>
                     <div>
@@ -2920,7 +2978,7 @@ export default function App(){
               {canDo("close",currentUser,c)&&c.status!=="Cerrado"&&(
                 <div style={{marginTop:8,padding:6,background:themeColor("legacyGrayBg"),borderRadius:4,fontSize:"10px"}}>
                   <div style={{color:themeColor("muted"),fontWeight:600,marginBottom:3}}>PRE-REQUISITOS DE CIERRE:</div>
-                  {[[c.actions?.length,"Al menos 1 acción"],[c.decisions?.length,"Al menos 1 decisión"],[c.status==="Resuelto","Estado = Resuelto"],[!!c.closingMotivo,"Motivo guardado"],[!c.bypassFlagged||!!c.bypassValidated,"Bypass resuelto"]].map(([ok,lbl],idx)=>(
+                  {[[c.actions?.length,"Al menos 1 acción"],[c.decisions?.length,"Al menos 1 decisión"],[c.status==="Resuelto","Estado = Resuelto"],[hasOperationalValidation,"Validación operativa"],[!!c.closingMotivo,"Motivo guardado"],[!c.bypassFlagged||!!c.bypassValidated,"Bypass resuelto"]].map(([ok,lbl],idx)=>(
                     <div key={`req-${idx}-${String(lbl)}`} style={{color:ok?themeColor("success"):themeColor("danger")}}>{ok?"✓":"✕"} {lbl}</div>
                   ))}
                 </div>
@@ -3089,7 +3147,7 @@ export default function App(){
             </Tooltip>
           </div>
           <div style={{maxHeight:140,overflowY:"auto"}}>
-            {ca.map((e,i)=>{const u=USERS.find(u=>u.id===e.actor);const tc: Record<string, string> = {CASE_CREATED:themeColor("success"),BYPASS_USED:themeColor("warning"),BYPASS_FLAGGED:themeColor("danger"),INSTRUCTION_BYPASS_USED:themeColor("legacyRedDarkText"),ESCALATED:themeColor("danger"),STATUS_CHANGED:themeColor("warningAlt"),ACTION_ADDED:themeColor("mutedAlt"),EXPORT_DONE:themeColor("purple"),COMMENT_ADDED:themeColor("muted"),REASSESSMENT:themeColor("warning"),DECISION_ADDED:themeColor("primary"),ASSIGNED:themeColor("purpleLight")};
+            {ca.map((e,i)=>{const u=USERS.find(u=>u.id===e.actor);const tc: Record<string, string> = {CASE_CREATED:themeColor("success"),BYPASS_USED:themeColor("warning"),BYPASS_FLAGGED:themeColor("danger"),INSTRUCTION_BYPASS_USED:themeColor("legacyRedDarkText"),ESCALATED:themeColor("danger"),STATUS_CHANGED:themeColor("warningAlt"),ACTION_ADDED:themeColor("mutedAlt"),EXPORT_DONE:themeColor("purple"),COMMENT_ADDED:themeColor("muted"),REASSESSMENT:themeColor("warning"),DECISION_ADDED:themeColor("primary"),ASSIGNED:themeColor("purpleLight"),OPERATIONAL_VALIDATION:themeColor("success")};
               return<div key={i} style={{display:"flex",gap:6,fontSize:"10px",padding:"3px 0",borderBottom:"1px solid #e5e7eb",flexWrap:"wrap"}}>
                 <span style={{color:themeColor("mutedDark"),flexShrink:0,width:108}}>{fmtDate(e.at)}</span>
                 <span style={{color:tc[e.type]||themeColor("muted"),fontWeight:600,flexShrink:0,width:130}}>{e.type}</span>
@@ -3100,6 +3158,60 @@ export default function App(){
             })}
           </div>
         </div>
+        )}
+
+        {/* Diálogo Validación operativa */}
+        {showOpValDialog && (
+          <>
+            <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.4)",zIndex:1000}} onClick={()=>setShowOpValDialog(false)} aria-hidden="true"/>
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="opval-title"
+              style={{
+                position:"fixed",
+                ...(isMobile?{bottom:0,left:0,right:0,maxHeight:"80vh",borderRadius:"12px 12px 0 0"}:{top:"50%",left:"50%",transform:"translate(-50%,-50%)",width:"min(400px,95vw)",borderRadius:12}),
+                background:themeColor("white"),
+                boxShadow:"0 12px 40px rgba(0,0,0,0.25)",
+                zIndex:1001,
+                padding:20,
+                display:"flex",
+                flexDirection:"column",
+                gap:12,
+              }}
+            >
+              <div id="opval-title" style={{fontWeight:800,fontSize:16}}>{UI_TEXT.buttons.operationalValidate}</div>
+              <label style={S.lbl}>{UI_TEXT.misc.operationalValidationResultLabel}</label>
+              <select style={S.inp} value={opValForm.result} onChange={e=>setOpValForm(p=>({...p,result:e.target.value as "OK"|"OBSERVATIONS"|"FAIL"}))}>
+                <option value="OK">{UI_TEXT.misc.operationalValidationResultOk}</option>
+                <option value="OBSERVATIONS">{UI_TEXT.misc.operationalValidationResultObservations}</option>
+                <option value="FAIL">{UI_TEXT.misc.operationalValidationResultFail}</option>
+              </select>
+              {(opValForm.result==="OBSERVATIONS"||opValForm.result==="FAIL")&&(
+                <>
+                  <label style={S.lbl}>{UI_TEXT.misc.operationalValidationNotePlaceholder}</label>
+                  <textarea style={{...S.inp,minHeight:80,resize:"vertical"}} value={opValForm.note} onChange={e=>setOpValForm(p=>({...p,note:e.target.value}))} placeholder={UI_TEXT.misc.operationalValidationNotePlaceholder}/>
+                </>
+              )}
+              <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:8}}>
+                <button style={S.btn("dark")} onClick={()=>setShowOpValDialog(false)}>Cancelar</button>
+                <button
+                  style={S.btn("primary")}
+                  disabled={opValBusy||((opValForm.result==="OBSERVATIONS"||opValForm.result==="FAIL")&&!opValForm.note.trim())}
+                  onClick={async ()=>{
+                    if((opValForm.result==="OBSERVATIONS"||opValForm.result==="FAIL")&&!opValForm.note.trim())return;
+                    setOpValBusy(true);
+                    await addOperationalValidation(c.id,opValForm.result,opValForm.note.trim());
+                    setOpValBusy(false);
+                    setShowOpValDialog(false);
+                    setOpValForm({result:"OK",note:""});
+                  }}
+                >
+                  {opValBusy?"Guardando...":UI_TEXT.buttons.confirmOperationalValidation}
+                </button>
+              </div>
+            </div>
+          </>
         )}
       </div>
     );
@@ -3879,7 +3991,7 @@ export default function App(){
         {view==="config"&&<ConfigView/>}
         {view==="trust"&&<TrustView/>}
       </div>
-      <HelpDrawer open={helpOpen} onClose={()=>setHelpOpen(false)} content={helpByView[view]??helpByView.dashboard} />
+      <HelpDrawer open={helpOpen} onClose={()=>setHelpOpen(false)} content={helpByView[view]??helpByView.dashboard} caseContext={view==="detail"?cases.find((x): x is CaseItem=>x.id===selectedCase?.id)??null:null} />
     </div>
   ) );
 }

@@ -1,0 +1,2 @@
+-- Add OPERATIONAL_VALIDATION to EventType enum (Paso 7 Validación operativa)
+ALTER TYPE "EventType" ADD VALUE IF NOT EXISTS 'OPERATIONAL_VALIDATION';
