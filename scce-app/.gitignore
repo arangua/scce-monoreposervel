@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Env local y producción (no versionar secretos ni URLs de despliegue)
+.env
+.env.production
+# Artefactos Playwright
+test-results/
