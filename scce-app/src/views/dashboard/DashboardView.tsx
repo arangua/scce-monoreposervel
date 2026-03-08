@@ -166,6 +166,13 @@ export function DashboardView({ gate }: DashboardViewProps) {
     return {};
   };
 
+  const quickFilterDisplayLabel: Record<typeof quickFilter, string> = {
+    all: "Todos",
+    open: "Abiertos",
+    criticalHigh: "Críticos + Altos",
+    overdue: "Casos atrasados",
+  };
+
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 6 }}>
@@ -288,6 +295,9 @@ export function DashboardView({ gate }: DashboardViewProps) {
         </div>
       ) : (
         <div>
+          <div style={{ fontSize: 12, color: themeColor("muted"), marginBottom: 8 }}>
+            Mostrando: {quickFilterDisplayLabel[quickFilter]} · {quickFilteredCases.length} {quickFilteredCases.length === 1 ? "caso" : "casos"}
+          </div>
           {(() => {
             const KNOWN_STATUSES = ["Nuevo", "Recepcionado por DR", "En gestión", "Escalado", "Mitigado", "Resuelto", "Cerrado"];
             const unknownCases = quickFilteredCases.filter((c) => normalizeStatus(c.status) === "Otros / Desconocido");
