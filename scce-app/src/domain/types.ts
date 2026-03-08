@@ -16,6 +16,9 @@ export type CaseStatus =
 
 export type Criticality = "CRITICA" | "ALTA" | "MEDIA" | "BAJA";
 
+/** Resultado de validación operativa (OPERATIONAL_VALIDATION). */
+export type OperationalValidationResult = "OK" | "OBSERVATIONS" | "FAIL";
+
 /** Fase 3.5/3.8 — comentario libre, respuesta, o eventos formales del ciclo de instrucción */
 export type CaseEventKind =
   | "COMMENT"
@@ -32,7 +35,7 @@ export type CaseEvent = {
   actor: string;
   note?: string;
   /** OPERATIONAL_VALIDATION: result OK | OBSERVATIONS | FAIL */
-  result?: "OK" | "OBSERVATIONS" | "FAIL";
+  result?: OperationalValidationResult;
   /** Fase 3.5 — id de la instrucción a la que responde este COMMENT */
   refInstructionId?: string;
   /** Fase 3.5 — COMMENT = libre, INSTRUCTION_REPLY = respuesta de terreno */
