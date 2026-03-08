@@ -1,9 +1,18 @@
 import React, { useState, useMemo, useEffect, useRef, forwardRef, useImperativeHandle, useCallback } from "react";
-import type { CaseItem, InstructionItem, ImpactLevel, ScopeFunctional, LocalCatalog, LocalCatalogEntry, CaseStatus, Criticality, RegionCode, CommuneCode, AuditLogEntry, CaseEventKind, CaseEvent } from "./domain/types";
+import type { CaseItem, InstructionItem, ImpactLevel, ScopeFunctional, LocalCatalog, LocalCatalogEntry, CaseStatus, Criticality, RegionCode, CommuneCode, AuditLogEntry, CaseEventKind, CaseEvent, OperationalValidationResult } from "./domain/types";
 import { calcCompleteness } from "./domain/caseMetrics";
 import { findActiveLocal } from "./domain/catalog";
 import { validateCaseSchema } from "./domain/caseValidation";
-import { fmtDate, fmtTime, timeDiff, nowISO, uuidSimple, tsISO, isDetectedAtInFuture, nowLocalDatetimeInput } from "./domain/date";
+import { fmtDate, timeDiff, nowISO, uuidSimple, tsISO, isDetectedAtInFuture, nowLocalDatetimeInput } from "./domain/date";
+import { CaseDetailView, type CaseDetailGate } from "./views/case";
+import { DashboardView, type DashboardGate } from "./views/dashboard";
+import { CatalogView as CatalogViewComponent, type CatalogGate } from "./views/catalog";
+import { ReportsView as ReportsViewComponent, type ReportsGate } from "./views/reports";
+import { AuditView as AuditViewComponent, type AuditGate } from "./views/audit";
+import { SimulationView as SimulationViewComponent, type SimulationGate } from "./views/simulation";
+import { ChecklistView as ChecklistViewComponent, type ChecklistGate } from "./views/checklist";
+import { ConfigView as ConfigViewComponent, type ConfigGate, type ElectionConfigShape } from "./views/config";
+import { TrustView as TrustViewComponent, type TrustGate } from "./views/trust";
 import { checkLocalDivergence } from "./domain/localDivergence";
 import { SLA_MINUTES, isSlaVencido, type SlaLevel } from "./domain/caseSla";
 import { getRecommendation } from "./domain/recommendation";
@@ -18,18 +27,16 @@ import { Badge } from "./ui/Badge";
 import { Tooltip } from "./ui/Tooltip";
 import { helpByView, type ViewKey } from "./helpContent";
 import { UI_TEXT } from "./config/uiTextStandard";
+import { UI_TEXT_GOVERNANCE } from "./config/uiTextGovernance";
 import { isTerrainMode } from "./domain/auth/visibility";
-import { isInstructionForUser, isClosedStatus } from "./domain/cases/terrainSort";
+import { isClosedStatus } from "./domain/cases/terrainSort";
 import { newEventId } from "./domain/eventId";
 import { isDuplicateEvent } from "./domain/dedupe";
-import { buildExportBundle, validateImportBundle } from "./domain/exportImport";
+import { buildExportBundle, validateImportBundle, type ExportBundle } from "./domain/exportImport";
 import {
   hasSigningKey,
   initSigningKey,
   signIntegrityHashHex,
-  getTrustedEntries,
-  addTrustedKey,
-  removeTrustedKey,
   publicKeyFingerprintShort,
 } from "./domain/signingVault";
 import { TerrainShell } from "./ui/terrain/TerrainShell";
@@ -64,7 +71,56 @@ const MAX_EVIDENCE_ITEMS = 50;
 const MAX_TOTAL_PAYLOAD_BYTES = 5 * 1024 * 1024; // 5 MB post-parse
 // 6.3-4 fechas soft (forma + largo, sin parsear)
 const MAX_DATE_STR = 35;
-const ISO_SOFT_RE = /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})?)?$/;
+const ISO_DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+const ISO_TIME_RE = /^[T ]\d{2}:\d{2}(?::\d{2})?(?:\.\d{1,3})?$/;
+const ISO_TZ_RE = /^(?:Z|[+-]\d{2}:\d{2})$/;
+const ISO_TZ_SUFFIX_RE = /(Z|[+-]\d{2}:\d{2})$/;
+
+const NAV_LABELS: Record<string, string> = {
+  dashboard: "Dashboard",
+  catalog: "🗂 Catálogo",
+  audit: "🔗 Auditoría",
+  reports: "Reportes",
+  simulation: "Simulación",
+  checklist: "Checklist",
+  config: "Config",
+};
+
+function DashboardGateWrapper(props: Readonly<{ gate: DashboardGate }>) {
+  return <DashboardView gate={props.gate} />;
+}
+function CatalogGateWrapper(props: Readonly<{ gate: CatalogGate }>) {
+  return <CatalogViewComponent gate={props.gate} />;
+}
+function ReportsGateWrapper(props: Readonly<{ gate: ReportsGate }>) {
+  return <ReportsViewComponent gate={props.gate} />;
+}
+function AuditGateWrapper(props: Readonly<{ gate: AuditGate }>) {
+  return <AuditViewComponent gate={props.gate} />;
+}
+function SimulationGateWrapper(props: Readonly<{ gate: SimulationGate }>) {
+  return <SimulationViewComponent gate={props.gate} />;
+}
+function ChecklistGateWrapper(props: Readonly<{ gate: ChecklistGate }>) {
+  return <ChecklistViewComponent gate={props.gate} />;
+}
+function ConfigGateWrapper(props: Readonly<{ gate: ConfigGate }>) {
+  return <ConfigViewComponent gate={props.gate} />;
+}
+function TrustGateWrapper(props: Readonly<{ gate: TrustGate }>) {
+  return <TrustViewComponent gate={props.gate} />;
+}
+
+function isISOSoftForm(s: string): boolean {
+  if (s.length > MAX_DATE_STR || s.length < 10) return false;
+  if (!ISO_DATE_ONLY_RE.test(s.slice(0, 10))) return false;
+  const rest = s.slice(10);
+  if (rest.length === 0) return true;
+  const tzMatch = ISO_TZ_SUFFIX_RE.exec(rest);
+  const timePart = tzMatch ? rest.slice(0, -tzMatch[1].length) : rest;
+  if (timePart.length === 0) return false;
+  return ISO_TIME_RE.test(timePart) && (!tzMatch || ISO_TZ_RE.test(tzMatch[1]));
+}
 const ID_RE = /^[A-Za-z0-9_-]+$/;
 
 function importFail(msg: string): never {
@@ -107,6 +163,39 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
 }
 
+function isInstructionAckedByUser(ins: InstructionItem, userId: string): boolean {
+  return (ins.acks ?? []).some((a) => a.userId === userId);
+}
+
+function lastAck(ins: InstructionItem): { userId: string; role: string; at: string } | null {
+  const acks = ins.acks ?? [];
+  return acks.length > 0 ? (acks.at(-1) ?? null) : null;
+}
+
+/** Actualiza la lista de instrucciones añadiendo un acuse a la instrucción indicada (reduce anidación en ackInstruction). */
+function addAckToInstruction(
+  instructions: InstructionItem[],
+  instructionId: string,
+  userId: string,
+  role: string
+): InstructionItem[] {
+  return instructions.map((ins) =>
+    ins.id === instructionId
+      ? { ...ins, acks: [...(ins.acks ?? []), { userId, role, at: nowISO() }] }
+      : ins
+  );
+}
+
+/** Actualiza la lista de instrucciones cerrando la instrucción indicada (reduce anidación en closeInstruction). */
+function closeInstructionInList(instructions: InstructionItem[], instructionId: string): InstructionItem[] {
+  return instructions.map((ins) => (ins.id === instructionId ? { ...ins, status: "CERRADA" as const } : ins));
+}
+
+/** Aplica un updater a un caso por id y devuelve la nueva lista (reduce anidación S2004 en setCases). */
+function updateOneCase(prev: CaseItem[], caseId: string, updater: (c: CaseItem) => CaseItem): CaseItem[] {
+  return prev.map((x) => (x.id === caseId ? updater(x) : x));
+}
+
 function isLocalSnapshot(v: unknown): v is {
   idLocal: string;
   nombre: string;
@@ -145,8 +234,163 @@ function assertIsoSoft(name: string, v: unknown, optional = false): string | und
   if (v === undefined || v === null) return optional ? undefined : importFail(`Import fail-closed: "${name}" es requerido.`);
   const s = assertImportString(name, v);
   if (s.length > MAX_DATE_STR) importFail(`Import fail-closed: "${name}" excede máximo (${MAX_DATE_STR}).`);
-  if (!ISO_SOFT_RE.test(s)) importFail(`Import fail-closed: "${name}" no tiene forma ISO válida (soft).`);
+  if (!isISOSoftForm(s)) importFail(`Import fail-closed: "${name}" no tiene forma ISO válida (soft).`);
   return s;
+}
+
+const MAX_IMPORT_FILE_BYTES = 5 * 1024 * 1024; // 5 MB
+
+function parseImportFile(file: File): Promise<string> {
+  if (file.size > MAX_IMPORT_FILE_BYTES) {
+    throw new Error(
+      `Import JSON bloqueado: ${(file.size / (1024 * 1024)).toFixed(2)} MB excede el máximo de ${(MAX_IMPORT_FILE_BYTES / (1024 * 1024)).toFixed(0)} MB.`
+    );
+  }
+  return file.text();
+}
+
+function validateImportRoot(parsed: unknown): { meta: Record<string, unknown>; casesIn: unknown[] } {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Import JSON bloqueado: estructura inválida (se esperaba objeto raíz).");
+  }
+  const root = parsed as Record<string, unknown>;
+  const metadata = root["metadata"];
+  const casesIn = root["cases"];
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    throw new Error("Import JSON bloqueado: 'metadata' no es un objeto válido.");
+  }
+  const meta = metadata as Record<string, unknown>;
+  if (meta.schemaVersion !== 1) importFail("Import fail-closed: metadata.schemaVersion debe ser 1.");
+  if (!Array.isArray(casesIn)) {
+    throw new TypeError("Import JSON bloqueado: 'cases' no es un array.");
+  }
+  if (casesIn.length > MAX_CASES) {
+    throw new Error(`Import JSON bloqueado: 'cases' excede el máximo de ${MAX_CASES}.`);
+  }
+  const totalSize = JSON.stringify(casesIn).length;
+  if (totalSize > MAX_TOTAL_PAYLOAD_BYTES) {
+    importFail(`Import fail-closed: tamaño total de payload excede máximo (${MAX_TOTAL_PAYLOAD_BYTES} bytes).`);
+  }
+  return { meta, casesIn };
+}
+
+function confirmImportReplace(): boolean {
+  const ok = confirm("Vas a reemplazar los casos actuales por el contenido del JSON. ¿Continuar?");
+  if (!ok) return false;
+  const typed = prompt("Escribe IMPORTAR para confirmar el reemplazo total:");
+  return (typed ?? "").trim() === "IMPORTAR";
+}
+
+function validateImportCaseEvidence(c: Record<string, unknown>, i: number): void {
+  if (c?.evidence == null) return;
+  if (!Array.isArray(c.evidence)) importFail(`Import fail-closed: cases[${i}].evidence debe ser arreglo.`);
+  if ((c.evidence as unknown[]).length > MAX_EVIDENCE_ITEMS) {
+    importFail(`Import fail-closed: cases[${i}].evidence excede máximo (${MAX_EVIDENCE_ITEMS}).`);
+  }
+  for (let j = 0; j < (c.evidence as unknown[]).length; j++) {
+    assertStringMax(`cases[${i}].evidence[${j}]`, (c.evidence as unknown[])[j], MAX_LONG, false);
+  }
+}
+
+function validateImportCaseOrigin(orig: Record<string, unknown>, i: number): void {
+  assertStringMax(`cases[${i}].origin.actor`, orig.actor, MAX_MED, true);
+  assertStringMax(`cases[${i}].origin.channel`, orig.channel, MAX_MED, true);
+  assertStringMax(`cases[${i}].origin.detectedAt`, orig.detectedAt, MAX_SHORT, true);
+  assertIsoSoft(`cases[${i}].origin.detectedAt`, orig.detectedAt, true);
+}
+
+function validateImportCaseLocalSnapshot(snap: Record<string, unknown>, i: number): void {
+  assertStringMax(`cases[${i}].localSnapshot.idLocal`, snap.idLocal, MAX_ID, true);
+  assertStringMax(`cases[${i}].localSnapshot.nombre`, snap.nombre, MAX_LONG, true);
+  assertStringMax(`cases[${i}].localSnapshot.region`, snap.region, MAX_SHORT, true);
+  assertStringMax(`cases[${i}].localSnapshot.commune`, snap.commune, MAX_SHORT, true);
+  assertStringMax(`cases[${i}].localSnapshot.snapshotAt`, snap.snapshotAt, MAX_SHORT, true);
+  assertIsoSoft(`cases[${i}].localSnapshot.snapshotAt`, snap.snapshotAt, true);
+}
+
+function validateImportCaseInstruction(ins: Record<string, unknown>, path: string): void {
+  assertStringMax(`${path}.id`, ins?.id, MAX_ID, true);
+  assertStringMax(`${path}.caseId`, ins?.caseId, MAX_ID, true);
+  assertStringMax(`${path}.scope`, ins?.scope, MAX_SHORT, false);
+  assertStringMax(`${path}.audience`, ins?.audience, MAX_SHORT, false);
+  assertStringMax(`${path}.summary`, ins?.summary, MAX_LONG, false);
+  assertStringMax(`${path}.details`, ins?.details, MAX_LONG, true);
+  assertStringMax(`${path}.createdAt`, ins?.createdAt, MAX_SHORT, false);
+  assertIsoSoft(`${path}.createdAt`, ins?.createdAt, false);
+  assertStringMax(`${path}.createdBy`, ins?.createdBy, MAX_MED, false);
+  assertStringMax(`${path}.status`, ins?.status, MAX_SHORT, false);
+  if (ins?.ackRequired !== true) importFail(`Import fail-closed: ${path}.ackRequired debe ser true.`);
+  const acks = assertArrayMax(`${path}.acks`, ins?.acks, MAX_TIMELINE, false);
+  if (!acks) importFail(`Import fail-closed: ${path}.acks debe ser arreglo.`);
+  for (let k = 0; k < acks.length; k++) {
+    const ack = acks[k] as Record<string, unknown>;
+    assertStringMax(`${path}.acks[${k}].userId`, ack?.userId, MAX_MED, false);
+    assertStringMax(`${path}.acks[${k}].role`, ack?.role, MAX_SHORT, false);
+    assertStringMax(`${path}.acks[${k}].at`, ack?.at, MAX_SHORT, false);
+    assertIsoSoft(`${path}.acks[${k}].at`, ack?.at, false);
+  }
+  const ev = assertArrayMax(`${path}.evidence`, ins?.evidence, MAX_EVIDENCE_ITEMS, true);
+  if (ev) {
+    for (let k = 0; k < ev.length; k++) {
+      assertStringMax(`${path}.evidence[${k}]`, ev[k], MAX_LONG, false);
+    }
+  }
+}
+
+function validateImportCaseTimeline(c: Record<string, unknown>, i: number): void {
+  const tl = assertArrayMax(`cases[${i}].timeline`, c?.timeline, MAX_TIMELINE, true);
+  if (!tl) return;
+  for (let j = 0; j < tl.length; j++) {
+    assertCaseEvent(`cases[${i}].timeline[${j}]`, tl[j]);
+    assertIsoSoft(`cases[${i}].timeline[${j}].at`, (tl[j] as Record<string, unknown>).at, false);
+  }
+}
+
+function validateImportCaseUnknownItemArrays(c: Record<string, unknown>, i: number): void {
+  const acts = assertArrayMax(`cases[${i}].actions`, c?.actions, MAX_UNKNOWN_ARRAY, true);
+  if (acts) for (let j = 0; j < acts.length; j++) assertUnknownItemKind(`cases[${i}].actions[${j}]`, acts[j]);
+  const decs = assertArrayMax(`cases[${i}].decisions`, c?.decisions, MAX_UNKNOWN_ARRAY, true);
+  if (decs) for (let j = 0; j < decs.length; j++) assertUnknownItemKind(`cases[${i}].decisions[${j}]`, decs[j]);
+  const eh = assertArrayMax(`cases[${i}].evaluationHistory`, c?.evaluationHistory, MAX_UNKNOWN_ARRAY, true);
+  if (eh) for (let j = 0; j < eh.length; j++) assertUnknownItemKind(`cases[${i}].evaluationHistory[${j}]`, eh[j]);
+}
+
+function validateImportCaseInstructions(c: Record<string, unknown>, i: number): void {
+  const insArr = assertArrayMax(`cases[${i}].instructions`, c?.instructions, MAX_TIMELINE, true);
+  if (!insArr) return;
+  for (let j = 0; j < insArr.length; j++) {
+    validateImportCaseInstruction(insArr[j] as Record<string, unknown>, `cases[${i}].instructions[${j}]`);
+  }
+}
+
+function validateImportCase(c: Record<string, unknown>, i: number): void {
+  assertIdStable(c?.id);
+  assertStringMax(`cases[${i}].region`, c?.region, MAX_SHORT, false);
+  assertStringMax(`cases[${i}].commune`, c?.commune, MAX_SHORT, false);
+  assertStringMax(`cases[${i}].summary`, c?.summary, MAX_LONG, false);
+  assertStringMax(`cases[${i}].local`, c?.local, MAX_MED, true);
+  assertStringMax(`cases[${i}].detail`, c?.detail, MAX_LONG, true);
+  assertStringMax(`cases[${i}].assignedTo`, c?.assignedTo, MAX_MED, true);
+  assertStringMax(`cases[${i}].closingMotivo`, c?.closingMotivo, MAX_LONG, true);
+  assertStringMax(`cases[${i}].bypassMotivo`, c?.bypassMotivo, MAX_LONG, true);
+  assertStringMax(`cases[${i}].bypassActor`, c?.bypassActor, MAX_MED, true);
+  assertStringMax(`cases[${i}].createdBy`, c?.createdBy, MAX_MED, true);
+  validateImportCaseEvidence(c, i);
+  const orig = c?.origin as Record<string, unknown> | undefined;
+  if (orig) validateImportCaseOrigin(orig, i);
+  const snap = c?.localSnapshot as Record<string, unknown> | undefined;
+  if (snap) validateImportCaseLocalSnapshot(snap, i);
+  validateImportCaseTimeline(c, i);
+  validateImportCaseUnknownItemArrays(c, i);
+  validateImportCaseInstructions(c, i);
+  assertIsoSoft(`cases[${i}].reportedAt`, c?.reportedAt, true);
+  assertIsoSoft(`cases[${i}].firstActionAt`, c?.firstActionAt, true);
+  assertIsoSoft(`cases[${i}].escalatedAt`, c?.escalatedAt, true);
+  assertIsoSoft(`cases[${i}].mitigatedAt`, c?.mitigatedAt, true);
+  assertIsoSoft(`cases[${i}].resolvedAt`, c?.resolvedAt, true);
+  assertIsoSoft(`cases[${i}].closedAt`, c?.closedAt, true);
+  assertIsoSoft(`cases[${i}].createdAt`, c?.createdAt, true);
+  assertIsoSoft(`cases[${i}].updatedAt`, c?.updatedAt, true);
 }
 
 const CONFIG = {
@@ -172,15 +416,18 @@ const CONFIG = {
 
 const DEFAULT_REGION = "TRP";
 
+/** Contraseña de usuarios demo/piloto; no hardcodear. Definir VITE_DEMO_PASSWORD en .env para desarrollo. */
+const DEMO_PASSWORD = (import.meta.env.VITE_DEMO_PASSWORD as string | undefined) ?? "";
+
 const USERS = [
-  {id:"u1",name:"PESE Local",                  username:"pese1",         password:"demo",role:"PESE",               region:"TRP",commune:"IQQ"},
-  {id:"u2",name:"Delegado Junta Electoral",     username:"delegado1",     password:"demo",role:"DELEGADO_JE",        region:"TRP",commune:"IQQ"},
-  {id:"u3",name:"Funcionario DR Eventual",      username:"dr_eventual",   password:"demo",role:"DR_EVENTUAL",        region:"TRP"},
-  {id:"u4",name:"Funcionario Registro SCCE",    username:"registro",      password:"demo",role:"REGISTRO_SCCE",      region:"TRP"},
-  {id:"u5",name:"Funcionario Jefe Operaciones", username:"jefe_ops",      password:"demo",role:"JEFE_OPS",           region:"TRP"},
-  {id:"u6",name:"Funcionario Encargado Gasto",  username:"gasto",         password:"demo",role:"ENCARGADO_GASTO",    region:"TRP"},
-  {id:"u7",name:"Director Regional",            username:"director",      password:"demo",role:"DIRECTOR_REGIONAL",  region:"TRP"},
-  {id:"u8",name:"Usuario Nivel Central",        username:"nivel_central", password:"demo",role:"NIVEL_CENTRAL",      region:null},
+  {id:"u1",name:"PESE Local",                  username:"pese1",         password:DEMO_PASSWORD,role:"PESE",               region:"TRP",commune:"IQQ"},
+  {id:"u2",name:"Delegado Junta Electoral",     username:"delegado1",     password:DEMO_PASSWORD,role:"DELEGADO_JE",        region:"TRP",commune:"IQQ"},
+  {id:"u3",name:"Funcionario DR Eventual",      username:"dr_eventual",   password:DEMO_PASSWORD,role:"DR_EVENTUAL",        region:"TRP"},
+  {id:"u4",name:"Funcionario Registro SCCE",    username:"registro",      password:DEMO_PASSWORD,role:"REGISTRO_SCCE",      region:"TRP"},
+  {id:"u5",name:"Funcionario Jefe Operaciones", username:"jefe_ops",      password:DEMO_PASSWORD,role:"JEFE_OPS",           region:"TRP"},
+  {id:"u6",name:"Funcionario Encargado Gasto",  username:"gasto",         password:DEMO_PASSWORD,role:"ENCARGADO_GASTO",    region:"TRP"},
+  {id:"u7",name:"Director Regional",            username:"director",      password:DEMO_PASSWORD,role:"DIRECTOR_REGIONAL",  region:"TRP"},
+  {id:"u8",name:"Usuario Nivel Central",        username:"nivel_central", password:DEMO_PASSWORD,role:"NIVEL_CENTRAL",      region:null},
 ];
 const ROLE_LABELS = {PESE:"PESE",DELEGADO_JE:"Delegado JE",DR_EVENTUAL:"DR Eventual",REGISTRO_SCCE:"Registro SCCE",JEFE_OPS:"Jefe Ops",ENCARGADO_GASTO:"Encargado Gasto",DIRECTOR_REGIONAL:"Director Regional",NIVEL_CENTRAL:"Nivel Central",ADMIN_PILOTO:"Admin Piloto",DR:"DR",EQUIPO_REGIONAL:"Equipo Regional",NIVEL_CENTRAL_SIM:"Nivel Central Sim"} as const;
 const POLICIES = {
@@ -237,6 +484,18 @@ type SimReport = {
 type BypassCause = "" | "system_down" | "risk_imminent" | "critical_level_3" | "other";
 type BypassFormState = { active: boolean; motivo: string; cause: BypassCause; confirmed: boolean };
 
+/** Parámetros para buildNewCaseData (objeto único para cumplir S107 y facilitar extensión). */
+interface BuildNewCaseDataParams {
+  newCase: CaseItem;
+  currentUser: User;
+  evalForm: Record<string, number>;
+  bypassForm: BypassFormState;
+  cases: CaseItem[];
+  localEntry: LocalCatalogEntry;
+  now_: string;
+  activeRegion: string;
+}
+
 function canDo(action: PolicyAction, user: User | null, caseObj?: CaseItem | null): boolean {
   if (!user) return false;
   const p = POLICIES[user.role];
@@ -258,13 +517,13 @@ type LncDraft = {
 };
 
 // ─── CATÁLOGO ────────────────────────────────────────────────────────────────
-let _localSeq = 0;
-
-function newLocalId(): string {
-  return `LOC-${String(++_localSeq).padStart(4, "0")}`;
+/** Crea un generador de IDs LOC-XXXX independiente (para uso en inicializadores o reset). */
+function createLocalIdGenerator(): () => string {
+  let n = 0;
+  return () => `LOC-${String(++n).padStart(4, "0")}`;
 }
 
-function buildCatalogSeed(): LocalCatalog {
+function buildCatalogSeed(nextId: () => string): LocalCatalog {
   const now = new Date().toISOString();
   const entries: LocalCatalog = [];
 
@@ -272,7 +531,7 @@ function buildCatalogSeed(): LocalCatalog {
     Object.entries(rd.communes).forEach(([cc, cd]) => {
       (cd.locals || []).forEach((nombre: string) => {
         entries.push({
-          idLocal: newLocalId(),
+          idLocal: nextId(),
           nombre,
           region: rc,
           commune: cc,
@@ -317,7 +576,7 @@ function genId(region: RegionCode, commune: CommuneCode, seq: number): string {
   return `${region}-${new Date().getFullYear()}-${commune}-${String(seq).padStart(3, "0")}`;
 }
 function calcCriticality(ev: Record<string, number> | null | undefined) {
-  const vals = Object.values(ev ?? {}) as number[];
+  const vals = Object.values(ev ?? {});
   const max = vals.length ? Math.max(...vals) : 0;
   const sum = vals.reduce((a: number, b: number) => a + b, 0);
 
@@ -356,6 +615,7 @@ const STATUS_MAP: Record<string, UiStatus> = {
   // backend / legacy
   OPEN: "Nuevo",
   NEW: "Nuevo",
+  ACKED: "Recepcionado por DR",
   IN_PROGRESS: "En gestión",
   ESCALATED: "Escalado",
   MITIGATED: "Mitigado",
@@ -373,7 +633,10 @@ const STATUS_MAP: Record<string, UiStatus> = {
 };
 
 function normalizeStatus(s: unknown): UiStatus | "Otros / Desconocido" {
-  const key = String(s ?? "").trim();
+  const key =
+    typeof s === "string" || typeof s === "number" || typeof s === "boolean"
+      ? String(s).trim()
+      : "";
   return STATUS_MAP[key] ?? "Otros / Desconocido";
 }
 type SeedEventInput = { type: string; at: string; actor: string; role: string; caseId?: string | null; summary: string };
@@ -381,7 +644,7 @@ type SeedEventInput = { type: string; at: string; actor: string; role: string; c
 function buildSeedLog(events: SeedEventInput[]): AuditLogEntry[] {
   const log: AuditLogEntry[] = [];
   for (const e of events) {
-    const prevHash: string = log.length ? log[log.length - 1].hash : "00000000";
+    const prevHash: string = log.at(-1)?.hash ?? "00000000";
     const ev: AuditLogEntry = {
       eventId: uuidSimple(),
       ...e,
@@ -443,7 +706,91 @@ const S={
   g4:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"8px"},
 };
 
-// Paso 3 (Detalles) como componente estable: evita remount del textarea al tipear (NewCaseForm está definido inline).
+function OpHome({ onNew }: Readonly<{ onNew: () => void }>) {
+  return (
+    <div>
+      <div style={{ ...S.card, marginBottom: 10 }}>
+        <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 8 }}>
+          Respuestas recibidas
+        </div>
+        <div style={{ color: themeColor("mutedAlt"), fontSize: 12, marginBottom: 8 }}>
+          Sin respuestas nuevas.
+        </div>
+        <button type="button" style={S.btn("primary")} onClick={onNew}>
+          Nuevo caso
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ClosedOverlay() {
+  return (
+    <div style={{position:"absolute",inset:0,background:"rgba(15,17,23,.28)",zIndex:50,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:"6px"}}>
+      <div style={{background:themeColor("bgSurface"),border:`1px solid ${themeColor("border")}`,borderRadius:"6px",padding:"14px 24px",textAlign:"center",boxShadow:"0 2px 12px rgba(0,0,0,.12)"}}>
+        <div style={{fontWeight:700,color:themeColor("textPrimary")}}>🔒 REGISTRO CERRADO</div>
+        <div style={{fontSize:"11px",color:themeColor("textSecondary"),marginTop:3}}>Solo lectura</div>
+      </div>
+    </div>
+  );
+}
+
+function SlaBadge({ c }: Readonly<{ c: CaseItem }>) {
+  return isSlaVencido(c) ? (
+    <Badge style={{ ...S.badge(themeColor("danger")) }} size="xs">
+      SLA VENCIDO
+    </Badge>
+  ) : null;
+}
+
+function RecBadge({
+  c,
+  variant = "FULL",
+}: Readonly<{
+  c: CaseItem;
+  variant?: "FULL" | "OP";
+}>) {
+  const rec = getRecommendation(c, variant);
+  const showTip = variant === "FULL";
+
+  const badgeEl = (
+    <Badge
+      style={{
+        ...S.badge(recColor(rec.level as RecLevel)),
+        cursor: showTip ? "help" : "default",
+      }}
+      size="xs"
+    >
+      {rec.icon} {rec.label}
+    </Badge>
+  );
+
+  if (!showTip) return badgeEl;
+
+  return (
+    <Tooltip
+      placement="bottom-start"
+      maxWidth={280}
+      panelStyle={{
+        background: themeColor("bgSurface"),
+        color: themeColor("textPrimary"),
+        border: "1px solid #e5e7eb",
+      }}
+      content={
+        <div>
+          <div style={{ fontWeight: 800, marginBottom: 4, color: themeColor("white") }}>
+            {rec.text}
+          </div>
+          <div style={{ color: themeColor("mutedAlt") }}>{rec.reason}</div>
+        </div>
+      }
+    >
+      {badgeEl}
+    </Tooltip>
+  );
+}
+
+// Paso 3 (Detalles) como componente estable: evita remount del textarea al tipear.
 type DetailStepContentRef = { getDetail: () => string };
 type DetailStepContentProps = {
   initialDetail: string;
@@ -467,8 +814,9 @@ const DetailStepContent = forwardRef<DetailStepContentRef, DetailStepContentProp
     <div style={S.card}>
       <div style={{ color: themeColor("mutedAlt"), fontSize: "11px", fontWeight: 600, marginBottom: 10 }}>PASO 3 — DETALLES</div>
       <div style={{ marginBottom: 8 }}>
-        <label style={S.lbl}>Detalle</label>
+        <label style={S.lbl} htmlFor="case-detail-textarea">Detalle</label>
         <textarea
+          id="case-detail-textarea"
           style={{ ...S.inp, height: 70, resize: "vertical" }}
           placeholder="Describe el incidente..."
           value={detail}
@@ -476,8 +824,9 @@ const DetailStepContent = forwardRef<DetailStepContentRef, DetailStepContentProp
         />
       </div>
       <div>
-        <label style={S.lbl}>Evidencia (Enter para agregar)</label>
+        <label style={S.lbl} htmlFor="case-evidence-input">Evidencia (Enter para agregar)</label>
         <input
+          id="case-evidence-input"
           style={S.inp}
           placeholder="URL o descripción"
           onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -489,8 +838,8 @@ const DetailStepContent = forwardRef<DetailStepContentRef, DetailStepContentProp
             }
           }}
         />
-        {(newCase?.evidence || []).map((ev, i) => (
-          <div key={i} style={{ fontSize: "11px", color: themeColor("mutedAlt"), marginTop: 2 }}>📎 {ev}</div>
+        {(newCase?.evidence || []).map((ev) => (
+          <div key={ev} style={{ fontSize: "11px", color: themeColor("mutedAlt"), marginTop: 2 }}>📎 {ev}</div>
         ))}
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10 }}>
@@ -500,6 +849,2067 @@ const DetailStepContent = forwardRef<DetailStepContentRef, DetailStepContentProp
     </div>
   );
 });
+
+// ─── Helpers para reducir complejidad cognitiva de App (S3776) ─────────────────
+type RegionOption = { code: string; name: string };
+type MembershipScopesMap = Record<string, { regionScopeMode: "ALL" | "LIST"; regionScope: string[]; regionCode?: string | null }>;
+
+function getRegionOptions(
+  isCentral: boolean,
+  effectiveMembership: Membership | null,
+  membershipScopes: MembershipScopesMap,
+  regionsConfig: Record<string, { name?: string }>
+): RegionOption[] {
+  const entriesAll = Object.entries(regionsConfig).map(([code, d]) => ({
+    code,
+    name: d.name ?? code,
+  }));
+  if (isCentral) {
+    return [{ code: "ALL", name: "Todas las regiones" }, ...entriesAll];
+  }
+  const mid = effectiveMembership?.id;
+  const mode =
+    effectiveMembership?.regionScopeMode ??
+    (mid ? membershipScopes[mid]?.regionScopeMode : undefined);
+  const scope =
+    effectiveMembership?.regionScope ??
+    (mid ? membershipScopes[mid]?.regionScope : undefined);
+  if (mode === "LIST" && Array.isArray(scope) && scope.length) {
+    const allowed = new Set(scope);
+    return entriesAll.filter((e) => allowed.has(e.code));
+  }
+  const rc =
+    effectiveMembership?.regionCode ??
+    (mid ? membershipScopes[mid]?.regionCode : undefined);
+  if (rc) return entriesAll.filter((e) => e.code === rc);
+  return entriesAll;
+}
+
+function downloadJson(filename: string, jsonText: string) {
+  const blob = new Blob([jsonText], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/** Intenta firmar el bundle con la llave existente. Devuelve true si se firmó. */
+async function trySignWithExistingKey(
+  bundle: ExportBundle,
+  notify: (msg: string, type: string) => void
+): Promise<boolean> {
+  const passphrase = globalThis.prompt(
+    UI_TEXT.misc.signPassphrasePrompt ?? "Ingrese passphrase para firmar el export:"
+  );
+  if (!passphrase?.trim()) {
+    notify(
+      UI_TEXT.misc.exportUnsignedWarning ?? "Export sin firma (no se ingresó passphrase).",
+      "warning"
+    );
+    return false;
+  }
+  try {
+    const sig = await signIntegrityHashHex({
+      passphrase: passphrase.trim(),
+      hashHex: bundle.integrity!.value,
+    });
+    bundle.signature = {
+      algo: "Ed25519",
+      publicKeyB64: sig.publicKeyB64,
+      valueB64: sig.signatureB64,
+      signedAt: sig.signedAt,
+    };
+    return true;
+  } catch {
+    notify(
+      UI_TEXT.errors.signFailed ??
+        "No se pudo firmar (passphrase incorrecta o llave inválida). Se exportará sin firma.",
+      "error"
+    );
+    return false;
+  }
+}
+
+/** Ofrece crear llave de firma si no existe; notifica resultado. */
+async function offerCreateSigningKey(notify: (msg: string, type: string) => void): Promise<void> {
+  const wants = globalThis.confirm(
+    UI_TEXT.misc.noSigningKeyConfirm ??
+      "No hay llave de firma configurada. ¿Deseas crear una ahora (recomendado)?"
+  );
+  if (!wants) return;
+
+  const p1 = globalThis.prompt(
+    UI_TEXT.misc.signCreatePassphrase1 ?? "Crea una passphrase (guárdala):"
+  );
+  if (!p1?.trim()) return;
+
+  const p2 = globalThis.prompt(UI_TEXT.misc.signCreatePassphrase2 ?? "Repite la passphrase:");
+  if (p2 !== p1) {
+    notify(
+      UI_TEXT.errors.signPassphraseMismatch ??
+        "Las passphrases no coinciden. Export se hará sin firma.",
+      "error"
+    );
+    return;
+  }
+  try {
+    await initSigningKey(p1);
+    notify(
+      UI_TEXT.misc.signKeyCreated ?? "Llave creada. Reintenta Exportar para firmar.",
+      "success"
+    );
+  } catch {
+    notify(
+      UI_TEXT.errors.signKeyCreateFailed ?? "No se pudo crear la llave de firma.",
+      "error"
+    );
+  }
+}
+
+type ExportStateOptions = {
+  cases: CaseItem[];
+  setAuditLog: React.Dispatch<React.SetStateAction<AuditLogEntry[]>>;
+  currentUser: User | null;
+  notify: (msg: string, type: string) => void;
+};
+
+async function handleExportState(opts: ExportStateOptions): Promise<void> {
+  const { cases, setAuditLog, currentUser, notify } = opts;
+  const bundle = await buildExportBundle(cases, APP_VERSION);
+  let signed = false;
+
+  if (await hasSigningKey()) {
+    signed = await trySignWithExistingKey(bundle, notify);
+  } else {
+    await offerCreateSigningKey(notify);
+    notify(
+      UI_TEXT.misc.exportUnsignedWarning ?? "Export sin firma (no hay llave configurada).",
+      "warning"
+    );
+  }
+
+  const text = JSON.stringify(bundle, null, 2);
+  const name = `SCCE_APP_export_${new Date().toISOString().replaceAll(":", "-")}.json`;
+  downloadJson(name, text);
+
+  if (currentUser?.id) {
+    setAuditLog((prev) =>
+      appendEvent(
+        prev,
+        "EXPORT_DONE",
+        currentUser.id,
+        currentUser.role,
+        null,
+        signed ? "Export estado v3 (firmado)" : "Export estado v3 (sin firma)"
+      )
+    );
+  }
+
+  notify(UI_TEXT.misc.exportOk ?? "Export listo.", "success");
+}
+
+type ImportStateOptions = {
+  setCases: React.Dispatch<React.SetStateAction<CaseItem[]>>;
+  setAuditLog: React.Dispatch<React.SetStateAction<AuditLogEntry[]>>;
+  currentUser: User | null;
+  notify: (msg: string, type: string) => void;
+};
+
+const MAX_IMPORT_BYTES = 5 * 1024 * 1024; // 5 MB
+
+function getImportFailureEventType(error: string): string {
+  if (error.includes("Firma inválida")) return "IMPORT_SIG_INVALID_BLOCKED";
+  if (error.includes("Integridad fallida")) return "IMPORT_INTEGRITY_FAILED_BLOCKED";
+  return "IMPORT_FAILED";
+}
+
+function appendImportAudit(
+  setAuditLog: React.Dispatch<React.SetStateAction<AuditLogEntry[]>>,
+  currentUser: User | null,
+  evType: string,
+  detail: string
+): void {
+  if (!currentUser?.id) return;
+  setAuditLog((prev) =>
+    appendEvent(prev, evType, currentUser.id, currentUser.role, null, detail)
+  );
+}
+
+type ImportSignatureAuditOpts = Pick<ImportStateOptions, "setAuditLog" | "currentUser" | "notify">;
+
+async function handleImportSignatureStatus(
+  signatureStatus: string,
+  opts: ImportSignatureAuditOpts,
+  fpForAudit: string
+): Promise<boolean> {
+  if (signatureStatus === "none") {
+    opts.notify(
+      UI_TEXT.misc.importUnsignedWarning ??
+        "Import sin firma: permitido, pero no hay garantía de autoría.",
+      "warning"
+    );
+    appendImportAudit(opts.setAuditLog, opts.currentUser, "IMPORT_SIG_NONE_ALLOWED", "Import sin firma permitido");
+    return true;
+  }
+  if (signatureStatus === "valid_untrusted") {
+    const confirmWord = UI_TEXT.misc.trustConfirmWord ?? "CONFIAR";
+    const typed = globalThis.prompt(
+      UI_TEXT.misc.importUntrustedTypeToConfirm ??
+        "Firma válida, pero no confiable. Para continuar escribe CONFIAR:"
+    );
+    if (typed?.trim() !== confirmWord) {
+      opts.notify(
+        UI_TEXT.errors.importUntrustedConfirmFailed ?? "No se confirmó la confianza. Import cancelado.",
+        "error"
+      );
+      appendImportAudit(
+        opts.setAuditLog,
+        opts.currentUser,
+        "IMPORT_SIG_VALID_UNTRUSTED_REJECTED",
+        fpForAudit ? `Rechazado – huella ${fpForAudit}` : "Rechazado"
+      );
+      return false;
+    }
+    appendImportAudit(
+      opts.setAuditLog,
+      opts.currentUser,
+      "IMPORT_SIG_VALID_UNTRUSTED_ACCEPTED",
+      fpForAudit ? `Aceptado – huella ${fpForAudit}` : "Aceptado"
+    );
+    return true;
+  }
+  opts.notify(
+    UI_TEXT.misc.importSignedTrustedOk ?? "Import con autoría verificada (confiable).",
+    "success"
+  );
+  appendImportAudit(
+    opts.setAuditLog,
+    opts.currentUser,
+    "IMPORT_SIG_VALID_TRUSTED",
+    fpForAudit ? `Import confiable – huella ${fpForAudit}` : "Import confiable"
+  );
+  return true;
+}
+
+async function handleImportStateFile(opts: ImportStateOptions, file: File): Promise<void> {
+  const { setCases, setAuditLog, currentUser, notify } = opts;
+  if (file.size > MAX_IMPORT_BYTES) {
+    notify((UI_TEXT.errors.importFileTooLarge ?? "Archivo demasiado grande (máx. {maxMb} MB).").replace("{maxMb}", String(MAX_IMPORT_BYTES / (1024 * 1024))), "error");
+    return;
+  }
+  let raw: unknown;
+  try {
+    raw = JSON.parse(await file.text());
+  } catch {
+    notify(UI_TEXT.errors.importInvalidJson ?? "Archivo no es JSON válido.", "error");
+    return;
+  }
+  const v = await validateImportBundle(raw);
+  if (!v.ok) {
+    notify(v.error, "error");
+    appendImportAudit(setAuditLog, currentUser, getImportFailureEventType(v.error), v.error.slice(0, 80));
+    return;
+  }
+
+  const signerPub = (raw as { signature?: { publicKeyB64: string } })?.signature?.publicKeyB64 ?? "";
+  const fpForAudit = signerPub ? await publicKeyFingerprintShort(signerPub) : "";
+
+  const mayContinue = await handleImportSignatureStatus(v.signatureStatus, opts, fpForAudit);
+  if (!mayContinue) return;
+
+  const ok = globalThis.confirm(
+    UI_TEXT.misc.importConfirm ?? "Esto reemplazará los casos actuales. ¿Continuar?"
+  );
+  if (!ok) return;
+  setCases(v.cases);
+  notify(UI_TEXT.misc.importOk ?? "Import realizado.", "success");
+}
+
+type BootstrapSessionOptions = {
+  setAuthToken: React.Dispatch<React.SetStateAction<string | null>>;
+  setApiUser: React.Dispatch<React.SetStateAction<ApiUser | null>>;
+  setMemberships: React.Dispatch<React.SetStateAction<Membership[]>>;
+  setActiveMembership: React.Dispatch<React.SetStateAction<Membership | null>>;
+  setCurrentUser: React.Dispatch<React.SetStateAction<User | null>>;
+  setLoginErr: React.Dispatch<React.SetStateAction<string>>;
+  setMembershipScopes: React.Dispatch<React.SetStateAction<MembershipScopesMap>>;
+  setCtxErr: React.Dispatch<React.SetStateAction<string>>;
+  setCases: React.Dispatch<React.SetStateAction<CaseItem[]>>;
+  setAuditLog: React.Dispatch<React.SetStateAction<AuditLogEntry[]>>;
+};
+
+type MeMembership = { id: string; regionCode?: string | null; regionScopeMode?: string; regionScope?: string[] };
+
+function clearSessionAndSetLoginError(opts: BootstrapSessionOptions): void {
+  clearSession();
+  opts.setAuthToken(null);
+  opts.setApiUser(null);
+  opts.setMemberships([]);
+  opts.setActiveMembership(null);
+  opts.setCurrentUser(null);
+  opts.setLoginErr("Sesión inválida o expirada. Inicia sesión nuevamente.");
+}
+
+function buildMembershipScopesMap(memberships: MeMembership[]): MembershipScopesMap {
+  const map: MembershipScopesMap = {};
+  for (const m of memberships) {
+    map[m.id] = {
+      regionScopeMode: m.regionScopeMode === "ALL" ? "ALL" : "LIST",
+      regionScope: Array.isArray(m.regionScope) ? m.regionScope : [],
+      regionCode: m.regionCode ?? null,
+    };
+  }
+  return map;
+}
+
+function ensureActiveMembershipFromList(list: Membership[], opts: BootstrapSessionOptions): void {
+  const adm = list.find((m) => m.regionCode === "ADM");
+  const pick = adm ?? (list.length === 1 ? list[0] : list[0] ?? null);
+  if (pick) {
+    setActiveMembership(pick);
+    opts.setActiveMembership(pick);
+  }
+}
+
+type RawCaseFromApi = {
+  regionCode?: string;
+  communeCode?: string;
+  localCode?: string;
+  createdByUserId?: string;
+  region?: string;
+  commune?: string;
+  local?: string;
+  createdBy?: string;
+  [key: string]: unknown;
+};
+
+function mapRawCaseToCaseItem(c: RawCaseFromApi): CaseItem {
+  return {
+    ...c,
+    region: c.region ?? c.regionCode ?? "",
+    commune: c.commune ?? c.communeCode ?? "",
+    local: c.local ?? c.localCode,
+    createdBy: c.createdBy ?? c.createdByUserId,
+  } as CaseItem;
+}
+
+async function loadCasesForMembership(
+  token: string,
+  membership: Membership,
+  opts: BootstrapSessionOptions
+): Promise<void> {
+  const headers: Record<string, string> = {};
+  if (membership.id) headers["x-scce-membership-id"] = membership.id;
+  if (membership.contextType && membership.contextId) {
+    headers["x-scce-context-type"] = membership.contextType;
+    headers["x-scce-context-id"] = membership.contextId;
+  }
+  const res = await apiRequest<unknown>("/cases", {
+    token,
+    method: "GET",
+    headers: Object.keys(headers).length ? headers : undefined,
+  });
+  if (!res.ok || !Array.isArray(res.data)) return;
+  const raw = res.data as RawCaseFromApi[];
+  const incoming = raw.map(mapRawCaseToCaseItem);
+  opts.setCases((prev) =>
+    incoming.map((nextCase) => {
+      const prevCase = prev.find((c) => c.id === nextCase.id);
+      if (!prevCase) return nextCase;
+      return {
+        ...nextCase,
+        actions: prevCase.actions ?? nextCase.actions,
+        timeline: prevCase.timeline ?? nextCase.timeline,
+        decisions: prevCase.decisions ?? nextCase.decisions,
+      };
+    })
+  );
+}
+
+type ApiEvent = { id: string; eventType: string; payloadJson: Record<string, unknown>; createdAt: string; actorId: string };
+
+function eventSummaryFromPayload(eventType: string, payloadJson: Record<string, unknown>): string {
+  const p = payloadJson ?? {};
+  if (eventType === "ACTION_ADDED") return (p.action as string) ?? eventType;
+  if (eventType === "DECISION_ADDED") return (p.fundament as string) ?? eventType;
+  if (eventType === "COMMENT_ADDED" || eventType === "INSTRUCTION_CREATED") return (p.note as string) ?? (p.comment as string) ?? eventType;
+  if (eventType === "CASE_CLOSED") return (p.reason as string) ?? eventType;
+  if (eventType === "OPERATIONAL_VALIDATION") return [p.result, p.note].filter(Boolean).map(String).join(" — ") || eventType;
+  if (eventType === "ASSIGNMENT_CHANGED") return (p.assignedTo as string) ? `Asignado a ${p.assignedTo}` : eventType;
+  return eventType;
+}
+
+function membershipToRequestHeaders(membership: Membership): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (membership.id) headers["x-scce-membership-id"] = membership.id;
+  if (membership.contextType && membership.contextId) {
+    headers["x-scce-context-type"] = membership.contextType;
+    headers["x-scce-context-id"] = membership.contextId;
+  }
+  return headers;
+}
+
+function eventCreatedAtIso(e: ApiEvent): string {
+  if (typeof e.createdAt === "string") return e.createdAt;
+  if (e.createdAt) return new Date(e.createdAt).toISOString();
+  return "";
+}
+
+function apiEventToAuditEntry(e: ApiEvent, caseId: string): Omit<AuditLogEntry, "prevHash" | "hash"> {
+  const at = eventCreatedAtIso(e);
+  const summary = eventSummaryFromPayload(e.eventType, e.payloadJson ?? {});
+  return {
+    eventId: e.id,
+    type: e.eventType,
+    at,
+    actor: e.actorId ?? "api",
+    role: "API",
+    caseId,
+    summary: summary.slice(0, 200),
+  };
+}
+
+function compareAt(a: { at: string }, b: { at: string }): number {
+  if (a.at < b.at) return -1;
+  if (a.at > b.at) return 1;
+  return 0;
+}
+
+function sortAndChainAuditEntries(entries: Omit<AuditLogEntry, "prevHash" | "hash">[]): AuditLogEntry[] {
+  const sorted = [...entries].sort(compareAt);
+  const log: AuditLogEntry[] = [];
+  let prevHash = "00000000";
+  for (const entry of sorted) {
+    const ev: AuditLogEntry = { ...entry, prevHash, hash: "" };
+    ev.hash = chainHash(prevHash, ev);
+    prevHash = ev.hash;
+    log.push(ev);
+  }
+  return log;
+}
+
+type CasesEventsOpts = { token: string; method: "GET"; headers?: Record<string, string> };
+
+async function collectAuditEntriesFromCases(
+  cases: RawCaseFromApi[],
+  opts: CasesEventsOpts
+): Promise<Omit<AuditLogEntry, "prevHash" | "hash">[]> {
+  const allEntries: Omit<AuditLogEntry, "prevHash" | "hash">[] = [];
+  for (const c of cases) {
+    const caseId = (c as { id?: string }).id;
+    if (!caseId) continue;
+    const eventsRes = await apiRequest<ApiEvent[]>(`/cases/${caseId}/events`, opts);
+    if (!eventsRes.ok || !Array.isArray(eventsRes.data)) continue;
+    for (const e of eventsRes.data) {
+      allEntries.push(apiEventToAuditEntry(e, caseId));
+    }
+  }
+  return allEntries;
+}
+
+async function loadAuditLogFromApi(token: string, membership: Membership): Promise<AuditLogEntry[]> {
+  const headers = membershipToRequestHeaders(membership);
+  const opts: CasesEventsOpts = { token, method: "GET", headers: Object.keys(headers).length ? headers : undefined };
+
+  const casesRes = await apiRequest<unknown>("/cases", opts);
+  if (!casesRes.ok || !Array.isArray(casesRes.data)) return [];
+  const cases = casesRes.data as RawCaseFromApi[];
+
+  const allEntries = await collectAuditEntriesFromCases(cases, opts);
+  return sortAndChainAuditEntries(allEntries);
+}
+
+async function bootstrapSession(token: string, opts: BootstrapSessionOptions): Promise<void> {
+  const meRes = await apiRequest<{ user: ApiUser; memberships?: MeMembership[] }>("/me", { token });
+  console.log("ME (crudo):", meRes);
+  const meMembershipsForLog = meRes.ok ? (meRes.data.memberships ?? []) : [];
+  console.log(
+    "ME memberships resumido:",
+    meMembershipsForLog.map((m: MeMembership) => ({ id: m.id, regionCode: m.regionCode, regionScopeMode: m.regionScopeMode, regionScope: m.regionScope }))
+  );
+
+  if (!meRes.ok) {
+    clearSessionAndSetLoginError(opts);
+    return;
+  }
+
+  opts.setApiUser(meRes.data.user);
+  if (meRes.data.memberships?.length) {
+    opts.setMembershipScopes(buildMembershipScopesMap(meRes.data.memberships));
+  }
+
+  const ctxRes = await apiRequest<{ memberships: Membership[] }>("/contexts", { token });
+  if (!ctxRes.ok) {
+    opts.setCtxErr(ctxRes.error || "No se pudo cargar contextos.");
+    opts.setMemberships([]);
+    return;
+  }
+
+  opts.setCtxErr("");
+  opts.setMemberships(ctxRes.data.memberships || []);
+
+  if (!getActiveMembership()) {
+    ensureActiveMembershipFromList(ctxRes.data.memberships || [], opts);
+  }
+
+  const effectiveMembership = getActiveMembership();
+  if (token && effectiveMembership) {
+    await loadCasesForMembership(token, effectiveMembership, opts);
+    const realAuditLog = await loadAuditLogFromApi(token, effectiveMembership);
+    opts.setAuditLog(realAuditLog);
+  }
+}
+
+// ─── Hooks y helpers para reducir complejidad cognitiva de App (S3776) ─────────
+type GoToSectionFn = (nextView: ViewKey, sectionId: string) => void;
+
+function createAppKeydownHandler(goToSection: GoToSectionFn) {
+  return function onKey(e: KeyboardEvent) {
+    const isCtrl = e.ctrlKey || e.metaKey;
+    if (!isCtrl) return;
+    const tag = (e.target as HTMLElement | null)?.tagName?.toLowerCase();
+    if (tag === "input" || tag === "textarea") return;
+    if (e.key.toLowerCase() === "e") {
+      e.preventDefault();
+      goToSection("reports", "reports-export");
+    }
+    if (e.key.toLowerCase() === "i") {
+      e.preventDefault();
+      goToSection("reports", "reports-export");
+    }
+    if (e.shiftKey && e.key.toLowerCase() === "r") {
+      e.preventDefault();
+      goToSection("config", "config-reset");
+    }
+  };
+}
+
+function useKeyboardShortcuts(goToSection: GoToSectionFn) {
+  useEffect(() => {
+    const onKey = createAppKeydownHandler(goToSection);
+    globalThis.addEventListener("keydown", onKey);
+    return () => globalThis.removeEventListener("keydown", onKey);
+  }, [goToSection]);
+}
+
+type UiMode = "OP" | "FULL";
+function uiModeStorageKey(userId: string) {
+  return `SCCE_UI_MODE:${userId}`;
+}
+
+function useUiModeFromStorage(
+  currentUser: User | null,
+  defaultUiModeForUser: (u: User | null) => UiMode,
+  setUiMode: React.Dispatch<React.SetStateAction<UiMode>>
+) {
+  useEffect(() => {
+    if (!currentUser) {
+      setUiMode("FULL");
+      return;
+    }
+    const key = uiModeStorageKey(currentUser.id);
+    const saved = localStorage.getItem(key);
+    if (saved === "OP" || saved === "FULL") {
+      setUiMode(saved);
+    } else {
+      setUiMode(defaultUiModeForUser(currentUser));
+    }
+  }, [currentUser, defaultUiModeForUser, setUiMode]);
+}
+
+function useTerrainShellRedirect(
+  showTerrainShell: boolean,
+  view: ViewKey,
+  setView: React.Dispatch<React.SetStateAction<ViewKey>>,
+  opHomeView: string
+) {
+  useEffect(() => {
+    if (!showTerrainShell) return;
+    if (view === "dashboard") setView(opHomeView as ViewKey);
+  }, [showTerrainShell, view, setView, opHomeView]);
+}
+
+function useActionsMenuCloseOutside(actionsOpen: boolean, setActionsOpen: React.Dispatch<React.SetStateAction<boolean>>) {
+  useEffect(() => {
+    if (!actionsOpen) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (!t) return;
+      if (t.closest?.("[data-actions-menu]")) return;
+      setActionsOpen(false);
+    };
+    globalThis.addEventListener("mousedown", onDown);
+    return () => globalThis.removeEventListener("mousedown", onDown);
+  }, [actionsOpen, setActionsOpen]);
+}
+
+function withBusyImpl(
+  key: string,
+  fn: () => void,
+  busyAction: Record<string, boolean>,
+  setBusyAction: React.Dispatch<React.SetStateAction<Record<string, boolean>>>
+) {
+  if (busyAction[key]) return;
+  setBusyAction((prev) => ({ ...prev, [key]: true }));
+  try {
+    fn();
+  } finally {
+    setTimeout(() => setBusyAction((prev) => ({ ...prev, [key]: false })), 350);
+  }
+}
+
+export type AppFilterState = { criticality: string; status: string; commune: string; search: string; region: string };
+
+type SessionEffectsOpts = {
+  authToken: string | null;
+  apiUser: ApiUser | null;
+  memberships: Membership[];
+  activeMembership: Membership | null;
+  setCurrentUser: React.Dispatch<React.SetStateAction<User | null>>;
+  isCentral: boolean;
+  justBecameCentralRef: React.RefObject<boolean>;
+  activeRegion: string;
+  setActiveRegion: React.Dispatch<React.SetStateAction<string>>;
+  setFilterState: React.Dispatch<React.SetStateAction<AppFilterState>>;
+  effectiveMembership: Membership | null;
+  membershipScopes: MembershipScopesMap;
+  bootstrapOpts: BootstrapSessionOptions;
+};
+
+function useAppSessionEffects(opts: SessionEffectsOpts) {
+  const {
+    authToken,
+    apiUser,
+    memberships,
+    activeMembership,
+    setCurrentUser,
+    isCentral,
+    justBecameCentralRef,
+    activeRegion,
+    setActiveRegion,
+    setFilterState,
+    effectiveMembership,
+    membershipScopes,
+    bootstrapOpts,
+  } = opts;
+
+  useEffect(() => {
+    if (!authToken) return;
+    if (apiUser && memberships.length) return;
+    bootstrapSession(authToken, bootstrapOpts);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authToken]);
+
+  useEffect(() => {
+    if (!apiUser || !activeMembership) return;
+    const u: User = {
+      id: apiUser.id,
+      username: apiUser.email,
+      name: apiUser.email,
+      role: activeMembership.role,
+      region: null,
+      commune: undefined,
+      password: "",
+    };
+    setCurrentUser(u);
+  }, [apiUser, activeMembership, setCurrentUser]);
+
+  useEffect(() => {
+    if (isCentral && !justBecameCentralRef.current) {
+      justBecameCentralRef.current = true;
+      setActiveRegion("ALL");
+    }
+    if (!isCentral) {
+      justBecameCentralRef.current = false;
+      if (activeRegion === "ALL") setActiveRegion(DEFAULT_REGION);
+    }
+    // justBecameCentralRef is a ref (stable identity), intentionally omitted from deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isCentral, activeRegion, setActiveRegion]);
+
+  useEffect(() => {
+    if (isCentral) return;
+    const mid = effectiveMembership?.id;
+    if (!mid) return;
+    const scope = membershipScopes[mid];
+    if (scope?.regionScopeMode !== "LIST") return;
+    const allowed = scope.regionScope || [];
+    if (!allowed.length) return;
+    if (!allowed.includes(activeRegion)) {
+      setActiveRegion(allowed[0]);
+      setFilterState((p) => ({ ...p, commune: "" }));
+    }
+  }, [isCentral, effectiveMembership?.id, membershipScopes, activeRegion, setActiveRegion, setFilterState]);
+
+  useEffect(() => {
+    if (!isCentral && activeRegion && activeRegion !== "ALL") {
+      setFilterState((prev) => {
+        if (prev.region === activeRegion) return prev;
+        return { ...prev, region: activeRegion, commune: "" };
+      });
+    }
+  }, [isCentral, activeRegion, setFilterState]);
+}
+
+/** Resultado exitoso de validación de nuevo caso (para envío). */
+type ValidateNewCaseSuccess = {
+  ok: true;
+  regionSel: string;
+  communeSel: string;
+  localName: string;
+  localEntry: LocalCatalogEntry;
+  now_: string;
+};
+
+function validateNewCaseCommuneAndRegion(
+  regionSel: string,
+  communeSel: string,
+  localCatalog: LocalCatalog
+): string | null {
+  if (!communeSel) return "⚠️ Debes seleccionar una comuna.";
+  const communesInRegion = [...new Set(localCatalog.filter((e) => e.region === regionSel).map((e) => e.commune))];
+  if (!communesInRegion.length) return "⚠️ Catálogo de locales no disponible para la región seleccionada.";
+  if (!communesInRegion.includes(communeSel)) return "⚠️ La comuna seleccionada no corresponde a la región indicada.";
+  return null;
+}
+
+function validateNewCaseLocalName(localName: string): string | null {
+  if (!localName) return "⚠️ Debes seleccionar un local de votación.";
+  return null;
+}
+
+function validateNewCaseDetectedAt(newCase: CaseItem): string | null {
+  const detectedAt = newCase.origin?.detectedAt;
+  if (!detectedAt) return "⚠️ Falta la hora de detección del incidente.";
+  if (!Number.isFinite(new Date(detectedAt).getTime())) return "⚠️ Hora de detección inválida.";
+  if (isDetectedAtInFuture(detectedAt)) return "⚠️ La hora de detección no puede estar en el futuro (se permite hasta 5 min por desfase de reloj).";
+  return null;
+}
+
+function validateNewCaseLocalEntry(
+  localCatalog: LocalCatalog,
+  regionSel: string,
+  communeSel: string,
+  localName: string
+): { error: string } | { localEntry: LocalCatalogEntry } {
+  const localEntry = findActiveLocal(localCatalog, regionSel, communeSel, localName);
+  if (!localEntry) return { error: "⚠️ El local seleccionado no existe o no está activo en el catálogo maestro." };
+  if (localEntry.region !== regionSel || localEntry.commune !== communeSel) return { error: "⚠️ El local seleccionado no corresponde a la comuna/región indicada." };
+  return { localEntry };
+}
+
+function validateNewCaseUserScope(
+  regionSel: string,
+  communeSel: string,
+  localEntry: LocalCatalogEntry,
+  currentUser: User,
+  assignedCommuneEffective: string | undefined | null,
+  assignedLocalIdEffective: string | undefined | null
+): string | null {
+  if (currentUser.region && regionSel !== currentUser.region) return "⚠️ No puedes registrar incidentes fuera de tu región autorizada.";
+  if (assignedCommuneEffective && communeSel !== assignedCommuneEffective) return "⚠️ No puedes registrar incidentes fuera de tu comuna autorizada.";
+  if (assignedLocalIdEffective && localEntry.idLocal !== assignedLocalIdEffective) return "⚠️ No puedes registrar incidentes fuera de tu local autorizado.";
+  return null;
+}
+
+/** Validación operativa para envío de nuevo caso. Devuelve error o datos listos para continuar. */
+function validateNewCaseForSubmit(
+  newCase: CaseItem,
+  localCatalog: LocalCatalog,
+  currentUser: User,
+  assignedCommuneEffective: string | undefined | null,
+  assignedLocalIdEffective: string | undefined | null
+): { error: string } | ValidateNewCaseSuccess {
+  const regionSel = (newCase.region ?? "").trim();
+  const communeSel = (newCase.commune ?? "").trim();
+  const localName = (newCase.local ?? "").trim();
+
+  const errCommune = validateNewCaseCommuneAndRegion(regionSel, communeSel, localCatalog);
+  if (errCommune) return { error: errCommune };
+
+  const errLocal = validateNewCaseLocalName(localName);
+  if (errLocal) return { error: errLocal };
+
+  const errDetected = validateNewCaseDetectedAt(newCase);
+  if (errDetected) return { error: errDetected };
+
+  const localResult = validateNewCaseLocalEntry(localCatalog, regionSel, communeSel, localName);
+  if ("error" in localResult) return localResult;
+
+  const errScope = validateNewCaseUserScope(regionSel, communeSel, localResult.localEntry, currentUser, assignedCommuneEffective, assignedLocalIdEffective);
+  if (errScope) return { error: errScope };
+
+  return { ok: true, regionSel, communeSel, localName, localEntry: localResult.localEntry, now_: nowISO() };
+}
+
+/** Devuelve el mensaje de error si el caso no cumple precondiciones para cerrar; null si puede cerrarse. */
+function getCloseCaseValidationError(c: CaseItem): string | null {
+  if (c.bypassFlagged && !c.bypassValidated) return UI_TEXT.errors.excepcionRequiereValidacion;
+  if (!c.actions?.length) return UI_TEXT_GOVERNANCE.validationMessages.missingAction;
+  if (!c.decisions?.length) return UI_TEXT.errors.alMenosUnaDecision;
+  if (normalizeStatus(c.status) !== "Resuelto") return UI_TEXT_GOVERNANCE.validationMessages.cannotCloseYet;
+  const hasOpVal = (c.timeline ?? []).some((ev) => ev.type === "OPERATIONAL_VALIDATION");
+  if (!hasOpVal) return UI_TEXT_GOVERNANCE.validationMessages.missingOperationalValidation;
+  if (!c.closingMotivo) return UI_TEXT_GOVERNANCE.validationMessages.missingCloseReason;
+  return null;
+}
+
+/** Lógica de cambio de estado de caso extraída para reducir complejidad cognitiva de App. */
+function changeCaseStatusImpl(
+  caseId: string,
+  newStatus: CaseStatus,
+  ctx: {
+    currentUser: User;
+    cases: CaseItem[];
+    notify: (msg: string, type?: string) => void;
+    setCases: React.Dispatch<React.SetStateAction<CaseItem[]>>;
+    setAuditLog: React.Dispatch<React.SetStateAction<AuditLogEntry[]>>;
+  }
+): void {
+  const { currentUser, cases, notify, setCases, setAuditLog } = ctx;
+  const c = cases.find((x) => x.id === caseId);
+  if (!c) return;
+  if (!canDo("update", currentUser, c) && !canDo("close", currentUser, c)) {
+    notify(UI_TEXT.errors.unauthorized, "error");
+    return;
+  }
+  if (newStatus === "En gestión" && normalizeStatus(c.status) === "Nuevo" && !c.bypass) {
+    notify("❌ " + UI_TEXT.errors.recepcionarPrimero, "error");
+    return;
+  }
+  if (newStatus === "Cerrado") {
+    const closeError = getCloseCaseValidationError(c);
+    if (closeError) {
+      notify("❌ " + closeError, "error");
+      return;
+    }
+  }
+  const tlMap: Record<CaseStatus, string> = { Escalado: "ESCALATED", Mitigado: "MITIGATED", Resuelto: "RESOLVED", Cerrado: "CLOSED", "En gestión": "IN_MANAGEMENT", "Recepcionado por DR": "RECEPCIONADO", Nuevo: "DETECTED" };
+  const tsMap: Partial<Record<CaseStatus, string>> = { Escalado: "escalatedAt", Mitigado: "mitigatedAt", Resuelto: "resolvedAt", Cerrado: "closedAt" };
+  setCases((prev) =>
+    prev.map((x) => {
+      if (x.id === caseId) {
+        const tl = [...(x.timeline ?? []), { eventId: newEventId("ev"), type: tlMap[newStatus] || "STATUS_CHANGED", at: nowISO(), actor: currentUser.id, note: `Estado → ${newStatus}` }];
+        const tsKey = tsMap[newStatus];
+        return { ...x, status: newStatus, ...(tsKey ? { [tsKey]: nowISO() } : {}), timeline: tl, updatedAt: nowISO() };
+      }
+      return x;
+    })
+  );
+  setAuditLog((prev) => appendEvent(prev, "STATUS_CHANGED", currentUser.id, currentUser.role, caseId, `Estado → ${newStatus}`));
+}
+
+/** Construye el objeto caso y payload para envío (reduce complejidad de submitNewCaseImpl). */
+function buildNewCaseData(
+  params: BuildNewCaseDataParams
+): { c: CaseItem; id: string; payloadForApi: Record<string, unknown>; result: { criticality: string; score: number }; bypassFlagged: boolean } {
+  const { newCase, currentUser, evalForm, bypassForm, cases, localEntry, now_, activeRegion } = params;
+  const localSnapshot = {
+    idLocal: localEntry.idLocal,
+    nombre: localEntry.nombre,
+    region: localEntry.region,
+    commune: localEntry.commune,
+    snapshotAt: now_,
+  };
+  const result = calcCriticality(evalForm);
+  const maxVar = Math.max(...Object.values(evalForm));
+  const bypassTechOk = maxVar >= 3 || bypassForm.cause === "system_down";
+  const bypassFlagged = bypassForm.active && !bypassTechOk;
+  const rCases = cases.filter((c) => c.region === newCase.region && c.commune === newCase.commune);
+  const id = genId(newCase.region, newCase.commune, rCases.length + 1);
+  const c = {
+    ...newCase,
+    id,
+    localSnapshot,
+    evaluation: evalForm,
+    evaluationLocked: true,
+    evaluationHistory: [],
+    criticality: result.criticality,
+    criticalityScore: result.score,
+    status: bypassForm.active ? "En gestión" : "Nuevo",
+    assignedTo: null,
+    slaMinutes: SLA_MINUTES[result.criticality as SlaLevel] || 60,
+    closingMotivo: null,
+    bypassValidated: null,
+    timeline: [
+      { eventId: newEventId("ev"), type: "DETECTED", at: newCase.origin!.detectedAt, actor: currentUser.id, note: "Detectado" },
+      { eventId: newEventId("ev"), type: "REPORTED", at: now_, actor: currentUser.id, note: "Reportado en SCCE" },
+    ],
+    actions: [],
+    decisions: [],
+    bypass: bypassForm.active,
+    bypassMotivo: bypassForm.motivo,
+    bypassFlagged,
+    bypassActor: bypassForm.active ? currentUser.id : null,
+    peseInoperante: bypassForm.cause === "system_down",
+    completeness: 0,
+    reportedAt: now_,
+    firstActionAt: null,
+    escalatedAt: null,
+    mitigatedAt: null,
+    resolvedAt: null,
+    closedAt: null,
+    createdBy: currentUser.id,
+    createdAt: now_,
+    updatedAt: now_,
+  } as CaseItem & { completeness: number };
+  c.completeness = calcCompleteness(c as CaseItem);
+  const payloadForApi = {
+    summary: newCase.summary,
+    status: c.status,
+    criticality: result.criticality,
+    regionCode: activeRegion === "ALL" ? newCase.region : activeRegion,
+    communeCode: newCase.commune,
+    localCode: newCase.local,
+    localSnapshot: localSnapshot ?? undefined,
+  };
+  return { c: c as CaseItem, id, payloadForApi, result, bypassFlagged };
+}
+
+/** Headers opcionales para peticiones API según membership (reduce complejidad). */
+function getMembershipApiHeaders(membership: Membership): Record<string, string> | undefined {
+  const headers: Record<string, string> = {};
+  if (membership.id) headers["x-scce-membership-id"] = membership.id;
+  if (membership.contextType && membership.contextId) {
+    headers["x-scce-context-type"] = membership.contextType;
+    headers["x-scce-context-id"] = membership.contextId;
+  }
+  return Object.keys(headers).length ? headers : undefined;
+}
+
+/** Aplica estado y notificación tras crear caso (API o local). */
+function applyNewCaseSuccess(
+  ctx: {
+    currentUser: User;
+    bypassForm: BypassFormState;
+    setCases: React.Dispatch<React.SetStateAction<CaseItem[]>>;
+    setAuditLog: React.Dispatch<React.SetStateAction<AuditLogEntry[]>>;
+    notify: (msg: string, type?: string) => void;
+    setView: (v: ViewKey) => void;
+    setNewCase: React.Dispatch<React.SetStateAction<CaseItem | null>>;
+  },
+  caseItem: CaseItem,
+  caseId: string,
+  result: { criticality: string },
+  bypassFlagged: boolean
+): void {
+  const { currentUser, bypassForm, setCases, setAuditLog, notify, setView, setNewCase } = ctx;
+  setCases((prev) => [caseItem, ...prev]);
+  setAuditLog((prev) => {
+    let log = appendEvent(prev, "CASE_CREATED", currentUser.id, currentUser.role, caseId, `Caso: ${caseItem.summary.slice(0, 60)}`);
+    if (bypassForm.active) log = appendEvent(log, "BYPASS_USED", currentUser.id, currentUser.role, caseId, `Bypass: ${bypassForm.motivo}`);
+    if (bypassFlagged) log = appendEvent(log, "BYPASS_FLAGGED", currentUser.id, currentUser.role, caseId, UI_TEXT.errors.excepcionRequiereValidacion);
+    return log;
+  });
+  notify(
+    `Caso ${caseId} — ${result.criticality}${bypassFlagged ? " ⚠️ " + UI_TEXT.states.flagged : ""}`,
+    result.criticality === "CRITICA" ? "error" : "success"
+  );
+  setView("dashboard");
+  setNewCase(null);
+}
+
+/** Lógica de envío de nuevo caso extraída para reducir complejidad cognitiva de App. */
+async function submitNewCaseImpl(ctx: {
+  newCase: CaseItem;
+  currentUser: User;
+  localCatalog: LocalCatalog;
+  evalForm: Record<string, number>;
+  bypassForm: BypassFormState;
+  cases: CaseItem[];
+  activeRegion: string;
+  authToken: string | null;
+  assignedCommuneEffective: string | undefined | null;
+  assignedLocalIdEffective: string | undefined | null;
+  notify: (msg: string, type?: string) => void;
+  setCases: React.Dispatch<React.SetStateAction<CaseItem[]>>;
+  setAuditLog: React.Dispatch<React.SetStateAction<AuditLogEntry[]>>;
+  setView: (v: ViewKey) => void;
+  setNewCase: React.Dispatch<React.SetStateAction<CaseItem | null>>;
+}): Promise<void> {
+  const {
+    newCase,
+    currentUser,
+    localCatalog,
+    evalForm,
+    bypassForm,
+    cases,
+    activeRegion,
+    authToken,
+    assignedCommuneEffective,
+    assignedLocalIdEffective,
+    notify,
+    setCases,
+    setAuditLog,
+    setView,
+    setNewCase,
+  } = ctx;
+
+  const se = validateCaseSchema(newCase, localCatalog);
+  if (se.length) {
+    notify("⚠️ " + se[0], "error");
+    return;
+  }
+  const validation = validateNewCaseForSubmit(newCase, localCatalog, currentUser, assignedCommuneEffective, assignedLocalIdEffective);
+  if ("error" in validation) {
+    notify(validation.error, "error");
+    return;
+  }
+  const { localEntry, now_ } = validation;
+  const { c, id, payloadForApi, result, bypassFlagged } = buildNewCaseData({
+    newCase,
+    currentUser,
+    evalForm,
+    bypassForm,
+    cases,
+    localEntry,
+    now_,
+    activeRegion,
+  });
+
+  const membership = getActiveMembership();
+  if (authToken && membership) {
+    const res = await apiRequest<{ id: string; regionCode: string; communeCode: string; localCode: string; localSnapshot?: unknown; status: string; createdAt: string; updatedAt: string }>("/cases", {
+      method: "POST",
+      token: authToken,
+      body: payloadForApi,
+      headers: getMembershipApiHeaders(membership),
+    });
+    if (!res.ok) {
+      notify(res.error || "Error al crear caso en el servidor.", "error");
+      return;
+    }
+    const ls = isLocalSnapshot(res.data.localSnapshot) ? res.data.localSnapshot : c.localSnapshot;
+    const apiCase = {
+      ...c,
+      id: res.data.id,
+      region: res.data.regionCode,
+      commune: res.data.communeCode,
+      local: res.data.localCode,
+      localSnapshot: ls,
+      status: res.data.status,
+      createdAt: res.data.createdAt,
+      updatedAt: res.data.updatedAt,
+    } as CaseItem;
+    apiCase.completeness = calcCompleteness(apiCase);
+    applyNewCaseSuccess(
+      { currentUser, bypassForm, setCases, setAuditLog, notify, setView, setNewCase },
+      apiCase,
+      res.data.id,
+      result,
+      bypassFlagged
+    );
+    return;
+  }
+
+  applyNewCaseSuccess(
+    { currentUser, bypassForm, setCases, setAuditLog, notify, setView, setNewCase },
+    c,
+    id,
+    result,
+    bypassFlagged
+  );
+}
+
+// ─── Helpers a nivel de módulo para reducir complejidad cognitiva de App (S3776) ─
+function computeRegionEffective(
+  isCentral: boolean,
+  filterState: AppFilterState,
+  activeRegion: string,
+  effectiveMembership: Membership | null
+): string {
+  return isCentral ? (filterState.region || activeRegion || "ALL") : (effectiveMembership?.regionCode || "");
+}
+
+type DoLoginSetters = {
+  setLoginErr: React.Dispatch<React.SetStateAction<string>>;
+  setCtxErr: React.Dispatch<React.SetStateAction<string>>;
+  setAuthBusy: React.Dispatch<React.SetStateAction<boolean>>;
+  setToken: (t: string) => void;
+  setAuthToken: React.Dispatch<React.SetStateAction<string | null>>;
+  setAuditLog: React.Dispatch<React.SetStateAction<AuditLogEntry[]>>;
+};
+async function doLoginImpl(
+  loginForm: { email: string; password: string },
+  bootstrapOpts: BootstrapSessionOptions,
+  setters: DoLoginSetters
+): Promise<void> {
+  setters.setLoginErr("");
+  setters.setCtxErr("");
+  setters.setAuthBusy(true);
+  try {
+    const res = await apiRequest<{ token: string }>("/auth/login", {
+      method: "POST",
+      body: { email: loginForm.email, password: loginForm.password },
+    });
+    if (!res.ok) {
+      setters.setLoginErr(res.error || "No se pudo iniciar sesión.");
+      return;
+    }
+    const token = res.data.token;
+    setToken(token);
+    setters.setAuthToken(token);
+    await bootstrapSession(token, bootstrapOpts);
+    setters.setAuditLog((prev) => appendEvent(prev, "LOGIN", "api", "API", null, "Inicio de sesión (API real)"));
+  } finally {
+    setters.setAuthBusy(false);
+  }
+}
+
+function isFixedLocalRoleModule(u: { role?: string } | null | undefined): boolean {
+  const r = String(u?.role ?? "").toUpperCase();
+  return r === "PESE" || r === "DELEGADO_JE";
+}
+
+function getCaseLocalIdSafeModule(
+  c: { localScope?: string; localRef?: { idLocal?: string }; localSnapshot?: { idLocal?: string } | null },
+  localCatalogById: Map<string, unknown>
+): string | null {
+  if (c?.localScope === "REGIONAL") return null;
+  const raw =
+    (c as { localRef?: { idLocal?: string }; localSnapshot?: { idLocal?: string } | null })?.localRef?.idLocal ??
+    (c as { localSnapshot?: { idLocal?: string } | null })?.localSnapshot?.idLocal ??
+    null;
+  if (!raw) return null;
+  const id = String(raw);
+  return localCatalogById.has(id) ? id : null;
+}
+
+function computeAssignedLocalIdEffective(
+  fixedLocalRole: boolean,
+  currentUser: User | null,
+  localCatalog: LocalCatalog,
+  localCatalogById: Map<string, LocalCatalogEntry>
+): string | null {
+  if (!fixedLocalRole) return null;
+  const explicit = currentUser?.assignedLocalId == null ? null : String(currentUser.assignedLocalId);
+  if (explicit && localCatalogById.has(explicit)) return explicit;
+  const fallback =
+    localCatalog.find((e) => e.activoGlobal && e.region === currentUser?.region && e.commune === currentUser?.commune)
+      ?.idLocal ?? null;
+  return fallback && localCatalogById.has(fallback) ? fallback : null;
+}
+
+type VisibleCasesFilterOpts = {
+  currentUser: User | null;
+  activeRegion: string;
+  filterState: AppFilterState;
+  fixedLocalRole: boolean;
+  assignedLocalIdEffective: string | null;
+  localCatalogById: Map<string, unknown>;
+  isCentral: boolean;
+};
+
+function passesFixedLocalRoleFilter(
+  c: CaseItem,
+  fixedLocalRole: boolean,
+  assignedLocalIdEffective: string | null,
+  localCatalogById: Map<string, unknown>
+): boolean {
+  if (!fixedLocalRole) return true;
+  if (!assignedLocalIdEffective || !localCatalogById.has(assignedLocalIdEffective)) return false;
+  const cid = getCaseLocalIdSafeModule(c, localCatalogById);
+  return cid === assignedLocalIdEffective;
+}
+
+function passesRegionFilter(c: CaseItem, regionToFilter: string): boolean {
+  const caseRegion =
+    (c as { region?: string; regionCode?: string }).regionCode ??
+    (c as { region?: string; regionCode?: string }).region ??
+    null;
+  return caseRegion !== null && caseRegion === regionToFilter;
+}
+
+function passesViewPermissionFilter(c: CaseItem, currentUser: User | null): boolean {
+  if (isFixedLocalRoleModule(currentUser)) return true;
+  if (canDo("viewAll", currentUser, c)) return true;
+  return c.createdBy === currentUser?.id || c.assignedTo === currentUser?.id;
+}
+
+function passesCriticalityStatusCommune(c: CaseItem, filterState: AppFilterState): boolean {
+  if (filterState.criticality && c.criticality !== filterState.criticality) return false;
+  if (filterState.status && normalizeStatus(c.status) !== normalizeStatus(filterState.status)) return false;
+  if (filterState.commune && c.commune !== filterState.commune) return false;
+  return true;
+}
+
+function passesSearchFilter(c: CaseItem, search: string): boolean {
+  const q = search.toLowerCase();
+  const localText =
+    (c.local || "") +
+    " " +
+    ((c as { localSnapshot?: { nombre?: string }; localRef?: { label?: string } }).localSnapshot?.nombre || "") +
+    " " +
+    ((c as { localRef?: { label?: string } }).localRef?.label || "");
+  return (
+    String(c.summary ?? "").toLowerCase().includes(q) ||
+    String(c.id ?? "").toLowerCase().includes(q) ||
+    localText.toLowerCase().includes(q)
+  );
+}
+
+function isCaseVisible(c: CaseItem, opts: VisibleCasesFilterOpts): boolean {
+  const {
+    currentUser,
+    activeRegion,
+    filterState,
+    fixedLocalRole,
+    assignedLocalIdEffective,
+    localCatalogById,
+    isCentral,
+  } = opts;
+  if (!passesFixedLocalRoleFilter(c, fixedLocalRole, assignedLocalIdEffective, localCatalogById)) return false;
+  const regionToFilter =
+    filterState.region || (isCentral && filterState.commune && activeRegion ? activeRegion : null);
+  if (regionToFilter && !passesRegionFilter(c, regionToFilter)) return false;
+  if (!passesViewPermissionFilter(c, currentUser)) return false;
+  if (!passesCriticalityStatusCommune(c, filterState)) return false;
+  if (filterState.search && !passesSearchFilter(c, filterState.search)) return false;
+  return true;
+}
+
+function pushTimelineEvent(timeline: CaseEvent[], ev: CaseEvent): CaseEvent[] {
+  if (isDuplicateEvent(timeline, ev)) return timeline;
+  return [...timeline, ev];
+}
+
+function setUiModeAndPersistImpl(
+  next: UiMode,
+  currentUserId: string | undefined,
+  setUiMode: React.Dispatch<React.SetStateAction<UiMode>>
+): void {
+  setUiMode(next);
+  if (currentUserId) localStorage.setItem(uiModeStorageKey(currentUserId), next);
+}
+
+type RecepcionarDeps = {
+  currentUser: User;
+  cases: CaseItem[];
+  notify: (msg: string, type?: string) => void;
+  setCases: React.Dispatch<React.SetStateAction<CaseItem[]>>;
+  setAuditLog: React.Dispatch<React.SetStateAction<AuditLogEntry[]>>;
+};
+function recepcionarImpl(caseId: string, deps: RecepcionarDeps): void {
+  const { currentUser, cases, notify, setCases, setAuditLog } = deps;
+  const c = cases.find((x) => x.id === caseId);
+  if (!c || !canDo("recepcionar", currentUser, c)) {
+    notify(UI_TEXT.errors.unauthorized, "error");
+    return;
+  }
+  setCases((prev) =>
+    prev.map((x) =>
+      x.id === caseId
+        ? ({
+            ...x,
+            status: "Recepcionado por DR",
+            updatedAt: nowISO(),
+            timeline: [...(x.timeline ?? []), { eventId: newEventId("ev"), type: "RECEPCIONADO", at: nowISO(), actor: currentUser.id, note: `Recepcionado por ${currentUser.name}` }],
+          } as CaseItem)
+        : x
+    )
+  );
+  setAuditLog((prev) => appendEvent(prev, "STATUS_CHANGED", currentUser.id, currentUser.role, caseId, "Estado → Recepcionado por DR"));
+  notify("Caso recepcionado", "success");
+}
+
+type ValidateBypassDeps = {
+  currentUser: User;
+  setCases: React.Dispatch<React.SetStateAction<CaseItem[]>>;
+  setAuditLog: React.Dispatch<React.SetStateAction<AuditLogEntry[]>>;
+  notify: (msg: string, type?: string) => void;
+};
+function validateBypassImpl(caseId: string, decision: string, fundament: string, deps: ValidateBypassDeps): void {
+  const { currentUser, setCases, setAuditLog, notify } = deps;
+  if (!canDo("validateBypass", currentUser)) {
+    notify(UI_TEXT.errors.soloDirectorValida, "error");
+    return;
+  }
+  if (!fundament) {
+    notify(UI_TEXT.errors.fundamentoRequerido, "error");
+    return;
+  }
+  const validated = decision === "VALIDATED";
+  const bypassEv: CaseEvent = {
+    eventId: newEventId("ev"),
+    type: validated ? "BYPASS_VALIDATED" : "BYPASS_REVOKED",
+    at: nowISO(),
+    actor: currentUser.id,
+    note: fundament,
+  };
+  setCases((prev) =>
+    prev.map((x) => {
+      if (x.id === caseId) {
+        const tl = pushTimelineEvent(x.timeline ?? [], bypassEv);
+        const nd = [...(x.decisions ?? []), { who: currentUser.id, at: nowISO(), fundament: `Bypass ${validated ? "VALIDADO" : "REVOCADO"}: ${fundament}` }];
+        return { ...x, bypassValidated: decision, decisions: nd, timeline: tl, updatedAt: nowISO() } as CaseItem;
+      }
+      return x;
+    })
+  );
+  setAuditLog((prev) => appendEvent(prev, validated ? "BYPASS_VALIDATED" : "BYPASS_REVOKED", currentUser.id, currentUser.role, caseId, fundament.slice(0, 80)));
+  notify(`Excepción ${validated ? "validada" : "revocada"}`, "success");
+}
+
+type EvalFormState = { continuidad: number; integridad: number; seguridad: number; exposicion: number; capacidadLocal: number };
+type EvalVarDef = { key: string; label: string; desc: string };
+
+function EvalVarRow(props: Readonly<{
+  v: EvalVarDef;
+  le: Record<string, number>;
+  setLe: React.Dispatch<React.SetStateAction<EvalFormState>>;
+}>) {
+  const { v, le, setLe } = props;
+  const handleScore = (n: number) => setLe((p) => ({ ...p, [v.key]: n } as EvalFormState));
+  const colors = [themeColor("success"), themeColor("warningAlt"), themeColor("warning"), themeColor("danger")];
+  const borders = ["#22c55e44", "#eab30844", "#f9731644", "#ef444444"];
+  return (
+    <div style={{ ...S.card, background: themeColor("bgSurface"), marginBottom: 6 }}>
+      <div style={{ fontWeight: 600, marginBottom: 1 }}>{v.label}</div>
+      <div style={{ color: themeColor("muted"), fontSize: "10px", marginBottom: 6 }}>{v.desc}</div>
+      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        {[0, 1, 2, 3].map((n) => {
+          const isSelected = le[v.key] === n;
+          const btnStyle = { padding: "6px 14px", borderRadius: 4, border: "2px solid", cursor: "pointer", fontWeight: 700, fontSize: "13px", background: isSelected ? colors[n] : "transparent", borderColor: borders[n], color: isSelected ? themeColor("white") : colors[n] };
+          return <button key={n} type="button" onClick={() => handleScore(n)} style={btnStyle}>{n}</button>;
+        })}
+        {le[v.key] === 3 && <span style={{ color: themeColor("danger"), fontWeight: 700, fontSize: "11px" }}>⚠️ ESCALAR</span>}
+      </div>
+    </div>
+  );
+}
+
+// NewCaseForm: definido a nivel de módulo para evitar S6478 (componente dentro del padre).
+type NewCaseFormGate = {
+  newCase: CaseItem | null;
+  setNewCase: React.Dispatch<React.SetStateAction<CaseItem | null>>;
+  evalForm: EvalFormState;
+  setEvalForm: React.Dispatch<React.SetStateAction<EvalFormState>>;
+  bypassForm: BypassFormState;
+  setBypassForm: React.Dispatch<React.SetStateAction<BypassFormState>>;
+  step: number;
+  setStep: React.Dispatch<React.SetStateAction<number>>;
+  regionsMap: Record<string, { name?: string; communes?: Record<string, { name?: string }> }>;
+  assignedCommuneEffective: string;
+  assignedLocalIdEffective: string | null;
+  assignedLocal: LocalCatalogEntry | null;
+  localCatalog: LocalCatalog;
+  setView: React.Dispatch<React.SetStateAction<ViewKey>>;
+  canDo: (action: string, user: User | null) => boolean;
+  currentUser: User | null;
+  notify: (msg: string, type?: string) => void;
+  submitCase: () => Promise<void>;
+  withBusy: (key: string, fn: () => void) => void;
+  busyAction: Record<string, boolean>;
+  nowLocalInput: () => string;
+};
+
+function NewCaseForm(props: Readonly<{ gate: NewCaseFormGate; hideBack?: boolean }>) {
+  const { gate, hideBack = false } = props;
+  const {
+    newCase,
+    setNewCase,
+    evalForm,
+    setEvalForm,
+    bypassForm,
+    setBypassForm,
+    step,
+    setStep,
+    regionsMap,
+    assignedCommuneEffective,
+    assignedLocalIdEffective,
+    assignedLocal,
+    localCatalog,
+    setView,
+    canDo,
+    currentUser,
+    notify,
+    submitCase,
+    withBusy,
+    busyAction,
+    nowLocalInput,
+  } = gate;
+
+  const detailStepRef = useRef<DetailStepContentRef>(null);
+  const [lnc, setLnc] = useState<LncDraft>(newCase ? { ...newCase } : {});
+  const [le, setLe] = useState(evalForm);
+  const [lb, setLb] = useState(bypassForm);
+  const er = calcCriticality(le);
+  const maxVar = Math.max(...Object.values(le));
+  const rData = regionsMap[lnc.region || "TRP"];
+  const availableLocals = useMemo(
+    () => getActiveLocals(localCatalog, lnc.region || "TRP", lnc.commune || ""),
+    [localCatalog, lnc.region, lnc.commune]
+  );
+
+  const isFixedLocal = Boolean(assignedLocalIdEffective);
+  const isFixedCommune = Boolean(assignedCommuneEffective);
+  const lockCommune = isFixedCommune;
+  const lockLocal = isFixedLocal;
+
+  useEffect(() => {
+    if (!lnc.origin?.detectedAt) {
+      setLnc((p) => ({
+        ...p,
+        origin: p.origin ? { ...p.origin, detectedAt: nowLocalInput() } : { detectedAt: nowLocalInput() },
+      }));
+    }
+    if (lockCommune && lnc.commune !== assignedCommuneEffective) {
+      setLnc((p) => ({ ...p, commune: assignedCommuneEffective, local: "" }));
+      return;
+    }
+    if (lockLocal && lnc.local !== (assignedLocal?.nombre ?? "")) {
+      setLnc((p) => ({ ...p, local: assignedLocal?.nombre ?? "" }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lockCommune, lockLocal, assignedCommuneEffective, assignedLocalIdEffective]);
+
+  useEffect(() => {
+    if (!lockLocal && availableLocals.length === 1) {
+      setLnc((prev) => ({ ...prev, local: availableLocals[0].nombre }));
+    }
+  }, [availableLocals, lockLocal]);
+
+  const varDefs = [
+    { key: "continuidad", label: "1. Continuidad del acto", desc: "0=Sin impacto · 1=Parcial · 2=Mesa suspendida · 3=Local sin funcionar" },
+    { key: "integridad", label: "2. Integridad jurídica", desc: "0=Sin riesgo · 1=Dudas · 2=Posible nulidad · 3=Nulidad evidente" },
+    { key: "seguridad", label: "3. Seguridad / orden público", desc: "0=Normal · 1=Tensión · 2=Incidente activo · 3=Violencia/amenaza grave" },
+    { key: "exposicion", label: "4. Exposición pública", desc: "0=Interna · 1=Testigos · 2=Medios/redes · 3=Atención nacional" },
+    { key: "capacidadLocal", label: "5. Capacidad local", desc: "0=Resuelven · 1=Orientación · 2=Apoyo externo · 3=Sin capacidad" },
+  ];
+
+  const handleLocalChange = (e: React.ChangeEvent<HTMLSelectElement>) =>
+    setLnc((p) => ({ ...p, local: e.target.value }));
+
+  const renderLocalSelect = () => {
+    if (lnc.commune === "" || lnc.commune == null) {
+      return (
+        <div style={{ ...S.inp, color: themeColor("mutedDark"), cursor: "not-allowed" }}>
+          Seleccione una comuna primero
+        </div>
+      );
+    }
+    if (availableLocals.length === 0) {
+      return (
+        <div
+          style={{
+            ...S.inp,
+            color: themeColor("danger"),
+            cursor: "not-allowed",
+            borderColor: "#ef444444",
+          }}
+        >
+          ⚠️ Sin locales activos — administre el catálogo
+        </div>
+      );
+    }
+    return (
+      <select
+        id="newcase-local"
+        style={{ ...S.inp, borderColor: lnc.local ? "#22c55e44" : "#ef444444" }}
+        value={lnc.local || ""}
+        disabled={lockLocal || !lnc.commune}
+        onChange={handleLocalChange}
+      >
+        {availableLocals.length > 1 && <option value="">Seleccione local...</option>}
+        {availableLocals.map((l) => (
+          <option key={l.idLocal} value={l.nombre}>
+            {l.nombre}
+          </option>
+        ))}
+      </select>
+    );
+  };
+
+  const stepLabels = ["Identificación", "Evaluación", "Detalles", "Confirmar"];
+  const stepIndicators = stepLabels.map((st, i) => {
+    let stepBg: string;
+    let stepColor: string;
+    let stepBorder: string;
+    if (step === i + 1) {
+      stepBg = themeColor("primary");
+      stepColor = themeColor("white");
+      stepBorder = themeColor("primary");
+    } else if (step > i + 1) {
+      stepBg = themeColor("greenLight");
+      stepColor = themeColor("greenText");
+      stepBorder = themeColor("success");
+    } else {
+      stepBg = themeColor("stepInactive");
+      stepColor = themeColor("textSecondary");
+      stepBorder = themeColor("border");
+    }
+    return (
+      <div
+        key={st}
+        style={{
+          padding: "4px 10px",
+          borderRadius: 4,
+          fontSize: "11px",
+          fontWeight: 600,
+          background: stepBg,
+          color: stepColor,
+          border: `1px solid ${stepBorder}`,
+        }}
+      >
+        {step > i + 1 ? "✓ " : ""}
+        {st}
+      </div>
+    );
+  });
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+        {!hideBack && (
+          <button style={S.btn("dark")} onClick={() => setView("dashboard")}>
+            ← Volver
+          </button>
+        )}
+        <h2 style={{ margin: 0, fontSize: "16px" }}>Nuevo Incidente — Ficha 60s</h2>
+      </div>
+      <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>{stepIndicators}</div>
+
+      {step === 1 && (
+        <div style={S.card}>
+          <div style={{ color: themeColor("mutedAlt"), fontSize: "11px", fontWeight: 600, marginBottom: 10 }}>
+            PASO 1 — IDENTIFICACIÓN
+          </div>
+          <div style={{ ...S.g2, marginBottom: 8 }}>
+            <div>
+              <label style={S.lbl} htmlFor="newcase-region">
+                Región
+              </label>
+              <select
+                id="newcase-region"
+                style={S.inp}
+                value={lnc.region || "TRP"}
+                onChange={(e) => setLnc((p) => ({ ...p, region: e.target.value, commune: "", local: "" }))}
+              >
+                {Object.entries(regionsMap).map(([k, v]) => (
+                  <option key={k} value={k}>
+                    {v?.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label style={S.lbl} htmlFor="newcase-commune">
+                Comuna *
+              </label>
+              <select
+                id="newcase-commune"
+                style={S.inp}
+                value={lnc.commune || ""}
+                disabled={lockCommune}
+                onChange={(e) => setLnc((p) => ({ ...p, commune: e.target.value, local: "" }))}
+              >
+                <option value="">Seleccione...</option>
+                {Object.entries(rData?.communes || {}).map(([k, v]) => (
+                  <option key={k} value={k}>
+                    {v.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div style={{ marginBottom: 8 }}>
+            <label style={S.lbl} htmlFor="newcase-local">
+              Local de Votación *
+            </label>
+            {renderLocalSelect()}
+            {lnc.local && (
+              <div style={{ fontSize: "9px", color: themeColor("purple"), marginTop: 2 }}>
+                📸 Se guardará snapshot del local al registrar
+              </div>
+            )}
+          </div>
+          <div style={{ ...S.g2, marginBottom: 8 }}>
+            <div>
+              <label style={S.lbl} htmlFor="newcase-channel">
+                Canal
+              </label>
+              <select
+                id="newcase-channel"
+                style={S.inp}
+                value={lnc.origin?.channel || "Teams"}
+                onChange={(e) => setLnc((p) => ({ ...p, origin: { ...p.origin, channel: e.target.value } }))}
+              >
+                {["Teams", "Teléfono", "WhatsApp", "Correo", "Presencial"].map((c) => (
+                  <option key={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label style={S.lbl} htmlFor="newcase-datetime">
+                Hora del incidente *
+              </label>
+              <input
+                id="newcase-datetime"
+                style={S.inp}
+                type="datetime-local"
+                value={(lnc.origin?.detectedAt || "").slice(0, 16)}
+                onChange={(e) => setLnc((p) => ({ ...p, origin: { ...p.origin, detectedAt: e.target.value } }))}
+              />
+              <div style={{ fontSize: "10px", color: themeColor("muted"), marginTop: 2 }}>
+                Hora en que ocurrió/detectó. Se permite hasta 5 min por desfase de reloj. La hora de registro se guarda al enviar.
+              </div>
+            </div>
+          </div>
+          <div style={{ marginBottom: 10 }}>
+            <label style={S.lbl} htmlFor="newcase-summary">
+              Resumen *
+            </label>
+            <input
+              id="newcase-summary"
+              style={S.inp}
+              placeholder="Ej: Urna sellada incorrectamente en mesa 12"
+              value={lnc.summary || ""}
+              onChange={(e) => setLnc((p) => ({ ...p, summary: e.target.value }))}
+            />
+          </div>
+          {canDo("bypass", currentUser) && (
+            <div style={{ ...S.card, background: themeColor("violetBlock"), border: "1px solid #7c3aed44" }}>
+              <label
+                style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}
+                title={UI_TEXT.tooltips.modoUrgente}
+                htmlFor="bypass-active"
+              >
+                <input
+                  id="bypass-active"
+                  type="checkbox"
+                  checked={lb.active}
+                  onChange={(e) => setLb((p) => ({ ...p, active: e.target.checked, confirmed: false }))}
+                />
+                <span style={{ color: themeColor("purpleLight"), fontWeight: 600, fontSize: "12px" }}>
+                  ⚡ Activar Modo urgente (Excepción operativa)
+                </span>
+              </label>
+              {lb.active && (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ color: themeColor("mutedAlt"), fontSize: "11px", marginBottom: 6 }}>
+                    Úselo solo si no es posible seguir el procedimiento normal. Queda registrado como excepción.
+                  </div>
+                  <label style={S.lbl} htmlFor="bypass-cause">
+                    Causal de la excepción *
+                  </label>
+                  <select
+                    id="bypass-cause"
+                    style={S.inp}
+                    value={lb.cause}
+                    onChange={(e) => setLb((p) => ({ ...p, cause: e.target.value as BypassCause }))}
+                  >
+                    <option value="">Seleccione...</option>
+                    <option value="system_down">Sistema institucional no disponible</option>
+                    <option value="risk_imminent">Riesgo inminente (seguridad/orden público/continuidad)</option>
+                    <option value="critical_level_3">Evaluación crítica máxima (Nivel 3)</option>
+                    <option value="other">Otra (requiere explicación detallada)</option>
+                  </select>
+                  <label style={S.lbl} htmlFor="bypass-motivo">
+                    Motivo / respaldo *
+                  </label>
+                  <input
+                    id="bypass-motivo"
+                    style={S.inp}
+                    placeholder="Motivo o respaldo de la excepción"
+                    value={lb.motivo}
+                    onChange={(e) => setLb((p) => ({ ...p, motivo: e.target.value }))}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+          <div style={{ marginTop: 10, textAlign: "right" }}>
+            <button
+              style={S.btn("primary")}
+              onClick={() => {
+                const errs = validateCaseSchema({ ...lnc, origin: { ...lnc.origin } }, localCatalog);
+                if (errs.length) return notify("⚠️ " + errs[0], "error");
+                if (lb.active && !lb.cause) return notify("Seleccione la causal de la excepción", "error");
+                if (lb.active && !lb.motivo) return notify("El Modo urgente requiere motivo o respaldo", "error");
+                if (lb.active && lb.cause === "other" && lb.motivo.trim().length < 15)
+                  return notify("Otra causal requiere explicación detallada (mín. 15 caracteres)", "error");
+                setNewCase({ ...lnc } as CaseItem);
+                setBypassForm(lb);
+                setStep(2);
+              }}
+            >
+              Siguiente →
+            </button>
+          </div>
+        </div>
+      )}
+
+      {step === 2 && (
+        <div style={S.card}>
+          <div style={{ color: themeColor("mutedAlt"), fontSize: "11px", fontWeight: 600, marginBottom: 10 }}>
+            PASO 2 — FICHA DE EVALUACIÓN (inmutable tras guardar)
+          </div>
+          {varDefs.map((v) => (
+            <EvalVarRow key={v.key} v={v} le={le as Record<string, number>} setLe={setLe} />
+          ))}
+          {lb.active && maxVar < 3 && lb.cause !== "system_down" && lb.cause !== "critical_level_3" && (
+            <div style={{ ...S.card, background: themeColor("redBlock"), border: "2px solid #ef4444", marginTop: 8 }}>
+              <div style={{ color: themeColor("danger"), fontWeight: 700, marginBottom: 6 }}>
+                ⚠️ {UI_TEXT.misc.excepcionSinFundamentoObjetivo}
+              </div>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }} htmlFor="bypass-confirmed">
+                <input
+                  id="bypass-confirmed"
+                  type="checkbox"
+                  checked={lb.confirmed || false}
+                  onChange={(e) => setLb((p) => ({ ...p, confirmed: e.target.checked }))}
+                />
+                <span style={{ color: themeColor("danger"), fontSize: "12px", fontWeight: 600 }}>
+                  {UI_TEXT.misc.confirmarExcepcionOperativa}
+                </span>
+              </label>
+            </div>
+          )}
+          <div
+            style={{
+              ...S.card,
+              background: themeColor("bgSurface"),
+              border: `2px solid ${critColor(er.criticality as Criticality)}`,
+              marginTop: 8,
+            }}
+          >
+            <Badge style={S.badge(critColor(er.criticality as Criticality))} size="sm">
+              CRITICIDAD: {er.criticality}
+            </Badge>
+            <span style={{ marginLeft: 8, color: themeColor("muted"), fontSize: "11px" }}>
+              Prioridad sugerida: {er.score}/15
+            </span>
+            <div style={{ marginTop: 6, color: themeColor("mutedAlt"), fontSize: "12px" }}>{er.recommendation}</div>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10 }}>
+            <button style={S.btn("dark")} onClick={() => setStep(1)}>
+              ← Atrás
+            </button>
+            <button
+              style={S.btn("primary")}
+              onClick={() => {
+                if (
+                  lb.active &&
+                  maxVar < 3 &&
+                  lb.cause !== "system_down" &&
+                  lb.cause !== "critical_level_3" &&
+                  !lb.confirmed
+                ) {
+                  notify("Confirmar Modo urgente atípico", "error");
+                  return;
+                }
+                setEvalForm(le);
+                setBypassForm(lb);
+                setStep(3);
+              }}
+            >
+              Siguiente →
+            </button>
+          </div>
+        </div>
+      )}
+
+      {step === 3 && (
+        <DetailStepContent
+          ref={detailStepRef}
+          initialDetail={newCase?.detail ?? ""}
+          newCase={newCase}
+          setNewCase={setNewCase}
+          onConfirm={() => {
+            const d = detailStepRef.current?.getDetail?.() ?? newCase?.detail ?? "";
+            setNewCase((p) => (p ? { ...p, detail: d } : p));
+            setStep(4);
+          }}
+          onBack={() => setStep(2)}
+        />
+      )}
+
+      {step === 4 && (
+        <div style={S.card}>
+          <div style={{ color: themeColor("mutedAlt"), fontSize: "11px", fontWeight: 600, marginBottom: 10 }}>
+            PASO 4 — CONFIRMAR Y REGISTRAR
+          </div>
+          <div style={{ ...S.g2, marginBottom: 8 }}>
+            <div>
+              <span style={{ color: themeColor("muted") }}>Región:</span>{" "}
+              {regionsMap[newCase?.region ?? ""]?.name}
+            </div>
+            <div>
+              <span style={{ color: themeColor("muted") }}>Comuna:</span>{" "}
+              {regionsMap[newCase?.region ?? ""]?.communes?.[newCase?.commune ?? ""]?.name || newCase?.commune}
+            </div>
+            <div>
+              <span style={{ color: themeColor("muted") }}>Canal:</span> {newCase?.origin?.channel}
+            </div>
+            <div>
+              <span style={{ color: themeColor("muted") }}>Criticidad:</span>{" "}
+              <Badge
+                style={S.badge(critColor(calcCriticality(evalForm).criticality as Criticality))}
+                size="sm"
+              >
+                {calcCriticality(evalForm).criticality}
+              </Badge>
+            </div>
+          </div>
+          <div
+            style={{
+              marginBottom: 8,
+              padding: "6px 10px",
+              background: themeColor("infoBg"),
+              border: "1px solid #93c5fd",
+              borderRadius: 4,
+            }}
+          >
+            <span style={{ fontSize: "11px", color: themeColor("infoIcon") }}>🏫 Local: </span>
+            <span style={{ fontWeight: 700 }}>{newCase?.local}</span>
+            <div style={{ fontSize: "9px", color: themeColor("purple"), marginTop: 2 }}>
+              📸 Se registrará snapshot del local
+            </div>
+          </div>
+          <div style={{ marginBottom: 8 }}>
+            <span style={{ color: themeColor("muted") }}>Resumen:</span> {newCase?.summary}
+          </div>
+          <div
+            style={{
+              ...S.card,
+              background: themeColor("bgSurface"),
+              marginBottom: 8,
+              fontSize: "11px",
+              color: themeColor("textSecondary"),
+            }}
+          >
+            Estado inicial:{" "}
+            <strong style={{ color: themeColor("purpleLight") }}>
+              {bypassForm.active
+                ? "En gestión (" + UI_TEXT.states.modoUrgenteActive + ")"
+                : "Nuevo → requiere recepción"}
+            </strong>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10 }}>
+            <button style={S.btn("dark")} onClick={() => setStep(3)}>
+              ← Atrás
+            </button>
+            <button
+              disabled={!!busyAction["submit_case"]}
+              style={{ ...S.btn("success"), padding: "8px 20px" }}
+              onClick={() => withBusy("submit_case", submitCase)}
+            >
+              {UI_TEXT_GOVERNANCE.buttons.registerIncident}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+type StartNewCaseDeps = {
+  currentUser: User;
+  activeRegion: string;
+  assignedCommuneEffective: string;
+  assignedLocal: LocalCatalogEntry | null;
+  setNewCase: React.Dispatch<React.SetStateAction<CaseItem | null>>;
+  setEvalForm: React.Dispatch<React.SetStateAction<EvalFormState>>;
+  setBypassForm: React.Dispatch<React.SetStateAction<BypassFormState>>;
+  setStep: React.Dispatch<React.SetStateAction<number>>;
+  setView: React.Dispatch<React.SetStateAction<ViewKey>>;
+  nowLocalInput: () => string;
+};
+function startNewCaseImpl(deps: StartNewCaseDeps): void {
+  const {
+    currentUser,
+    activeRegion,
+    assignedCommuneEffective,
+    assignedLocal,
+    setNewCase,
+    setEvalForm,
+    setBypassForm,
+    setStep,
+    setView,
+    nowLocalInput,
+  } = deps;
+  const fixedCommune = assignedCommuneEffective || "";
+  const fixedLocal = assignedLocal?.nombre ?? "";
+  setNewCase({
+    region: currentUser.region || (activeRegion === "ALL" ? DEFAULT_REGION : activeRegion),
+    commune: fixedCommune,
+    local: fixedLocal,
+    origin: { actor: currentUser.name, channel: "Teams", detectedAt: nowLocalInput() },
+    summary: "",
+    detail: "",
+    evidence: [],
+    id: "",
+    status: "Nuevo",
+    criticality: "MEDIA",
+  } as CaseItem);
+  setEvalForm({ continuidad: 0, integridad: 0, seguridad: 0, exposicion: 0, capacidadLocal: 0 });
+  setBypassForm({ active: false, motivo: "", cause: "", confirmed: false });
+  setStep(1);
+  setView("new_case");
+}
+
+// Tipo mínimo para las compuertas y el layout (evita complejidad cognitiva en App)
+type SCCEAppGate = {
+  authToken: string | null;
+  activeMembership: Membership | null;
+  currentUser: User | null;
+  loginForm: { email: string; password: string };
+  setLoginForm: React.Dispatch<React.SetStateAction<{ email: string; password: string }>>;
+  showPassword: boolean;
+  setShowPassword: React.Dispatch<React.SetStateAction<boolean>>;
+  loginErr: string;
+  ctxErr: string;
+  authBusy: boolean;
+  doLogin: () => void;
+  doReset: () => void;
+  memberships: Membership[];
+  setActiveMembership: React.Dispatch<React.SetStateAction<Membership | null>>;
+  setAuditLog: React.Dispatch<React.SetStateAction<AuditLogEntry[]>>;
+  apiUser: ApiUser | null;
+  clearSession: () => void;
+  setAuthToken: React.Dispatch<React.SetStateAction<string | null>>;
+  setApiUser: React.Dispatch<React.SetStateAction<ApiUser | null>>;
+  setMemberships: React.Dispatch<React.SetStateAction<Membership[]>>;
+  setCurrentUser: React.Dispatch<React.SetStateAction<User | null>>;
+  setLoginErr: React.Dispatch<React.SetStateAction<string>>;
+  setCtxErr: React.Dispatch<React.SetStateAction<string>>;
+};
+
+function LoginScreen({ app }: Readonly<{ app: SCCEAppGate }>) {
+  return (
+    <div style={{ ...S.app, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <style>{`.tipWrap:hover .tip{display:block!important}`}</style>
+      <div style={{ ...S.card, width: 360 }}>
+        <div style={{ textAlign: "center", marginBottom: 16 }}>
+          <div style={{ fontSize: "24px", fontWeight: 800, color: themeColor("primary"), letterSpacing: 1 }}>SCCE</div>
+          <div style={{ color: themeColor("mutedDark"), fontSize: "12px" }}>Sistema de Comunicación de Contingencias Electorales</div>
+          <div style={{ color: themeColor("mutedDarker"), fontSize: "10px", marginTop: 2 }}>v{APP_VERSION} · SERVEL Chile</div>
+          <div style={{ color: themeColor("muted"), fontSize: "10px", marginTop: 6 }}>
+            API: <span style={{ fontFamily: "monospace" }}>{API_BASE_URL}</span>
+          </div>
+        </div>
+        <div style={{ marginBottom: 8 }}>
+          <label style={{ ...S.lbl, display: "block" }} htmlFor="login-email">
+            Email
+          </label>
+          <input
+            id="login-email"
+            type="email"
+            autoComplete="email"
+            style={S.inp}
+            value={app.loginForm.email}
+            onChange={e => app.setLoginForm(p => ({ ...p, email: e.target.value }))}
+            onKeyDown={e => e.key === "Enter" && !app.authBusy && app.doLogin()}
+          />
+        </div>
+        <div style={{ marginBottom: 12 }}>
+          <label style={S.lbl} htmlFor="login-password">
+            Contraseña
+          </label>
+          <div style={{ display: "flex", alignItems: "stretch", gap: 6 }}>
+            <input
+              id="login-password"
+              type={app.showPassword ? "text" : "password"}
+              autoComplete="current-password"
+              style={{ ...S.inp, flex: 1, minWidth: 0 }}
+              value={app.loginForm.password}
+              onChange={e => app.setLoginForm(p => ({ ...p, password: e.target.value }))}
+              onKeyDown={e => e.key === "Enter" && !app.authBusy && app.doLogin()}
+            />
+            <button
+              type="button"
+              aria-label={app.showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+              style={{ ...S.inp, width: 44, minWidth: 44, padding: "6px 8px", flexShrink: 0, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "18px" }}
+              onClick={() => app.setShowPassword(prev => !prev)}
+              title={app.showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+            >
+              {app.showPassword ? "🙈" : "👁"}
+            </button>
+          </div>
+        </div>
+        {(app.loginErr || app.ctxErr) && (
+          <div style={{ color: themeColor("danger"), fontSize: "11px", marginBottom: 8 }}>
+            {app.loginErr || app.ctxErr}
+          </div>
+        )}
+        <button
+          style={{ ...S.btn("primary"), width: "100%", padding: "8px", opacity: app.authBusy ? 0.7 : 1 }}
+          disabled={app.authBusy}
+          onClick={()=>{ app.doLogin(); }}
+        >
+          {app.authBusy ? "Ingresando..." : "Ingresar"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ContextSelectorScreen({ app }: Readonly<{ app: SCCEAppGate }>) {
+  return (
+    <div style={{ ...S.app, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ ...S.card, width: 520 }}>
+        <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 6 }}>Seleccionar contexto</div>
+        <div style={{ color: themeColor("muted"), fontSize: 11, marginBottom: 12 }}>
+          Debes seleccionar un contexto antes de continuar.
+        </div>
+        {app.ctxErr && <div style={{ color: themeColor("danger"), fontSize: "11px", marginBottom: 8 }}>{app.ctxErr}</div>}
+        {app.memberships.length === 0 ? (
+          <div style={{ color: themeColor("mutedAlt"), fontSize: 11 }}>Cargando contextos...</div>
+        ) : (
+          <div style={{ display: "grid", gap: 8 }}>
+            {app.memberships.map(m => {
+              const scopeList = m.regionScopeMode === "LIST" && Array.isArray(m.regionScope) && m.regionScope.length ? m.regionScope : [];
+              const regionLabels = scopeList.map(code => (CONFIG.regions as Record<string, { name?: string }>)[code]?.name ?? code).join(", ") || (m.regionScopeMode === "ALL" ? "Todas las regiones" : null);
+              const regionText = regionLabels ? ` · ${regionLabels}` : "";
+              return (
+                <button
+                  key={m.id}
+                  style={{ ...S.btn("dark"), justifyContent: "space-between", display: "flex", alignItems: "center" }}
+                  onClick={() => {
+                    app.setActiveMembership(m);
+                    app.setActiveMembership(m);
+                    app.setAuditLog(prev => appendEvent(prev, "CONTEXT_SET", "api", "API", null, `Contexto ${m.contextType}/${m.contextId} (${m.role})`));
+                  }}
+                >
+                  <span style={{ fontSize: 12, fontWeight: 700 }}>{m.contextType} / {m.contextId}{regionText}</span>
+                  <Badge style={{ ...S.badge(themeColor("blueDark")) }} size="xs">{m.role}</Badge>
+                </button>
+              );
+            })}
+          </div>
+        )}
+        <div style={{ marginTop: 12, borderTop: "1px solid #e5e7eb", paddingTop: 10, display: "flex", justifyContent: "space-between" }}>
+          <span style={{ color: themeColor("muted"), fontSize: 10 }}>{app.apiUser?.email ?? ""}</span>
+          <button
+            style={{ ...S.btn("dark"), fontSize: "11px" }}
+            onClick={() => {
+              app.clearSession();
+              app.setAuthToken(null);
+              app.setApiUser(null);
+              app.setMemberships([]);
+              app.setActiveMembership(null);
+              app.setCurrentUser(null);
+              app.setLoginErr("");
+              app.setCtxErr("");
+            }}
+          >
+            Cerrar sesión
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LoadingScreen() {
+  return (
+    <div style={{ ...S.app, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ color: themeColor("mutedAlt"), fontSize: 12 }}>Cargando sesión...</div>
+    </div>
+  );
+}
 
 // ─── COMPONENTE PRINCIPAL ─────────────────────────────────────────────────────
 export default function App(){
@@ -513,263 +2923,49 @@ export default function App(){
   const [authToken, setAuthToken] = useState<string | null>(() => getToken());
   const [apiUser, setApiUser] = useState<ApiUser | null>(null);
   const [memberships, setMemberships] = useState<Membership[]>([]);
-  const [activeMembership, setActiveMembershipState] = useState<Membership | null>(() => getActiveMembership());
+  const [activeMembership, setActiveMembership] = useState<Membership | null>(() => getActiveMembership());
 
   const [activeRegion,setActiveRegion]=useState(DEFAULT_REGION);
-  const [membershipScopes, setMembershipScopes] = useState<Record<
-    string,
-    { regionScopeMode: "ALL" | "LIST"; regionScope: string[]; regionCode?: string | null }
-  >>({});
+  const [membershipScopes, setMembershipScopes] = useState<MembershipScopesMap>({});
   const justBecameCentralRef = useRef(false);
   const effectiveMembership = getActiveMembership();
   const isCentral = isCentralFromContext(effectiveMembership, currentUser?.role);
-  const regionOptions = useMemo(() => {
-    const entriesAll = Object.entries(CONFIG.regions).map(([code, d]) => ({
-      code,
-      name: (d as { name?: string }).name ?? code,
-    }));
+  const regionOptions = useMemo(
+    () => getRegionOptions(isCentral, effectiveMembership, membershipScopes, CONFIG.regions as Record<string, { name?: string }>),
+    [isCentral, effectiveMembership, membershipScopes]
+  );
+  const localSeqRef = useRef(0);
+  const getNextLocalId = useCallback(() => {
+    localSeqRef.current += 1;
+    return `LOC-${String(localSeqRef.current).padStart(4, "0")}`;
+  }, []);
 
-    if (isCentral) {
-      return [{ code: "ALL", name: "Todas las regiones" }, ...entriesAll];
-    }
-
-    const mid = effectiveMembership?.id;
-
-    const mode =
-      effectiveMembership?.regionScopeMode ??
-      (mid ? membershipScopes[mid]?.regionScopeMode : undefined);
-
-    const scope =
-      effectiveMembership?.regionScope ??
-      (mid ? membershipScopes[mid]?.regionScope : undefined);
-
-    if (mode === "LIST" && Array.isArray(scope) && scope.length) {
-      const allowed = new Set(scope);
-      return entriesAll.filter((e) => allowed.has(e.code));
-    }
-
-    const rc =
-      effectiveMembership?.regionCode ??
-      (mid ? membershipScopes[mid]?.regionCode : undefined);
-
-    if (rc) return entriesAll.filter((e) => e.code === rc);
-
-    return entriesAll;
-  }, [isCentral, effectiveMembership, membershipScopes]);
-  const [localCatalog, setLocalCatalog] = useState<LocalCatalog>(() => buildCatalogSeed());
+  const [localCatalog, setLocalCatalog] = useState<LocalCatalog>(() => buildCatalogSeed(createLocalIdGenerator()));
 
   const [cases, setCases] = useState<CaseItem[]>(() => {
-    const cat = buildCatalogSeed();
+    const cat = buildCatalogSeed(createLocalIdGenerator());
     return makeSeedCases(cat);
   });
   const [auditLog, setAuditLog] = useState<AuditLogEntry[]>(() => makeSeedAudit());
   const importJsonInputRef = useRef<HTMLInputElement | null>(null);
   const importFileRef = useRef<HTMLInputElement | null>(null);
 
-  function downloadJson(filename: string, jsonText: string) {
-    const blob = new Blob([jsonText], { type: "application/json;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
+  const onExportState = () => handleExportState({ cases, setAuditLog, currentUser, notify });
+  const onImportStateFile = (file: File) => handleImportStateFile({ setCases, setAuditLog, currentUser, notify }, file);
 
-  async function onExportState() {
-    const bundle = await buildExportBundle(cases, APP_VERSION);
-    let signed = false;
-
-    if (await hasSigningKey()) {
-      const passphrase = globalThis.prompt(
-        UI_TEXT.misc.signPassphrasePrompt ?? "Ingrese passphrase para firmar el export:"
-      );
-      if (passphrase && passphrase.trim()) {
-        try {
-          const sig = await signIntegrityHashHex({
-            passphrase,
-            hashHex: bundle.integrity!.value,
-          });
-          bundle.signature = {
-            algo: "Ed25519",
-            publicKeyB64: sig.publicKeyB64,
-            valueB64: sig.signatureB64,
-            signedAt: sig.signedAt,
-          };
-          signed = true;
-        } catch {
-          notify(
-            UI_TEXT.errors.signFailed ??
-              "No se pudo firmar (passphrase incorrecta o llave inválida). Se exportará sin firma.",
-            "error"
-          );
-        }
-      } else {
-        notify(
-          UI_TEXT.misc.exportUnsignedWarning ?? "Export sin firma (no se ingresó passphrase).",
-          "warning"
-        );
-      }
-    } else {
-      const wants = globalThis.confirm(
-        UI_TEXT.misc.noSigningKeyConfirm ??
-          "No hay llave de firma configurada. ¿Deseas crear una ahora (recomendado)?"
-      );
-
-      if (wants) {
-        const p1 = globalThis.prompt(
-          UI_TEXT.misc.signCreatePassphrase1 ?? "Crea una passphrase (guárdala):"
-        );
-        if (p1 && p1.trim()) {
-          const p2 = globalThis.prompt(
-            UI_TEXT.misc.signCreatePassphrase2 ?? "Repite la passphrase:"
-          );
-          if (p2 === p1) {
-            try {
-              await initSigningKey(p1);
-              notify(
-                UI_TEXT.misc.signKeyCreated ?? "Llave creada. Reintenta Exportar para firmar.",
-                "success"
-              );
-            } catch {
-              notify(
-                UI_TEXT.errors.signKeyCreateFailed ?? "No se pudo crear la llave de firma.",
-                "error"
-              );
-            }
-          } else {
-            notify(
-              UI_TEXT.errors.signPassphraseMismatch ??
-                "Las passphrases no coinciden. Export se hará sin firma.",
-              "error"
-            );
-          }
-        }
-      }
-
-      notify(
-        UI_TEXT.misc.exportUnsignedWarning ?? "Export sin firma (no hay llave configurada).",
-        "warning"
-      );
-    }
-
-    const text = JSON.stringify(bundle, null, 2);
-    const name = `SCCE_APP_export_${new Date().toISOString().replaceAll(":", "-")}.json`;
-    downloadJson(name, text);
-
-    if (currentUser?.id) {
-      setAuditLog((prev) =>
-        appendEvent(
-          prev,
-          "EXPORT_DONE",
-          currentUser.id,
-          currentUser.role,
-          null,
-          signed ? "Export estado v3 (firmado)" : "Export estado v3 (sin firma)"
-        )
-      );
-    }
-
-    notify(UI_TEXT.misc.exportOk ?? "Export listo.", "success");
-  }
-
-  async function onImportStateFile(file: File) {
-    const MAX_IMPORT_BYTES = 5 * 1024 * 1024; // 5 MB
-    if (file.size > MAX_IMPORT_BYTES) {
-      notify((UI_TEXT.errors.importFileTooLarge ?? "Archivo demasiado grande (máx. {maxMb} MB).").replace("{maxMb}", String(MAX_IMPORT_BYTES / (1024 * 1024))), "error");
-      return;
-    }
-    let raw: unknown;
-    try {
-      raw = JSON.parse(await file.text());
-    } catch {
-      notify(UI_TEXT.errors.importInvalidJson ?? "Archivo no es JSON válido.", "error");
-      return;
-    }
-    const v = await validateImportBundle(raw);
-    if (!v.ok) {
-      notify(v.error, "error");
-      if (currentUser?.id) {
-        const evType = v.error.includes("Firma inválida")
-          ? "IMPORT_SIG_INVALID_BLOCKED"
-          : v.error.includes("Integridad fallida")
-            ? "IMPORT_INTEGRITY_FAILED_BLOCKED"
-            : "IMPORT_FAILED";
-        setAuditLog((prev) =>
-          appendEvent(prev, evType, currentUser.id, currentUser.role, null, v.error.slice(0, 80))
-        );
-      }
-      return;
-    }
-
-    const signerPub = (raw as { signature?: { publicKeyB64: string } })?.signature?.publicKeyB64 ?? "";
-    const fpForAudit = signerPub ? await publicKeyFingerprintShort(signerPub) : "";
-
-    if (v.signatureStatus === "none") {
-      notify(
-        UI_TEXT.misc.importUnsignedWarning ??
-          "Import sin firma: permitido, pero no hay garantía de autoría.",
-        "warning"
-      );
-      if (currentUser?.id)
-        setAuditLog((prev) =>
-          appendEvent(prev, "IMPORT_SIG_NONE_ALLOWED", currentUser.id, currentUser.role, null, "Import sin firma permitido")
-        );
-    } else if (v.signatureStatus === "valid_untrusted") {
-      const confirmWord = UI_TEXT.misc.trustConfirmWord ?? "CONFIAR";
-      const typed = globalThis.prompt(
-        UI_TEXT.misc.importUntrustedTypeToConfirm ??
-          "Firma válida, pero no confiable. Para continuar escribe CONFIAR:"
-      );
-      if (typed?.trim() !== confirmWord) {
-        notify(
-          UI_TEXT.errors.importUntrustedConfirmFailed ?? "No se confirmó la confianza. Import cancelado.",
-          "error"
-        );
-        if (currentUser?.id)
-          setAuditLog((prev) =>
-            appendEvent(prev, "IMPORT_SIG_VALID_UNTRUSTED_REJECTED", currentUser.id, currentUser.role, null, fpForAudit ? `Rechazado – huella ${fpForAudit}` : "Rechazado")
-          );
-        return;
-      }
-      if (currentUser?.id)
-        setAuditLog((prev) =>
-          appendEvent(prev, "IMPORT_SIG_VALID_UNTRUSTED_ACCEPTED", currentUser.id, currentUser.role, null, fpForAudit ? `Aceptado – huella ${fpForAudit}` : "Aceptado")
-        );
-    } else {
-      notify(
-        UI_TEXT.misc.importSignedTrustedOk ?? "Import con autoría verificada (confiable).",
-        "success"
-      );
-      if (currentUser?.id)
-        setAuditLog((prev) =>
-          appendEvent(prev, "IMPORT_SIG_VALID_TRUSTED", currentUser.id, currentUser.role, null, fpForAudit ? `Import confiable – huella ${fpForAudit}` : "Import confiable")
-        );
-    }
-
-    const ok = globalThis.confirm(
-      UI_TEXT.misc.importConfirm ?? "Esto reemplazará los casos actuales. ¿Continuar?"
-    );
-    if (!ok) return;
-    setCases(v.cases);
-    notify(UI_TEXT.misc.importOk ?? "Import realizado.", "success");
-  }
   const [view,setView]=useState<ViewKey>("dashboard");
   const OP_HOME_VIEW = "op_home" as const;
   const [selectedCase, setSelectedCase] = useState<CaseItem | null>(null);
-  type UiMode = "OP" | "FULL";
-  function uiModeStorageKey(userId: string) {
-    return `SCCE_UI_MODE:${userId}`;
-  }
   const defaultUiModeForUser = useCallback((u: User | null): UiMode => {
     return isTerrainMode(u) ? "OP" : "FULL";
   }, []);
   const [uiMode, setUiMode] = useState<UiMode>("FULL");
   const [crisisMode,setCrisisMode]=useState(false);
-  const [filterState,setFilterState]=useState({criticality:"",status:"",commune:"",search:"",region:""});
-  const regionEffective = isCentral
-    ? (filterState.region || activeRegion || "ALL")
-    : (effectiveMembership?.regionCode || "");
+  const [filterState,setFilterState]=useState<AppFilterState>({criticality:"",status:"",commune:"",search:"",region:""});
+  const regionEffective = useMemo(
+    () => computeRegionEffective(isCentral, filterState, activeRegion, effectiveMembership),
+    [isCentral, filterState, activeRegion, effectiveMembership]
+  );
   const [notification, setNotification] = useState<Notification>(null);
   const [simCases,setSimCases]=useState<CaseItem[]>([]);
   const [simReport, setSimReport] = useState<SimReport>(null);
@@ -786,71 +2982,33 @@ export default function App(){
   const [helpOpen,setHelpOpen]=useState(false);
   const [actionsOpen,setActionsOpen]=useState(false);
   const [busyAction, setBusyAction] = useState<Record<string, boolean>>({});
+  const withBusy = useCallback(
+    (key: string, fn: () => void) => withBusyImpl(key, fn, busyAction, setBusyAction),
+    [busyAction, setBusyAction]
+  );
 
-  function withBusy(key: string, fn: () => void) {
-    if (busyAction[key]) return;
-    setBusyAction((prev) => ({ ...prev, [key]: true }));
-    try {
-      fn();
-    } finally {
-      setTimeout(() => setBusyAction((prev) => ({ ...prev, [key]: false })), 350);
-    }
-  }
+  const setViewAndCloseHelp = useCallback<React.Dispatch<React.SetStateAction<ViewKey>>>((value) => {
+    setView(value);
+    setHelpOpen(false);
+  }, [setHelpOpen]);
 
   const goToSection=(nextView: ViewKey,sectionId: string)=>{
-    setView(nextView);
+    setViewAndCloseHelp(nextView);
     setActionsOpen(false);
-    window.setTimeout(()=>{
+    globalThis.setTimeout(()=>{
       const el=document.getElementById(sectionId);
       el?.scrollIntoView({behavior:"smooth",block:"start"});
     },60);
   };
-  useEffect(()=>{
-    if (!actionsOpen) return;
-    const onDown=(e: MouseEvent)=>{
-      const t=e.target as HTMLElement|null;
-      if (!t) return;
-      if (t.closest?.("[data-actions-menu]")) return;
-      setActionsOpen(false);
-    };
-    window.addEventListener("mousedown",onDown);
-    return ()=>window.removeEventListener("mousedown",onDown);
-  },[actionsOpen]);
-  useEffect(()=>{setHelpOpen(false);},[view]);
-  useEffect(() => {
-    if (!currentUser) {
-      setUiMode("FULL");
-      return;
-    }
-    const key = uiModeStorageKey(currentUser.id);
-    const saved = localStorage.getItem(key);
-    if (saved === "OP" || saved === "FULL") {
-      setUiMode(saved);
-    } else {
-      setUiMode(defaultUiModeForUser(currentUser));
-    }
-  }, [currentUser, defaultUiModeForUser]);
+  useActionsMenuCloseOutside(actionsOpen, setActionsOpen);
+  useUiModeFromStorage(currentUser, defaultUiModeForUser, setUiMode);
 
-  function setUiModeAndPersist(next: UiMode) {
-    setUiMode(next);
-    if (currentUser?.id) {
-      localStorage.setItem(uiModeStorageKey(currentUser.id), next);
-    }
-  }
+  const setUiModeAndPersist = useCallback(
+    (next: UiMode) => setUiModeAndPersistImpl(next, currentUser?.id, setUiMode),
+    [currentUser?.id, setUiMode]
+  );
 
-  useEffect(()=>{
-    const onKey=(e: KeyboardEvent)=>{
-      const isCtrl=e.ctrlKey||e.metaKey;
-      if (!isCtrl) return;
-      const tag=(e.target as HTMLElement|null)?.tagName?.toLowerCase();
-      if (tag==="input"||tag==="textarea") return;
-      if (e.key.toLowerCase()==="e"){e.preventDefault();goToSection("reports","reports-export");}
-      if (e.key.toLowerCase()==="i"){e.preventDefault();goToSection("reports","reports-export");}
-      if (e.shiftKey&&e.key.toLowerCase()==="r"){e.preventDefault();goToSection("config","config-reset");}
-    };
-    window.addEventListener("keydown",onKey);
-    return ()=>window.removeEventListener("keydown",onKey);
-  },[]);
+  useKeyboardShortcuts(goToSection);
 
   const chainResult=useMemo(()=>verifyChain(auditLog),[auditLog]);
 
@@ -867,180 +3025,133 @@ export default function App(){
     if(v.length)console.warn("[SCCE][CATALOG-SELFCHECK]",v);
   },[localCatalog]);
 
-  const showTerrainShell = currentUser != null && uiMode === "OP";
+  // Hidratar caso con eventos (timeline, actions desde ACTION_ADDED, decisions desde DECISION_ADDED) al abrir detalle
+  const detailHydratedCaseIdRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!showTerrainShell) return;
-    if (view === "dashboard") setView(OP_HOME_VIEW);
-  }, [showTerrainShell, view]);
+    if (view !== "detail" || !selectedCase?.id) {
+      detailHydratedCaseIdRef.current = null;
+      return;
+    }
+    const caseId = selectedCase.id;
+    if (!authToken || !effectiveMembership || detailHydratedCaseIdRef.current === caseId) return;
+    detailHydratedCaseIdRef.current = caseId;
+    const headers: Record<string, string> = {};
+    if (effectiveMembership.id) headers["x-scce-membership-id"] = effectiveMembership.id;
+    if (effectiveMembership.contextType && effectiveMembership.contextId) {
+      headers["x-scce-context-type"] = effectiveMembership.contextType;
+      headers["x-scce-context-id"] = effectiveMembership.contextId;
+    }
+    apiRequest<Array<{ id: string; eventType: string; payloadJson: Record<string, unknown>; createdAt: string; actorId: string }>>(
+      `/cases/${caseId}/events`,
+      { method: "GET", token: authToken, headers: Object.keys(headers).length ? headers : undefined }
+    ).then((res) => {
+      if (!res.ok || !Array.isArray(res.data)) return;
+      const events = res.data;
+      const actions = events
+        .filter((e) => e.eventType === "ACTION_ADDED")
+        .map((e) => ({
+          id: e.id,
+          action: (e.payloadJson?.action as string) ?? "",
+          responsible: (e.payloadJson?.responsible as string) ?? "",
+          result: (e.payloadJson?.result as string) ?? "",
+          at: new Date(e.createdAt).toISOString(),
+        }));
+      const decisions = events
+        .filter((e) => e.eventType === "DECISION_ADDED")
+        .map((e) => ({
+          fundament: (e.payloadJson?.fundament as string) ?? "",
+          who: (e.payloadJson?.who as string) ?? "",
+          at: (e.payloadJson?.at as string) ?? e.createdAt,
+        }));
+      const timeline: CaseEvent[] = events.map((e) => {
+        const at = new Date(e.createdAt).toISOString();
+        const base = { eventId: e.id, type: e.eventType, at, actor: e.actorId ?? "" };
+        if (e.eventType === "OPERATIONAL_VALIDATION" && (e.payloadJson?.result === "OK" || e.payloadJson?.result === "OBSERVATIONS" || e.payloadJson?.result === "FAIL")) {
+          return { ...base, result: e.payloadJson.result as OperationalValidationResult, ...(e.payloadJson?.note != null ? { note: String(e.payloadJson.note) } : {}) };
+        }
+        return { ...base, ...(e.payloadJson?.note != null ? { note: String(e.payloadJson.note) } : {}) };
+      });
+      setCases((prev) =>
+        prev.map((c) => (c.id === caseId ? ({ ...c, actions, timeline, decisions } as CaseItem) : c))
+      );
+      setSelectedCase((prev) =>
+        prev?.id === caseId ? ({ ...prev, actions, timeline, decisions } as CaseItem) : prev
+      );
+    });
+  }, [view, selectedCase?.id, authToken, effectiveMembership]);
+
+  const showTerrainShell = useMemo(() => currentUser != null && uiMode === "OP", [currentUser, uiMode]);
+  useTerrainShellRedirect(showTerrainShell, view, setViewAndCloseHelp, OP_HOME_VIEW);
   const goOpHome = () => {
     setSelectedCase(null);
-    setView(OP_HOME_VIEW);
+    setViewAndCloseHelp(OP_HOME_VIEW);
   };
   const goNewCase = () => {
     setSelectedCase(null);
-    setView("new_case");
+    setViewAndCloseHelp("new_case");
   };
 
-  const notify=(msg: string, type="info")=>{setNotification({msg,type});setTimeout(()=>setNotification(null),4000);};
+  const notify = useCallback((msg: string, type = "info") => {
+    setNotification({ msg, type });
+    setTimeout(() => setNotification(null), 4000);
+  }, []);
 
-  async function bootstrapSession(token: string) {
-    const meRes = await apiRequest<{ user: ApiUser; memberships?: Array<{ id: string; regionCode?: string | null; regionScopeMode?: string; regionScope?: string[] }> }>("/me", { token });
-    console.log("ME (crudo):", meRes);
+  const bootstrapOpts: BootstrapSessionOptions = useMemo(
+    () => ({
+      setAuthToken,
+      setApiUser,
+      setMemberships,
+      setActiveMembership,
+      setCurrentUser,
+      setLoginErr,
+      setMembershipScopes,
+      setCtxErr,
+      setCases,
+      setAuditLog,
+    }),
+    [
+      setAuthToken,
+      setApiUser,
+      setMemberships,
+      setActiveMembership,
+      setCurrentUser,
+      setLoginErr,
+      setMembershipScopes,
+      setCtxErr,
+      setCases,
+      setAuditLog,
+    ]
+  );
 
-    const meMembershipsForLog = meRes.ok ? (meRes.data.memberships ?? []) : [];
-    console.log(
-      "ME memberships resumido:",
-      meMembershipsForLog.map((m: { id: string; regionCode?: string | null; regionScopeMode?: string; regionScope?: string[] }) => ({
-        id: m.id,
-        regionCode: m.regionCode,
-        regionScopeMode: m.regionScopeMode,
-        regionScope: m.regionScope,
-      }))
-    );
-
-    if (!meRes.ok) {
-      clearSession();
-      setAuthToken(null);
-      setApiUser(null);
-      setMemberships([]);
-      setActiveMembershipState(null);
-      setCurrentUser(null);
-      setLoginErr("Sesión inválida o expirada. Inicia sesión nuevamente.");
-      return;
-    }
-    setApiUser(meRes.data.user);
-    if (meRes.data.memberships?.length) {
-      const map: Record<string, { regionScopeMode: "ALL" | "LIST"; regionScope: string[]; regionCode?: string | null }> = {};
-      for (const m of meRes.data.memberships) {
-        map[m.id] = {
-          regionScopeMode: (m.regionScopeMode === "ALL" ? "ALL" : "LIST") as "ALL" | "LIST",
-          regionScope: Array.isArray(m.regionScope) ? m.regionScope : [],
-          regionCode: m.regionCode ?? null,
-        };
-      }
-      setMembershipScopes(map);
-    }
-
-    const ctxRes = await apiRequest<{ memberships: Membership[] }>("/contexts", { token });
-    if (!ctxRes.ok) {
-      setCtxErr(ctxRes.error || "No se pudo cargar contextos.");
-      setMemberships([]);
-      return;
-    }
-    setCtxErr("");
-    setMemberships(ctxRes.data.memberships || []);
-
-    if (!getActiveMembership()) {
-      const list = ctxRes.data.memberships || [];
-
-      // 1) Si existe ADM, preferirlo como activo por defecto (modo admin)
-      const adm = list.find((m) => m.regionCode === "ADM");
-      const pick = adm ?? (list.length === 1 ? list[0] : list[0] ?? null);
-
-      if (pick) {
-        setActiveMembership(pick);
-        setActiveMembershipState(pick);
-      }
-    }
-
-    // DR hardening: cargar casos reales desde API (fallback seed si falla)
-    const effectiveMembership = getActiveMembership();
-    if (token && effectiveMembership) {
-      const headers: Record<string, string> = {};
-      if (effectiveMembership.id) headers["x-scce-membership-id"] = effectiveMembership.id;
-      if (effectiveMembership.contextType && effectiveMembership.contextId) {
-        headers["x-scce-context-type"] = effectiveMembership.contextType;
-        headers["x-scce-context-id"] = effectiveMembership.contextId;
-      }
-      const res = await apiRequest<unknown>("/cases", {
-        token,
-        method: "GET",
-        headers: Object.keys(headers).length ? headers : undefined,
-      });
-
-      // Fallback seed: si falla, NO reemplazamos cases
-      if (res.ok && Array.isArray(res.data)) {
-        setCases(res.data as CaseItem[]);
-      }
-    }
-  }
-
-  useEffect(() => {
-    if (!authToken) return;
-    if (apiUser && memberships.length) return;
-    bootstrapSession(authToken);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authToken]);
-
-  useEffect(() => {
-    if (!apiUser || !activeMembership) return;
-    const u: User = {
-      id: apiUser.id,
-      username: apiUser.email,
-      name: apiUser.email,
-      role: activeMembership.role,
-      region: null,
-      commune: undefined,
-      password: "",
-    };
-    setCurrentUser(u);
-  }, [apiUser, activeMembership]);
-
-  // Por defecto, usuario central ve "Todas las regiones" (solo al volverse central)
-  useEffect(() => {
-    if (isCentral && !justBecameCentralRef.current) {
-      justBecameCentralRef.current = true;
-      setActiveRegion("ALL");
-    }
-    if (!isCentral) {
-      justBecameCentralRef.current = false;
-      if (activeRegion === "ALL") setActiveRegion(DEFAULT_REGION);
-    }
-  }, [isCentral, activeRegion]);
-
-  // Enforce: si DR tiene activeRegion fuera de su scope, corregir al primer permitido
-  useEffect(() => {
-    if (isCentral) return;
-    const mid = effectiveMembership?.id;
-    if (!mid) return;
-
-    const scope = membershipScopes[mid];
-    if (!scope || scope.regionScopeMode !== "LIST") return;
-
-    const allowed = scope.regionScope || [];
-    if (!allowed.length) return;
-
-    if (!allowed.includes(activeRegion)) {
-      setActiveRegion(allowed[0]);
-      setFilterState((p) => ({ ...p, commune: "" }));
-    }
-  }, [isCentral, effectiveMembership?.id, membershipScopes, activeRegion]);
-
-  useEffect(() => {
-    // Para DR (no central): el filtro región debe quedar amarrado a su región efectiva
-    if (!isCentral && activeRegion && activeRegion !== "ALL") {
-      setFilterState((prev) => {
-        // si ya está correcto, no hace nada
-        if (prev.region === activeRegion) return prev;
-        // al cambiar región, resetea comuna para evitar cruces inválidos
-        return { ...prev, region: activeRegion, commune: "" };
-      });
-    }
-  }, [isCentral, activeRegion]);
+  useAppSessionEffects({
+    authToken,
+    apiUser,
+    memberships,
+    activeMembership,
+    setCurrentUser,
+    isCentral,
+    justBecameCentralRef,
+    activeRegion,
+    setActiveRegion,
+    setFilterState,
+    effectiveMembership,
+    membershipScopes,
+    bootstrapOpts,
+  });
 
   function doReset(){
-    _localSeq=0;
-    const cat=buildCatalogSeed();
+    localSeqRef.current = 0;
+    const cat = buildCatalogSeed(getNextLocalId);
     const y=Math.max(new Date().getFullYear(),MIN_ELECTION_YEAR);
     clearSession();
     setAuthToken(null);
     setApiUser(null);
     setMemberships([]);
-    setActiveMembershipState(null);
+    setActiveMembership(null);
     setLocalCatalog(cat);
     setCases(makeSeedCases(cat));
     setAuditLog(makeSeedAudit());
-    setCurrentUser(null);setView("dashboard");setSelectedCase(null);
+    setCurrentUser(null);setViewAndCloseHelp("dashboard");setSelectedCase(null);
     setCrisisMode(false);setSimCases([]);setSimReport(null);
     setSimSurvey({claridad:0,respaldo:0,submitted:false});
     setLoginForm({ email: "", password: "" });
@@ -1049,315 +3160,46 @@ export default function App(){
     setElectionConfig({name:`Elecciones Generales ${y}`,date:`${y}-11-15`,year:y});
   }
 
-  async function doLogin() {
-    setLoginErr("");
-    setCtxErr("");
-    setAuthBusy(true);
-    try {
-      const res = await apiRequest<{ token: string }>("/auth/login", {
-        method: "POST",
-        body: { email: loginForm.email, password: loginForm.password },
-      });
+  const doLogin = useCallback(
+    () =>
+      doLoginImpl(loginForm, bootstrapOpts, {
+        setLoginErr,
+        setCtxErr,
+        setAuthBusy,
+        setToken,
+        setAuthToken,
+        setAuditLog,
+      }),
+    [loginForm, bootstrapOpts, setLoginErr, setCtxErr, setAuthBusy, setAuthToken, setAuditLog]
+  );
 
-      if (!res.ok) {
-        setLoginErr(res.error || "No se pudo iniciar sesión.");
-        return;
-      }
+  const nowLocalInput = useCallback(() => nowLocalDatetimeInput(), []);
 
-      const token = res.data.token;
-      setToken(token);
-      setAuthToken(token);
+  const recepcionar = useCallback(
+    (caseId: string) => {
+      if (!currentUser) return;
+      recepcionarImpl(caseId, { currentUser, cases, notify, setCases, setAuditLog });
+    },
+    [currentUser, cases, notify, setCases, setAuditLog]
+  );
 
-      await bootstrapSession(token);
+  const changeStatus = useCallback(
+    (caseId: string, newStatus: CaseStatus) => {
+      if (!currentUser) return;
+      changeCaseStatusImpl(caseId, newStatus, { currentUser, cases, notify, setCases, setAuditLog });
+    },
+    [currentUser, cases, notify, setCases, setAuditLog]
+  );
 
-      setAuditLog((prev) => appendEvent(prev, "LOGIN", "api", "API", null, "Inicio de sesión (API real)"));
-    } finally {
-      setAuthBusy(false);
-    }
-  }
+  const validateBypass = useCallback(
+    (caseId: string, decision: string, fundament: string) => {
+      if (!currentUser) return;
+      validateBypassImpl(caseId, decision, fundament, { currentUser, setCases, setAuditLog, notify });
+    },
+    [currentUser, setCases, setAuditLog, notify]
+  );
 
-  function nowLocalInput() {
-    return nowLocalDatetimeInput();
-  }
-
-  function startNewCase(){
-    if (!currentUser) return;
-    const fixedCommune = assignedCommuneEffective || "";
-    const fixedLocal = assignedLocal?.nombre ?? "";
-    setNewCase({
-      region: currentUser.region || (activeRegion === "ALL" ? DEFAULT_REGION : activeRegion),
-      commune: fixedCommune,
-      local: fixedLocal,
-      origin: {
-        actor: currentUser.name,
-        channel: "Teams",
-        detectedAt: nowLocalInput()
-      },
-      summary: "",
-      detail: "",
-      evidence: [],
-      id: "",
-      status: "Nuevo",
-      criticality: "MEDIA"
-    } as CaseItem);
-    setEvalForm({continuidad:0,integridad:0,seguridad:0,exposicion:0,capacidadLocal:0});
-    setBypassForm({active:false,motivo:"",cause:"",confirmed:false});
-    setStep(1);setView("new_case");
-  }
-
-  async function submitCase(){
-    if (!currentUser || !newCase) return;
-
-    // 0) Validación base existente (schema)
-    const se = validateCaseSchema(newCase, localCatalog);
-    if (se.length) return notify("⚠️ " + se[0], "error");
-
-    // =========================
-    // HARDENING OPERATIVO (fail-closed)
-    // =========================
-
-    // 1) Comuna obligatoria y válida en la región seleccionada
-    const regionSel = (newCase.region ?? "").trim();
-    const communeSel = (newCase.commune ?? "").trim();
-    if (!communeSel) {
-      return notify("⚠️ Debes seleccionar una comuna.", "error");
-    }
-    // Catálogo maestro es array: LocalCatalogEntry[] (region, commune por entrada)
-    const communesInRegion = [...new Set(localCatalog.filter((e) => e.region === regionSel).map((e) => e.commune))];
-    if (!communesInRegion.length) {
-      return notify("⚠️ Catálogo de locales no disponible para la región seleccionada.", "error");
-    }
-    if (!communesInRegion.includes(communeSel)) {
-      return notify("⚠️ La comuna seleccionada no corresponde a la región indicada.", "error");
-    }
-
-    // 2) Local obligatorio y existente en catálogo
-    const localName = (newCase.local ?? "").trim();
-    if (!localName) {
-      return notify("⚠️ Debes seleccionar un local de votación.", "error");
-    }
-
-    const now_ = nowISO();
-
-    // 3) Hora detección no futura (y fecha válida)
-    const detectedAt = newCase.origin?.detectedAt;
-    if (!detectedAt) {
-      return notify("⚠️ Falta la hora de detección del incidente.", "error");
-    }
-    if (!Number.isFinite(new Date(detectedAt).getTime())) {
-      return notify("⚠️ Hora de detección inválida.", "error");
-    }
-    if (isDetectedAtInFuture(detectedAt)) {
-      return notify("⚠️ La hora de detección no puede estar en el futuro (se permite hasta 5 min por desfase de reloj).", "error");
-    }
-
-    // 4) Local existe y pertenece a la comuna/región seleccionada
-    const localEntry = findActiveLocal(localCatalog, regionSel, communeSel, localName);
-    if (!localEntry) {
-      return notify("⚠️ El local seleccionado no existe o no está activo en el catálogo maestro.", "error");
-    }
-    if (localEntry.region !== regionSel || localEntry.commune !== communeSel) {
-      return notify("⚠️ El local seleccionado no corresponde a la comuna/región indicada.", "error");
-    }
-
-    // 5) Usuario no puede forzar comuna/local fuera de su ámbito efectivo (usa derivados ya en scope)
-    if (currentUser.region && regionSel !== currentUser.region) {
-      return notify("⚠️ No puedes registrar incidentes fuera de tu región autorizada.", "error");
-    }
-    if (assignedCommuneEffective && communeSel !== assignedCommuneEffective) {
-      return notify("⚠️ No puedes registrar incidentes fuera de tu comuna autorizada.", "error");
-    }
-    if (assignedLocalIdEffective && localEntry.idLocal !== assignedLocalIdEffective) {
-      return notify("⚠️ No puedes registrar incidentes fuera de tu local autorizado.", "error");
-    }
-
-    // 6) Snapshot desde catálogo activo (consistente)
-    const localSnapshot = {
-      idLocal: localEntry.idLocal,
-      nombre: localEntry.nombre,
-      region: localEntry.region,
-      commune: localEntry.commune,
-      snapshotAt: now_
-    };
-
-    // =========================
-    // CONTINÚA FLUJO ORIGINAL (sin refactor masivo)
-    // =========================
-
-    const result = calcCriticality(evalForm);
-    const maxVar = Math.max(...Object.values(evalForm));
-    const bypassTechOk = maxVar >= 3 || bypassForm.cause === "system_down";
-    const bypassFlagged = bypassForm.active && !bypassTechOk;
-
-    const rCases = cases.filter((c) => c.region === newCase.region && c.commune === newCase.commune);
-    const id = genId(newCase.region, newCase.commune, rCases.length + 1);
-
-    const c = {
-      ...newCase,
-      id,
-      localSnapshot,
-      evaluation: evalForm,
-      evaluationLocked: true,
-      evaluationHistory: [],
-      criticality: result.criticality,
-      criticalityScore: result.score,
-      status: bypassForm.active ? "En gestión" : "Nuevo",
-      assignedTo: null,
-      slaMinutes: (SLA_MINUTES as Record<SlaLevel, number>)[result.criticality as SlaLevel] || 60,
-      closingMotivo: null,
-      bypassValidated: null,
-      timeline: [
-        { eventId: newEventId("ev"), type: "DETECTED", at: newCase.origin!.detectedAt, actor: currentUser.id, note: "Detectado" },
-        { eventId: newEventId("ev"), type: "REPORTED", at: now_, actor: currentUser.id, note: "Reportado en SCCE" }
-      ],
-      actions: [],
-      decisions: [],
-      bypass: bypassForm.active,
-      bypassMotivo: bypassForm.motivo,
-      bypassFlagged,
-      bypassActor: bypassForm.active ? currentUser.id : null,
-      peseInoperante: bypassForm.cause === "system_down",
-      completeness: 0,
-      reportedAt: now_,
-      firstActionAt: null,
-      escalatedAt: null,
-      mitigatedAt: null,
-      resolvedAt: null,
-      closedAt: null,
-      createdBy: currentUser.id,
-      createdAt: now_,
-      updatedAt: now_
-    };
-
-    c.completeness = calcCompleteness(c as CaseItem);
-
-    const payloadForApi = {
-      summary: newCase.summary,
-      status: c.status,
-      criticality: result.criticality,
-      regionCode: activeRegion === "ALL" ? newCase.region : activeRegion,
-      communeCode: newCase.commune,
-      localCode: newCase.local,
-      localSnapshot: localSnapshot ?? undefined,
-    };
-
-    const token = authToken;
-    const ctx = getActiveMembership();
-    if (token && ctx) {
-      const headers: Record<string, string> = {};
-      if (ctx.id) headers["x-scce-membership-id"] = ctx.id;
-      if (ctx.contextType && ctx.contextId) {
-        headers["x-scce-context-type"] = ctx.contextType;
-        headers["x-scce-context-id"] = ctx.contextId;
-      }
-      const res = await apiRequest<{ id: string; regionCode: string; communeCode: string; localCode: string; localSnapshot?: unknown; status: string; createdAt: string; updatedAt: string }>("/cases", {
-        method: "POST",
-        token,
-        body: payloadForApi,
-        headers: Object.keys(headers).length ? headers : undefined,
-      });
-      if (res.ok) {
-        const ls = isLocalSnapshot(res.data.localSnapshot) ? res.data.localSnapshot : localSnapshot;
-
-        const apiCase = {
-          ...c,
-          id: res.data.id,
-          region: res.data.regionCode,
-          commune: res.data.communeCode,
-          local: res.data.localCode,
-          localSnapshot: ls,
-          status: res.data.status,
-          createdAt: res.data.createdAt,
-          updatedAt: res.data.updatedAt,
-        } as CaseItem;
-        apiCase.completeness = calcCompleteness(apiCase);
-        setCases((prev) => [apiCase, ...prev]);
-        setAuditLog((prev) => {
-          let log = appendEvent(prev, "CASE_CREATED", currentUser.id, currentUser.role, res.data.id, `Caso: ${c.summary.slice(0, 60)}`);
-          if (bypassForm.active) log = appendEvent(log, "BYPASS_USED", currentUser.id, currentUser.role, res.data.id, `Bypass: ${bypassForm.motivo}`);
-          if (bypassFlagged) log = appendEvent(log, "BYPASS_FLAGGED", currentUser.id, currentUser.role, res.data.id, UI_TEXT.errors.excepcionRequiereValidacion);
-          return log;
-        });
-        notify(
-          `Caso ${res.data.id} — ${result.criticality}${bypassFlagged ? " ⚠️ " + UI_TEXT.states.flagged : ""}`,
-          result.criticality === "CRITICA" ? "error" : "success"
-        );
-        setView("dashboard");
-        setNewCase(null);
-        return;
-      }
-      notify(res.error || "Error al crear caso en el servidor.", "error");
-      return;
-    }
-
-    setCases((prev) => [c as CaseItem, ...prev]);
-
-    setAuditLog((prev) => {
-      let log = appendEvent(prev, "CASE_CREATED", currentUser.id, currentUser.role, id, `Caso: ${c.summary.slice(0, 60)}`);
-      if (bypassForm.active) log = appendEvent(log, "BYPASS_USED", currentUser.id, currentUser.role, id, `Bypass: ${bypassForm.motivo}`);
-      if (bypassFlagged) log = appendEvent(log, "BYPASS_FLAGGED", currentUser.id, currentUser.role, id, UI_TEXT.errors.excepcionRequiereValidacion);
-      return log;
-    });
-
-    notify(
-      `Caso ${id} — ${result.criticality}${bypassFlagged ? " ⚠️ " + UI_TEXT.states.flagged : ""}`,
-      result.criticality === "CRITICA" ? "error" : "success"
-    );
-
-    setView("dashboard");
-  }
-
-  function recepcionar(caseId: string){
-    if (!currentUser) return;
-    const c=cases.find(x=>x.id===caseId);
-    if(!c||!canDo("recepcionar",currentUser,c))return notify(UI_TEXT.errors.unauthorized,"error");
-    setCases(prev=>prev.map(x=>x.id!==caseId?x:{...x,status:"Recepcionado por DR",updatedAt:nowISO(),timeline:[...(x.timeline ?? []),{eventId:newEventId("ev"),type:"RECEPCIONADO",at:nowISO(),actor:currentUser.id,note:`Recepcionado por ${currentUser.name}`}]} as CaseItem));
-    setAuditLog(prev=>appendEvent(prev,"STATUS_CHANGED",currentUser.id,currentUser.role,caseId,"Estado → Recepcionado por DR"));
-    notify("Caso recepcionado","success");
-  }
-
-  function changeStatus(caseId: string, newStatus: CaseStatus){
-    if (!currentUser) return;
-    const c=cases.find(x=>x.id===caseId);
-    if(!c)return;
-    if(!canDo("update",currentUser,c)&&!canDo("close",currentUser,c))return notify(UI_TEXT.errors.unauthorized,"error");
-    if(newStatus==="En gestión"&&c.status==="Nuevo"&&!c.bypass)return notify("❌ "+UI_TEXT.errors.recepcionarPrimero,"error");
-    if(newStatus==="Cerrado"){
-      if(c.bypassFlagged&&!c.bypassValidated)return notify("❌ "+UI_TEXT.errors.excepcionRequiereValidacion,"error");
-      if(!c.actions?.length)return notify("❌ "+UI_TEXT.errors.alMenosUnaAccion,"error");
-      if(!c.decisions?.length)return notify("❌ "+UI_TEXT.errors.alMenosUnaDecision,"error");
-      if(c.status!=="Resuelto")return notify("❌ "+UI_TEXT.errors.casoDebeEstarResuelto,"error");
-      const hasOpVal=(c.timeline??[]).some((ev)=>ev.type==="OPERATIONAL_VALIDATION");
-      if(!hasOpVal)return notify("❌ "+UI_TEXT.errors.faltaValidacionOperativa,"error");
-      if(!c.closingMotivo)return notify("❌ "+UI_TEXT.errors.ingresaMotivoCierre,"error");
-    }
-    const tlMap: Record<CaseStatus, string> = {Escalado:"ESCALATED",Mitigado:"MITIGATED",Resuelto:"RESOLVED",Cerrado:"CLOSED","En gestión":"IN_MANAGEMENT","Recepcionado por DR":"RECEPCIONADO",Nuevo:"DETECTED"};
-    const tsMap: Partial<Record<CaseStatus, string>> = {Escalado:"escalatedAt",Mitigado:"mitigatedAt",Resuelto:"resolvedAt",Cerrado:"closedAt"};
-    setCases(prev=>prev.map(x=>{
-      if(x.id!==caseId)return x;
-      const tl=[...(x.timeline ?? []),{eventId:newEventId("ev"),type:tlMap[newStatus]||"STATUS_CHANGED",at:nowISO(),actor:currentUser.id,note:`Estado → ${newStatus}`}];
-      return{...x,status:newStatus,...(tsMap[newStatus]?{[tsMap[newStatus]!]:nowISO()}:{}),timeline:tl,updatedAt:nowISO()} as CaseItem;
-    }));
-    setAuditLog(prev=>appendEvent(prev,"STATUS_CHANGED",currentUser.id,currentUser.role,caseId,`Estado → ${newStatus}`));
-  }
-
-  function validateBypass(caseId: string, decision: string, fundament: string){
-    if(!currentUser) return;
-    if(!canDo("validateBypass",currentUser))return notify(UI_TEXT.errors.soloDirectorValida,"error");
-    if(!fundament)return notify(UI_TEXT.errors.fundamentoRequerido,"error");
-    const validated=decision==="VALIDATED";
-    const bypassEv: CaseEvent = { eventId: newEventId("ev"), type: validated ? "BYPASS_VALIDATED" : "BYPASS_REVOKED", at: nowISO(), actor: currentUser.id, note: fundament };
-    setCases(prev=>prev.map(x=>{
-      if(x.id!==caseId)return x;
-      const tl = pushTimelineEvent(x.timeline ?? [], bypassEv);
-      const nd=[...(x.decisions ?? []),{who:currentUser.id,at:nowISO(),fundament:`Bypass ${validated?"VALIDADO":"REVOCADO"}: ${fundament}`}];
-      return{...x,bypassValidated:decision,decisions:nd,timeline:tl,updatedAt:nowISO()} as CaseItem;
-    }));
-    setAuditLog(prev=>appendEvent(prev,validated?"BYPASS_VALIDATED":"BYPASS_REVOKED",currentUser.id,currentUser.role,caseId,fundament.slice(0,80)));
-    notify(`Excepción ${validated?"validada":"revocada"}`,"success");
-  }
-
-  async function addOperationalValidation(caseId: string, result: "OK" | "OBSERVATIONS" | "FAIL", note: string) {
+  async function addOperationalValidation(caseId: string, result: OperationalValidationResult, note: string) {
     if (!currentUser) return;
     const ev: CaseEvent = {
       eventId: newEventId("ev"),
@@ -1368,9 +3210,12 @@ export default function App(){
       ...(note ? { note } : {}),
     };
     setCases((prev) =>
-      prev.map((x) =>
-        x.id !== caseId ? x : { ...x, timeline: pushTimelineEvent(x.timeline ?? [], ev), updatedAt: nowISO() } as CaseItem
-      )
+      prev.map((x) => {
+        if (x.id === caseId) {
+          return { ...x, timeline: pushTimelineEvent(x.timeline ?? [], ev), updatedAt: nowISO() } as CaseItem;
+        }
+        return x;
+      })
     );
     setAuditLog((prev) => appendEvent(prev, "OPERATIONAL_VALIDATION", currentUser.id, currentUser.role, caseId, `${result}${note ? ": " + note.slice(0, 40) : ""}`));
     if (authToken && effectiveMembership) {
@@ -1388,7 +3233,39 @@ export default function App(){
       });
       if (!res.ok) console.warn("[SCCE] Operational validation API sync failed:", res.error);
     }
-    notify("Validación operativa registrada", "success");
+    notify(UI_TEXT_GOVERNANCE.successMessages.operationalValidationSaved, "success");
+  }
+
+  async function assignCaseResponsible(caseId: string, selectedUserId: string) {
+    const selectedUser = USERS.find((u) => u.id === selectedUserId);
+    if (!selectedUser) return;
+    const nameToSave = selectedUser.name;
+    if (authToken && effectiveMembership) {
+      const headers: Record<string, string> = {};
+      if (effectiveMembership.id) headers["x-scce-membership-id"] = effectiveMembership.id;
+      if (effectiveMembership.contextType && effectiveMembership.contextId) {
+        headers["x-scce-context-type"] = effectiveMembership.contextType;
+        headers["x-scce-context-id"] = effectiveMembership.contextId;
+      }
+      const res = await apiRequest<unknown>(`/cases/${caseId}/events`, {
+        method: "POST",
+        token: authToken,
+        headers: Object.keys(headers).length ? headers : undefined,
+        body: { eventType: "ASSIGNMENT_CHANGED", payloadJson: { assignedTo: nameToSave } },
+      });
+      if (!res.ok) {
+        console.warn("[SCCE] Assign responsible API failed:", res.error);
+        notify(res.error ?? "Error al asignar responsable", "error");
+        return;
+      }
+    }
+    setCases((prev) =>
+      prev.map((x) => (x.id === caseId ? { ...x, assignedTo: nameToSave, updatedAt: nowISO() } : x))
+    );
+    setAuditLog((prev) =>
+      appendEvent(prev, "ASSIGNED", currentUser!.id, currentUser!.role, caseId, "Asignado a " + nameToSave)
+    );
+    notify(UI_TEXT_GOVERNANCE.successMessages.commandAssigned, "success");
   }
 
   function requestReassessment(caseId: string, newEval: Record<string, number>, justification: string){
@@ -1398,52 +3275,112 @@ export default function App(){
     const nr=calcCriticality(newEval);
     const snap={previousEval:c.evaluation,at:nowISO(),by:currentUser.id,justification};
     setCases(prev=>prev.map(x=>{
-      if(x.id!==caseId)return x;
-      const tl=[...(x.timeline ?? []),{eventId:newEventId("ev"),type:"REASSESSMENT",at:nowISO(),actor:currentUser.id,note:`Reevaluación: ${justification}`}];
-      const upd={...x,evaluation:newEval,criticality:nr.criticality as Criticality,criticalityScore:nr.score,evaluationHistory:[...(x.evaluationHistory||[]),snap],timeline:tl,updatedAt:nowISO()} as CaseItem;
-      upd.completeness=calcCompleteness(upd);return upd;
+      if(x.id===caseId){
+        const tl=[...(x.timeline ?? []),{eventId:newEventId("ev"),type:"REASSESSMENT",at:nowISO(),actor:currentUser.id,note:`Reevaluación: ${justification}`}];
+        const upd={...x,evaluation:newEval,criticality:nr.criticality as Criticality,criticalityScore:nr.score,evaluationHistory:[...(x.evaluationHistory||[]),snap],timeline:tl,updatedAt:nowISO()} as CaseItem;
+        upd.completeness=calcCompleteness(upd);return upd;
+      }
+      return x;
     }));
     setAuditLog(prev=>appendEvent(prev,"REASSESSMENT",currentUser.id,currentUser.role,caseId,`Reevaluación: ${justification.slice(0,60)}`));
     notify("Reevaluación registrada","success");
   }
 
-  function addAction(caseId: string, action: string, responsible: string, result_: string){
-    if(!currentUser) return;
-    const c=cases.find(x=>x.id===caseId);
-    if(!c||!canDo("update",currentUser,c))return notify(UI_TEXT.errors.unauthorized,"error");
-    setCases(prev=>prev.map(x=>{
-      if(x.id!==caseId)return x;
-      const na={id:"a"+Date.now(),action,responsible,at:nowISO(),result:result_};
-      const tl=[...(x.timeline ?? [])];
-      if(!x.firstActionAt)tl.push({eventId:newEventId("ev"),type:"FIRST_ACTION",at:nowISO(),actor:currentUser.id,note:action});
-      const upd={...x,actions:[...(x.actions ?? []),na],firstActionAt:x.firstActionAt||nowISO(),timeline:tl,updatedAt:nowISO()} as CaseItem;
-      upd.completeness=calcCompleteness(upd);return upd;
-    }));
-    setAuditLog(prev=>appendEvent(prev,"ACTION_ADDED",currentUser.id,currentUser.role,caseId,action.slice(0,80)));
+  async function addAction(caseId: string, action: string, responsible: string, result_: string): Promise<boolean> {
+    if (!currentUser) return false;
+    const c = cases.find((x) => x.id === caseId);
+    if (!c || !canDo("update", currentUser, c)) {
+      notify(UI_TEXT.errors.unauthorized, "error");
+      return false;
+    }
+    if (authToken && effectiveMembership) {
+      const headers: Record<string, string> = {};
+      if (effectiveMembership.id) headers["x-scce-membership-id"] = effectiveMembership.id;
+      if (effectiveMembership.contextType && effectiveMembership.contextId) {
+        headers["x-scce-context-type"] = effectiveMembership.contextType;
+        headers["x-scce-context-id"] = effectiveMembership.contextId;
+      }
+      const res = await apiRequest<unknown>(`/cases/${caseId}/events`, {
+        method: "POST",
+        token: authToken,
+        headers: Object.keys(headers).length ? headers : undefined,
+        body: { eventType: "ACTION_ADDED", payloadJson: { action, responsible, result: result_ } },
+      });
+      if (!res.ok) {
+        console.warn("[SCCE] Add action API failed:", res.error);
+        notify(res.error ?? UI_TEXT_GOVERNANCE.validationMessages.missingAction, "error");
+        return false;
+      }
+    }
+    setCases((prev) =>
+      prev.map((x) => {
+        if (x.id === caseId) {
+          const na = { id: "a" + Date.now(), action, responsible, at: nowISO(), result: result_ };
+          const tl = [...(x.timeline ?? [])];
+          if (!x.firstActionAt) tl.push({ eventId: newEventId("ev"), type: "FIRST_ACTION", at: nowISO(), actor: currentUser.id, note: action });
+          const upd = { ...x, actions: [...(x.actions ?? []), na], firstActionAt: x.firstActionAt || nowISO(), timeline: tl, updatedAt: nowISO() } as CaseItem;
+          upd.completeness = calcCompleteness(upd);
+          return upd;
+        }
+        return x;
+      })
+    );
+    setAuditLog((prev) => appendEvent(prev, "ACTION_ADDED", currentUser.id, currentUser.role, caseId, action.slice(0, 80)));
+    return true;
   }
 
-  function addDecision(caseId: string, fundament: string){
-    if(!currentUser) return;
-    const c=cases.find(x=>x.id===caseId);
-    if(!c||(!canDo("update",currentUser,c)&&!canDo("close",currentUser,c)))return notify(UI_TEXT.errors.unauthorized,"error");
-    setCases(prev=>prev.map(x=>{
-      if(x.id!==caseId)return x;
-      const upd={...x,decisions:[...(x.decisions ?? []),{who:currentUser.id,at:nowISO(),fundament}],updatedAt:nowISO()} as CaseItem;
-      upd.completeness=calcCompleteness(upd);return upd;
-    }));
-    setAuditLog(prev=>appendEvent(prev,"DECISION_ADDED",currentUser.id,currentUser.role,caseId,fundament.slice(0,60)));
+  async function addDecision(caseId: string, fundament: string): Promise<void> {
+    if (!currentUser) return;
+    const c = cases.find((x) => x.id === caseId);
+    if (!c || (!canDo("update", currentUser, c) && !canDo("close", currentUser, c))) {
+      notify(UI_TEXT.errors.unauthorized, "error");
+      return;
+    }
+    if (authToken && effectiveMembership) {
+      const headers: Record<string, string> = {};
+      if (effectiveMembership.id) headers["x-scce-membership-id"] = effectiveMembership.id;
+      if (effectiveMembership.contextType && effectiveMembership.contextId) {
+        headers["x-scce-context-type"] = effectiveMembership.contextType;
+        headers["x-scce-context-id"] = effectiveMembership.contextId;
+      }
+      const res = await apiRequest<unknown>(`/cases/${caseId}/events`, {
+        method: "POST",
+        token: authToken,
+        headers: Object.keys(headers).length ? headers : undefined,
+        body: {
+          eventType: "DECISION_ADDED",
+          payloadJson: { fundament, who: currentUser.id, at: nowISO() },
+        },
+      });
+      if (!res.ok) {
+        console.warn("[SCCE] Add decision API failed:", res.error);
+        notify(res.error ?? UI_TEXT.errors.alMenosUnaDecision, "error");
+        return;
+      }
+    }
+    setCases((prev) =>
+      prev.map((x) => {
+        if (x.id === caseId) {
+          const upd = { ...x, decisions: [...(x.decisions ?? []), { who: currentUser.id, at: nowISO(), fundament }], updatedAt: nowISO() } as CaseItem;
+          upd.completeness = calcCompleteness(upd);
+          return upd;
+        }
+        return x;
+      })
+    );
+    setAuditLog((prev) => appendEvent(prev, "DECISION_ADDED", currentUser.id, currentUser.role, caseId, fundament.slice(0, 60)));
   }
 
   function addComment(caseId: string, comment: string){
     if(!currentUser) return;
-    setCases(prev=>prev.map(x=>x.id!==caseId?x:{...x,timeline:[...(x.timeline ?? []),{eventId:newEventId("ev"),type:"COMMENT",at:nowISO(),actor:currentUser.id,note:comment}],updatedAt:nowISO()} as CaseItem));
+    setCases(prev=>prev.map(x=>x.id===caseId?{...x,timeline:[...(x.timeline ?? []),{eventId:newEventId("ev"),type:"COMMENT",at:nowISO(),actor:currentUser.id,note:comment}],updatedAt:nowISO()} as CaseItem:x));
     setAuditLog(prev=>appendEvent(prev,"COMMENT_ADDED",currentUser.id,currentUser.role,caseId,comment.slice(0,80)));
   }
 
   /** Fase 3.5 — Respuesta de terreno a una instrucción: COMMENT en timeline con refInstructionId. */
   function addInstructionReply(caseId: string, instructionId: string, replyText: string){
     if(!currentUser?.id || !replyText?.trim()) return;
-    setCases(prev=>prev.map(x=>x.id!==caseId?x:{...x,timeline:[...(x.timeline ?? []),{eventId:newEventId("ev"),type:"COMMENT",kind:"INSTRUCTION_REPLY",refInstructionId:instructionId,at:nowISO(),actor:currentUser.id,note:replyText.trim()}],updatedAt:nowISO()} as CaseItem));
+    setCases(prev=>prev.map(x=>x.id===caseId?{...x,timeline:[...(x.timeline ?? []),{eventId:newEventId("ev"),type:"COMMENT",kind:"INSTRUCTION_REPLY",refInstructionId:instructionId,at:nowISO(),actor:currentUser.id,note:replyText.trim()}],updatedAt:nowISO()} as CaseItem:x));
     setAuditLog(prev=>appendEvent(prev,"COMMENT_ADDED",currentUser.id,currentUser.role,caseId,`Respuesta instrucción ${instructionId}: ${replyText.trim().slice(0,60)}`));
   }
 
@@ -1452,30 +3389,30 @@ export default function App(){
     return { eventId: newEventId("ev"), type: "COMMENT", kind, refInstructionId: instructionId, at: nowISO(), actor: currentUser!.id, note };
   }
 
-  /** Fase 4.0 — push a timeline con dedupe (evita doble evento en ventana de ~4s). */
-  function pushTimelineEvent(timeline: CaseEvent[], ev: CaseEvent): CaseEvent[] {
-    if (isDuplicateEvent(timeline, ev)) return timeline;
-    return [...timeline, ev];
-  }
+  type CreateInstructionParams = {
+    caseId: string;
+    scope: string;
+    audience: string;
+    summary: string;
+    details: string;
+    impactLevel?: ImpactLevel;
+    scopeFunctional?: ScopeFunctional;
+    bypass?: { enabled: boolean; reason?: string };
+    cc?: { role?: string; userId?: string; label: string }[];
+  };
 
-  function isInstructionAckedByUser(ins: InstructionItem, userId: string): boolean {
-    return (ins.acks ?? []).some((a) => a.userId === userId);
-  }
-  function lastAck(ins: InstructionItem): { userId: string; role: string; at: string } | null {
-    const acks = ins.acks ?? [];
-    return acks.length > 0 ? acks[acks.length - 1] : null;
-  }
-  function createInstruction(
-    caseId: string,
-    scope: string,
-    audience: string,
-    summary: string,
-    details: string,
-    impactLevel: ImpactLevel = "L1",
-    scopeFunctional: ScopeFunctional = "OPERACIONES",
-    bypass?: { enabled: boolean; reason?: string },
-    cc?: { role?: string; userId?: string; label: string }[]
-  ){
+  function createInstruction(params: CreateInstructionParams): void {
+    const {
+      caseId,
+      scope,
+      audience,
+      summary,
+      details,
+      impactLevel = "L1",
+      scopeFunctional = "OPERACIONES",
+      bypass,
+      cc,
+    } = params;
     if(!currentUser?.id) return;
     if(!summary?.trim()) return notify(UI_TEXT.errors.instructionSummaryRequired, "error");
     const role = currentUser.role;
@@ -1502,10 +3439,17 @@ export default function App(){
       evidence: [],
       impactLevel,
       scopeFunctional,
-      to: {
-        label: audience === "AMBOS" ? "Dirección Regional / Terreno" : audience === "PESE" ? "PESE" : "Delegado",
-        role: audience === "PESE" ? "PESE" : audience === "DELEGADO" ? "DELEGADO_JE" : undefined,
-      },
+      to: (() => {
+        let toLabel: string;
+        if (audience === "AMBOS") toLabel = "Dirección Regional / Terreno";
+        else if (audience === "PESE") toLabel = "PESE";
+        else toLabel = "Delegado";
+        let toRole: string | undefined;
+        if (audience === "PESE") toRole = "PESE";
+        else if (audience === "DELEGADO") toRole = "DELEGADO_JE";
+        else toRole = undefined;
+        return { label: toLabel, role: toRole };
+      })(),
       ...(cc?.length ? { cc } : {}),
       ...(bypass?.enabled && bypass?.reason?.trim()
         ? { bypass: { enabled: true, reason: bypass.reason.trim() } }
@@ -1514,9 +3458,9 @@ export default function App(){
     const traceEv = makeInstructionTraceEvent("INSTRUCTION_CREATED", newIns.id, `Instrucción creada: ${newIns.summary.slice(0, 80)}`);
     setCases((prev) =>
       prev.map((x) =>
-        x.id !== caseId
-          ? x
-          : { ...x, instructions: [...(x.instructions ?? []), newIns], timeline: pushTimelineEvent(x.timeline ?? [], traceEv), updatedAt: nowISO() } as CaseItem
+        x.id === caseId
+          ? { ...x, instructions: [...(x.instructions ?? []), newIns], timeline: pushTimelineEvent(x.timeline ?? [], traceEv), updatedAt: nowISO() } as CaseItem
+          : x
       )
     );
     setAuditLog((prev) =>
@@ -1532,16 +3476,8 @@ export default function App(){
     const role = currentUser?.role ?? "unknown";
     const traceEv = makeInstructionTraceEvent("INSTRUCTION_ACK", instructionId, "Acuse registrado");
     setCases((prev) =>
-      prev.map((x) => {
-        if (x.id !== caseId) return x;
-        const instructions = (x.instructions ?? []).map((ins) =>
-          ins.id !== instructionId
-            ? ins
-            : {
-                ...ins,
-                acks: [...(ins.acks ?? []), { userId: currentUser.id, role, at: nowISO() }],
-              }
-        );
+      updateOneCase(prev, caseId, (x) => {
+        const instructions = addAckToInstruction(x.instructions ?? [], instructionId, currentUser.id, role);
         return { ...x, instructions, timeline: pushTimelineEvent(x.timeline ?? [], traceEv), updatedAt: nowISO() } as CaseItem;
       })
     );
@@ -1559,11 +3495,8 @@ export default function App(){
     if (ins && isClosedStatus(ins.status)) return;
     const traceEv = makeInstructionTraceEvent("INSTRUCTION_CLOSED", instructionId, "Instrucción cerrada");
     setCases((prev) =>
-      prev.map((x) => {
-        if (x.id !== caseId) return x;
-        const instructions = (x.instructions ?? []).map((ins) =>
-          ins.id !== instructionId ? ins : { ...ins, status: "CERRADA" }
-        );
+      updateOneCase(prev, caseId, (x) => {
+        const instructions = closeInstructionInList(x.instructions ?? [], instructionId);
         return { ...x, instructions, timeline: pushTimelineEvent(x.timeline ?? [], traceEv), updatedAt: nowISO() } as CaseItem;
       })
     );
@@ -1574,23 +3507,23 @@ export default function App(){
   function catalogAddLocal(nombre: string, region: string, commune: string, actor: User){
     if(!nombre?.trim())return notify(UI_TEXT.errors.nombreObligatorio,"error");
     if(!commune)return notify(UI_TEXT.errors.seleccioneComuna,"error");
-    if(localCatalog.find(l=>l.nombre===nombre&&l.region===region&&l.commune===commune))return notify(`Ya existe "${nombre}" en esa comarca`,"error");
-    const entry={idLocal:newLocalId(),nombre:nombre.trim(),region,commune,activoGlobal:true,activoEnEleccionActual:true,fechaCreacion:nowISO(),fechaDesactivacion:null,origenSeed:false};
+    if(localCatalog.some(l=>l.nombre===nombre&&l.region===region&&l.commune===commune))return notify(`Ya existe "${nombre}" en esa comarca`,"error");
+    const entry={idLocal:getNextLocalId(),nombre:nombre.trim(),region,commune,activoGlobal:true,activoEnEleccionActual:true,fechaCreacion:nowISO(),fechaDesactivacion:null,origenSeed:false};
     setLocalCatalog(prev=>[...prev,entry]);
     setAuditLog(prev=>appendEvent(prev,"LOCAL_CREATED",actor.id,actor.role,null,`Local: "${nombre}" [${region}/${commune}]`));
     notify(`Local "${nombre}" añadido`,"success");
   }
   function catalogDeactivate(idLocal: string, actor: User){
     const e=localCatalog.find(l=>l.idLocal===idLocal);
-    if(!e||!e.activoGlobal)return notify("Ya está desactivado","error");
-    setLocalCatalog(prev=>prev.map(l=>l.idLocal!==idLocal?l:{...l,activoGlobal:false,activoEnEleccionActual:false,fechaDesactivacion:nowISO()}));
+    if(!e?.activoGlobal)return notify("Ya está desactivado","error");
+    setLocalCatalog(prev=>prev.map(l=>l.idLocal===idLocal?{...l,activoGlobal:false,activoEnEleccionActual:false,fechaDesactivacion:nowISO()}:l));
     setAuditLog(prev=>appendEvent(prev,"LOCAL_DEACTIVATED",actor.id,actor.role,null,`SD: "${e.nombre}" [${idLocal}]`));
     notify(`Local "${e.nombre}" desactivado`,"warning");
   }
   function catalogReactivate(idLocal: string, actor: User){
     const e=localCatalog.find(l=>l.idLocal===idLocal);
     if(!e||e.activoGlobal)return notify("Ya está activo","error");
-    setLocalCatalog(prev=>prev.map(l=>l.idLocal!==idLocal?l:{...l,activoGlobal:true,fechaDesactivacion:null}));
+    setLocalCatalog(prev=>prev.map(l=>l.idLocal===idLocal?{...l,activoGlobal:true,fechaDesactivacion:null}:l));
     setAuditLog(prev=>appendEvent(prev,"LOCAL_REACTIVATED",actor.id,actor.role,null,`Reactivado: "${e.nombre}" [${idLocal}]`));
     notify(`Local "${e.nombre}" reactivado`,"success");
   }
@@ -1599,7 +3532,7 @@ export default function App(){
     if(!e)return;
     if(!e.activoGlobal)return notify("No se puede activar en elección: local desactivado globalmente","error");
     const next=!e.activoEnEleccionActual;
-    setLocalCatalog(prev=>prev.map(l=>l.idLocal!==idLocal?l:{...l,activoEnEleccionActual:next}));
+    setLocalCatalog(prev=>prev.map(l=>l.idLocal===idLocal?{...l,activoEnEleccionActual:next}:l));
     setAuditLog(prev=>appendEvent(prev,"LOCAL_ELECTION_TOGGLED",actor.id,actor.role,null,`"${e.nombre}": elección → ${next}`));
     notify(`"${e.nombre}": elección → ${next?"ACTIVO":"INACTIVO"}`,"success");
   }
@@ -1620,7 +3553,7 @@ export default function App(){
   }
   function loadSimCases(){
     setCases(prev=>([...simCases,...prev.filter(x=>!x.isSim)] as CaseItem[]));
-    setAuditLog(prev=>{let log=prev;for(const c of simCases)log=appendEvent(log,"CASE_CREATED","SIM","SIMULACION",c.id,`[SIM] ${c.summary}`);return log;});
+    setAuditLog(prev=>{let log=prev;for(const c of simCases){log=appendEvent(log,"CASE_CREATED","SIM","SIMULACION",c.id,`[SIM] ${c.summary}`);}return log;});
     notify("Incidentes de simulación cargados","warning");
   }
 
@@ -1628,7 +3561,7 @@ export default function App(){
     if (!currentUser) return;
     const rows=[[ "ID","Región","Comuna","Local","Criticidad","Estado",UI_TEXT.labels.bypassColumn,UI_TEXT.labels.flaggedColumn,"SnapshotID","Creado","Completitud"]];
     cases.forEach(c=>rows.push([c.id,c.region,c.commune,c.local||"—",c.criticality,c.status,c.bypass?"SÍ":"No",c.bypassFlagged?UI_TEXT.states.flaggedShort:"—",c.localSnapshot?.idLocal||"—",fmtDate(c.createdAt),(c.completeness ?? 0)+"%"]));
-    const csv=rows.map(r=>r.map(x=>`"${String(x).replace(/"/g,'""')}"`).join(",")).join("\n");
+    const csv=rows.map(r=>r.map(x=>`"${String(x).replaceAll('"', '""')}"`).join(",")).join("\n");
     const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download="SCCE_casos.csv";a.click();
     setAuditLog(prev=>appendEvent(prev,"EXPORT_DONE",currentUser.id,currentUser.role,null,"Export CSV"));
     notify("CSV exportado");
@@ -1668,152 +3601,42 @@ export default function App(){
     if (!currentUser) return;
     importJsonInputRef.current?.click();
   }
-  function importJSONSelected(e: React.ChangeEvent<HTMLInputElement>){
+  async function importJSONSelected(e: React.ChangeEvent<HTMLInputElement>){
     if (!currentUser) return;
-    const file=e.target.files?.[0]??null;
-    e.target.value="";
+    const file = e.target.files?.[0] ?? null;
+    e.target.value = "";
     if (!file) return;
-    const MAX_BYTES=5*1024*1024; // 5 MB
-    if (file.size>MAX_BYTES){
-      alert(`Import JSON bloqueado: ${(file.size/(1024*1024)).toFixed(2)} MB excede el máximo de ${(MAX_BYTES/(1024*1024)).toFixed(0)} MB.`);
-      return;
-    }
-    const reader=new FileReader();
-    reader.onerror=()=>{alert("Import JSON falló: no se pudo leer el archivo.");};
-    reader.onload=()=>{
-      try {
-        const text=typeof reader.result==="string"?reader.result:"";
-        const parsed=JSON.parse(text) as unknown;
-        if (!parsed||typeof parsed!=="object"||Array.isArray(parsed)){
-          alert("Import JSON bloqueado: estructura inválida (se esperaba objeto raíz).");
-          return;
-        }
-        const root=parsed as Record<string, unknown>;
-        const metadata=root["metadata"];
-        const casesIn=root["cases"];
-        if (!metadata||typeof metadata!=="object"||Array.isArray(metadata)){
-          alert("Import JSON bloqueado: 'metadata' no es un objeto válido.");
-          return;
-        }
-        const meta=metadata as Record<string, unknown>;
-        if (meta.schemaVersion!==1) importFail("Import fail-closed: metadata.schemaVersion debe ser 1.");
-        if (!Array.isArray(casesIn)){
-          alert("Import JSON bloqueado: 'cases' no es un array.");
-          return;
-        }
-        if (casesIn.length>MAX_CASES){
-          alert(`Import JSON bloqueado: 'cases' excede el máximo de ${MAX_CASES}.`);
-          return;
-        }
-        const totalSize=JSON.stringify(casesIn).length;
-        if (totalSize>MAX_TOTAL_PAYLOAD_BYTES) importFail(`Import fail-closed: tamaño total de payload excede máximo (${MAX_TOTAL_PAYLOAD_BYTES} bytes).`);
-        const seen=new Set<string>();
-        for (let i=0;i<casesIn.length;i++){
-          const c=casesIn[i] as Record<string, unknown>;
-          const id=assertIdStable(c?.id);
-          if (seen.has(id)) importFail(`Import fail-closed: case.id duplicado "${id}".`);
-          seen.add(id);
-          assertStringMax(`cases[${i}].region`,c?.region,MAX_SHORT,false);
-          assertStringMax(`cases[${i}].commune`,c?.commune,MAX_SHORT,false);
-          assertStringMax(`cases[${i}].summary`,c?.summary,MAX_LONG,false);
-          assertStringMax(`cases[${i}].local`,c?.local,MAX_MED,true);
-          assertStringMax(`cases[${i}].detail`,c?.detail,MAX_LONG,true);
-          assertStringMax(`cases[${i}].assignedTo`,c?.assignedTo,MAX_MED,true);
-          assertStringMax(`cases[${i}].closingMotivo`,c?.closingMotivo,MAX_LONG,true);
-          assertStringMax(`cases[${i}].bypassMotivo`,c?.bypassMotivo,MAX_LONG,true);
-          assertStringMax(`cases[${i}].bypassActor`,c?.bypassActor,MAX_MED,true);
-          assertStringMax(`cases[${i}].createdBy`,c?.createdBy,MAX_MED,true);
-          if (c?.evidence!==undefined&&c?.evidence!==null){
-            if (!Array.isArray(c.evidence)) importFail(`Import fail-closed: cases[${i}].evidence debe ser arreglo.`);
-            if ((c.evidence as unknown[]).length>MAX_EVIDENCE_ITEMS) importFail(`Import fail-closed: cases[${i}].evidence excede máximo (${MAX_EVIDENCE_ITEMS}).`);
-            for (let j=0;j<(c.evidence as unknown[]).length;j++){
-              assertStringMax(`cases[${i}].evidence[${j}]`,(c.evidence as unknown[])[j],MAX_LONG,false);
-            }
-          }
-          const orig=c?.origin as Record<string, unknown>|undefined;
-          if (orig){
-            assertStringMax(`cases[${i}].origin.actor`,orig.actor,MAX_MED,true);
-            assertStringMax(`cases[${i}].origin.channel`,orig.channel,MAX_MED,true);
-            assertStringMax(`cases[${i}].origin.detectedAt`,orig.detectedAt,MAX_SHORT,true);
-            assertIsoSoft(`cases[${i}].origin.detectedAt`,orig.detectedAt,true);
-          }
-          const snap=c?.localSnapshot as Record<string, unknown>|undefined;
-          if (snap){
-            assertStringMax(`cases[${i}].localSnapshot.idLocal`,snap.idLocal,MAX_ID,true);
-            assertStringMax(`cases[${i}].localSnapshot.nombre`,snap.nombre,MAX_LONG,true);
-            assertStringMax(`cases[${i}].localSnapshot.region`,snap.region,MAX_SHORT,true);
-            assertStringMax(`cases[${i}].localSnapshot.commune`,snap.commune,MAX_SHORT,true);
-            assertStringMax(`cases[${i}].localSnapshot.snapshotAt`,snap.snapshotAt,MAX_SHORT,true);
-            assertIsoSoft(`cases[${i}].localSnapshot.snapshotAt`,snap.snapshotAt,true);
-          }
-          const tl=assertArrayMax(`cases[${i}].timeline`,c?.timeline,MAX_TIMELINE,true);
-          if (tl){ for (let j=0;j<tl.length;j++){ assertCaseEvent(`cases[${i}].timeline[${j}]`,tl[j]); assertIsoSoft(`cases[${i}].timeline[${j}].at`,(tl[j] as Record<string, unknown>).at,false); } }
-          const acts=assertArrayMax(`cases[${i}].actions`,c?.actions,MAX_UNKNOWN_ARRAY,true);
-          if (acts){ for (let j=0;j<acts.length;j++) assertUnknownItemKind(`cases[${i}].actions[${j}]`,acts[j]); }
-          const decs=assertArrayMax(`cases[${i}].decisions`,c?.decisions,MAX_UNKNOWN_ARRAY,true);
-          if (decs){ for (let j=0;j<decs.length;j++) assertUnknownItemKind(`cases[${i}].decisions[${j}]`,decs[j]); }
-          const eh=assertArrayMax(`cases[${i}].evaluationHistory`,c?.evaluationHistory,MAX_UNKNOWN_ARRAY,true);
-          if (eh){ for (let j=0;j<eh.length;j++) assertUnknownItemKind(`cases[${i}].evaluationHistory[${j}]`,eh[j]); }
-          const insArr=assertArrayMax(`cases[${i}].instructions`,(c as Record<string, unknown>)?.instructions,MAX_TIMELINE,true);
-          if (insArr){
-            for (let j=0;j<insArr.length;j++){
-              const ins=insArr[j] as Record<string, unknown>;
-              assertStringMax(`cases[${i}].instructions[${j}].id`,ins?.id,MAX_ID,true);
-              assertStringMax(`cases[${i}].instructions[${j}].caseId`,ins?.caseId,MAX_ID,true);
-              assertStringMax(`cases[${i}].instructions[${j}].scope`,ins?.scope,MAX_SHORT,false);
-              assertStringMax(`cases[${i}].instructions[${j}].audience`,ins?.audience,MAX_SHORT,false);
-              assertStringMax(`cases[${i}].instructions[${j}].summary`,ins?.summary,MAX_LONG,false);
-              assertStringMax(`cases[${i}].instructions[${j}].details`,ins?.details,MAX_LONG,true);
-              assertStringMax(`cases[${i}].instructions[${j}].createdAt`,ins?.createdAt,MAX_SHORT,false);
-              assertIsoSoft(`cases[${i}].instructions[${j}].createdAt`,ins?.createdAt,false);
-              assertStringMax(`cases[${i}].instructions[${j}].createdBy`,ins?.createdBy,MAX_MED,false);
-              assertStringMax(`cases[${i}].instructions[${j}].status`,ins?.status,MAX_SHORT,false);
-              if (ins?.ackRequired!==true) importFail(`Import fail-closed: cases[${i}].instructions[${j}].ackRequired debe ser true.`);
-              const acks=assertArrayMax(`cases[${i}].instructions[${j}].acks`,ins?.acks,MAX_TIMELINE,false);
-              if (!acks) importFail(`Import fail-closed: cases[${i}].instructions[${j}].acks debe ser arreglo.`);
-              for (let k=0;k<acks.length;k++){
-                const ack=acks[k] as Record<string, unknown>;
-                assertStringMax(`cases[${i}].instructions[${j}].acks[${k}].userId`,ack?.userId,MAX_MED,false);
-                assertStringMax(`cases[${i}].instructions[${j}].acks[${k}].role`,ack?.role,MAX_SHORT,false);
-                assertStringMax(`cases[${i}].instructions[${j}].acks[${k}].at`,ack?.at,MAX_SHORT,false);
-                assertIsoSoft(`cases[${i}].instructions[${j}].acks[${k}].at`,ack?.at,false);
-              }
-              const ev=assertArrayMax(`cases[${i}].instructions[${j}].evidence`,ins?.evidence,MAX_EVIDENCE_ITEMS,true);
-              if (ev){ for (let k=0;k<ev.length;k++){ assertStringMax(`cases[${i}].instructions[${j}].evidence[${k}]`,ev[k],MAX_LONG,false); } }
-            }
-          }
-          assertIsoSoft(`cases[${i}].reportedAt`,c?.reportedAt,true);
-          assertIsoSoft(`cases[${i}].firstActionAt`,c?.firstActionAt,true);
-          assertIsoSoft(`cases[${i}].escalatedAt`,c?.escalatedAt,true);
-          assertIsoSoft(`cases[${i}].mitigatedAt`,c?.mitigatedAt,true);
-          assertIsoSoft(`cases[${i}].resolvedAt`,c?.resolvedAt,true);
-          assertIsoSoft(`cases[${i}].closedAt`,c?.closedAt,true);
-          assertIsoSoft(`cases[${i}].createdAt`,c?.createdAt,true);
-          assertIsoSoft(`cases[${i}].updatedAt`,c?.updatedAt,true);
-        }
-        const hasExisting=Array.isArray(cases)&&cases.length>0;
-        if (hasExisting){
-          const ok=confirm("Vas a reemplazar los casos actuales por el contenido del JSON. ¿Continuar?");
-          if (!ok){alert("Import cancelado: no se realizaron cambios.");return;}
-          const typed=prompt("Escribe IMPORTAR para confirmar el reemplazo total:");
-          if ((typed??"").trim()!=="IMPORTAR"){alert("Import cancelado: no se realizaron cambios.");return;}
-        }
-        const migrated=migrateLegacyInstructionsInCases(casesIn as CaseItem[]);
-        setCases(migrated);
-        setAuditLog(prev=>appendEvent(prev,"IMPORT_DONE",currentUser.id,currentUser.role,null,"Import JSON"));
-        notify("JSON importado");
-      } catch (err) {
-        alert(err instanceof Error ? err.message : "Import JSON bloqueado: JSON inválido (no se pudo interpretar).");
+    try {
+      const text = await parseImportFile(file);
+      const parsed = JSON.parse(text) as unknown;
+      const { casesIn } = validateImportRoot(parsed);
+      const seen = new Set<string>();
+      for (let i = 0; i < casesIn.length; i++) {
+        const c = casesIn[i] as Record<string, unknown>;
+        const id = assertIdStable(c?.id);
+        if (seen.has(id)) importFail(`Import fail-closed: case.id duplicado "${id}".`);
+        seen.add(id);
+        validateImportCase(c, i);
       }
-    };
-    reader.readAsText(file);
+      const hasExisting = Array.isArray(cases) && cases.length > 0;
+      if (hasExisting && !confirmImportReplace()) {
+        alert("Import cancelado: no se realizaron cambios.");
+        return;
+      }
+      const migrated = migrateLegacyInstructionsInCases(casesIn as CaseItem[]);
+      setCases(migrated);
+      setAuditLog(prev => appendEvent(prev, "IMPORT_DONE", currentUser.id, currentUser.role, null, "Import JSON"));
+      notify("JSON importado");
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Import JSON bloqueado: JSON inválido (no se pudo interpretar).");
+    }
   }
   function exportAuditCSV(){
     if (!currentUser) return;
     const{ok,failIndex}=chainResult;
     const rows=[["EventID","Tipo","Timestamp","Actor","Rol","CaseID","Resumen","Hash","Verificacion"]];
     auditLog.forEach((e,i)=>{const u=USERS.find(u=>u.id===e.actor);rows.push([e.eventId,e.type,e.at,u?.name||e.actor,e.role,e.caseId||"",e.summary,e.hash,!ok&&i===failIndex?"FALLA":"OK"]);});
-    const csv=rows.map(r=>r.map(x=>`"${String(x).replace(/"/g,'""')}"`).join(",")).join("\n");
+    const csv=rows.map(r=>r.map(x=>`"${String(x).replaceAll('"', '""')}"`).join(",")).join("\n");
     const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download="SCCE_auditoria.csv";a.click();
     setAuditLog(prev=>appendEvent(prev,"EXPORT_DONE",currentUser.id,currentUser.role,null,"Export CSV auditoría"));
     notify("Auditoría exportada");
@@ -1822,2028 +3645,436 @@ export default function App(){
     const ca=auditLog.filter(e=>e.caseId===c.id);
     const div=checkLocalDivergence(c,localCatalog);
     const regionsMap = CONFIG.regions as Record<string, { name?: string; communes?: Record<string, { name?: string }> }>;
-    const txt=`SCCE v${APP_VERSION} — REPORTE DE CASO\nID: ${c.id}\nElección: ${electionConfig.name} · ${electionConfig.date}\nRegión: ${regionsMap[c.region]?.name}\nComuna: ${regionsMap[c.region]?.communes?.[c.commune]?.name||c.commune}\nLocal: ${c.local||"—"}\nSnapshot: ${c.localSnapshot?`${c.localSnapshot.nombre} [${c.localSnapshot.idLocal}] @ ${fmtDate(c.localSnapshot.snapshotAt)}`:"sin snapshot"}\n${div?`⚠️ DIVERGENCIA: ${div.msg}\n`:""}\nCRITICIDAD: ${c.criticality} (${c.criticalityScore}/15)\nESTADO: ${c.status}\n${UI_TEXT.misc.reporteBypassLabel}: ${c.bypass?`SÍ — ${c.bypassMotivo}`:"No"}\n\nRESUMEN: ${c.summary}\nDETALLE: ${c.detail||"—"}\n\nACCIONES:\n${(c.actions as { action?: string; result?: string }[]).map((a: { action?: string; result?: string })=>`• ${a.action} → ${a.result||"—"}`).join("\n")||"—"}\n\nDECISIONES:\n${(c.decisions as { who?: string; fundament?: string }[]).map((d: { who?: string; fundament?: string })=>`• ${USERS.find(u=>u.id===d.who)?.name}: ${d.fundament}`).join("\n")||"—"}\n\nAUDITORÍA (${ca.length} eventos):\n${ca.map(e=>`[${e.at}] ${e.type} | ${USERS.find(u=>u.id===e.actor)?.name||e.actor} | ${e.summary} | ${e.hash}`).join("\n")||"—"}\n\nGenerado: ${nowISO()}\nSCCE v${APP_VERSION} — SERVEL Chile`;
+    const regionName = regionsMap[c.region]?.name ?? "";
+    const communeName = regionsMap[c.region]?.communes?.[c.commune]?.name || c.commune;
+    const snapshotLine = c.localSnapshot
+      ? `${c.localSnapshot.nombre} [${c.localSnapshot.idLocal}] @ ${fmtDate(c.localSnapshot.snapshotAt)}`
+      : "sin snapshot";
+    const divLine = div ? `⚠️ DIVERGENCIA: ${div.msg}\n` : "";
+    const bypassLine = c.bypass ? `SÍ — ${c.bypassMotivo}` : "No";
+    const actionsBlock = (c.actions as { action?: string; result?: string }[])?.length
+      ? (c.actions as { action?: string; result?: string }[]).map((a: { action?: string; result?: string }) => `• ${a.action} → ${a.result||"—"}`).join("\n")
+      : "—";
+    const decisionsBlock = (c.decisions as { who?: string; fundament?: string }[])?.length
+      ? (c.decisions as { who?: string; fundament?: string }[]).map((d: { who?: string; fundament?: string }) => `• ${USERS.find(u=>u.id===d.who)?.name}: ${d.fundament}`).join("\n")
+      : "—";
+    const auditBlock = ca.length ? ca.map(e=>`[${e.at}] ${e.type} | ${USERS.find(u=>u.id===e.actor)?.name||e.actor} | ${e.summary} | ${e.hash}`).join("\n") : "—";
+    const txt = [
+      `SCCE v${APP_VERSION} — REPORTE DE CASO`,
+      `ID: ${c.id}`,
+      `Elección: ${electionConfig.name} · ${electionConfig.date}`,
+      `Región: ${regionName}`,
+      `Comuna: ${communeName}`,
+      `Local: ${c.local||"—"}`,
+      `Snapshot: ${snapshotLine}`,
+      divLine,
+      `CRITICIDAD: ${c.criticality} (${c.criticalityScore}/15)`,
+      `ESTADO: ${c.status}`,
+      `${UI_TEXT.misc.reporteBypassLabel}: ${bypassLine}`,
+      "",
+      `RESUMEN: ${c.summary}`,
+      `DETALLE: ${c.detail||"—"}`,
+      "",
+      `${UI_TEXT_GOVERNANCE.sections.actions.toUpperCase()}:\n${actionsBlock}`,
+      "",
+      `${UI_TEXT_GOVERNANCE.sections.decisions.toUpperCase()}:\n${decisionsBlock}`,
+      "",
+      `AUDITORÍA (${ca.length} eventos):\n${auditBlock}`,
+      "",
+      `Generado: ${nowISO()}`,
+      `SCCE v${APP_VERSION} — SERVEL Chile`,
+    ].join("\n");
     const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([txt],{type:"text/plain"}));a.download=`SCCE_${c.id}.txt`;a.click();
     notify("Reporte exportado");
   }
 
-  function isFixedLocalRole(u: { role?: string } | null | undefined): boolean {
-    const r = String(u?.role ?? "").toUpperCase();
-    return r === "PESE" || r === "DELEGADO_JE";
-  }
-
-  function getCaseLocalIdSafe(c: { localScope?: string; localRef?: { idLocal?: string }; localSnapshot?: { idLocal?: string } | null }, localCatalogById: Map<string, unknown>): string | null {
-    if (c?.localScope === "REGIONAL") return null;
-    const raw = (c as { localRef?: { idLocal?: string }; localSnapshot?: { idLocal?: string } | null })?.localRef?.idLocal ?? (c as { localSnapshot?: { idLocal?: string } | null })?.localSnapshot?.idLocal ?? null;
-    if (!raw) return null;
-    const id = String(raw);
-    return localCatalogById.has(id) ? id : null;
-  }
+  const fixedLocalRole = isFixedLocalRoleModule(currentUser);
 
   const localCatalogById = useMemo(() => new Map(localCatalog.map((e) => [e.idLocal, e])), [localCatalog]);
 
-  const fixedLocalRole = isFixedLocalRole(currentUser);
-
-  const assignedLocalIdEffective = useMemo(() => {
-    if (!fixedLocalRole) return null;
-    const explicit = currentUser?.assignedLocalId != null ? String(currentUser.assignedLocalId) : null;
-    if (explicit && localCatalogById.has(explicit)) return explicit;
-    const fallback = localCatalog.find((e) => e.activoGlobal && e.region === currentUser?.region && e.commune === currentUser?.commune)?.idLocal ?? null;
-    return fallback && localCatalogById.has(fallback) ? fallback : null;
-  }, [fixedLocalRole, currentUser?.assignedLocalId, currentUser?.region, currentUser?.commune, localCatalog, localCatalogById]);
+  const assignedLocalIdEffective = useMemo(
+    () => computeAssignedLocalIdEffective(fixedLocalRole, currentUser, localCatalog, localCatalogById),
+    [fixedLocalRole, currentUser, localCatalog, localCatalogById]
+  );
 
   const assignedLocal = useMemo(() => {
     if (!assignedLocalIdEffective) return null;
-    return (localCatalogById.get(assignedLocalIdEffective) as LocalCatalogEntry | undefined) ?? null;
+    return localCatalogById.get(assignedLocalIdEffective) ?? null;
   }, [assignedLocalIdEffective, localCatalogById]);
 
   const assignedCommuneEffective = assignedLocal?.commune ?? "";
 
-  useEffect(() => {
-    if (!fixedLocalRole) return;
-    const next = assignedCommuneEffective || "";
-    setFilterState((p) => {
-      if ((p.commune || "") === next) return p;
-      return { ...p, commune: next };
+  const startNewCase = useCallback(() => {
+    if (!currentUser) return;
+    startNewCaseImpl({
+      currentUser,
+      activeRegion,
+      assignedCommuneEffective,
+      assignedLocal,
+      setNewCase,
+      setEvalForm,
+      setBypassForm,
+      setStep,
+      setView: setViewAndCloseHelp,
+      nowLocalInput,
     });
-  }, [fixedLocalRole, assignedCommuneEffective]);
+  }, [currentUser, activeRegion, assignedCommuneEffective, assignedLocal, setNewCase, setEvalForm, setBypassForm, setStep, setViewAndCloseHelp, nowLocalInput]);
 
-  const visibleCases = useMemo(() => cases.filter((c) => {
-    if (fixedLocalRole) {
-      if (!assignedLocalIdEffective || !localCatalogById.has(assignedLocalIdEffective)) return false;
-      const cid = getCaseLocalIdSafe(c, localCatalogById);
-      if (cid !== assignedLocalIdEffective) return false;
-    }
+  const submitCase = useCallback(async () => {
+    if (!currentUser || !newCase) return;
+    await submitNewCaseImpl({
+      newCase,
+      currentUser,
+      localCatalog,
+      evalForm,
+      bypassForm,
+      cases,
+      activeRegion,
+      authToken,
+      assignedCommuneEffective,
+      assignedLocalIdEffective,
+      notify,
+      setCases,
+      setAuditLog,
+      setView: setViewAndCloseHelp,
+      setNewCase,
+    });
+  }, [newCase, currentUser, localCatalog, evalForm, bypassForm, cases, activeRegion, authToken, assignedCommuneEffective, assignedLocalIdEffective, notify, setCases, setAuditLog, setViewAndCloseHelp, setNewCase]);
 
-    // filtro por región (si el usuario eligió una región, o comuna sin región → usar activeRegion)
-    const regionToFilter = filterState.region || (isCentral && filterState.commune && activeRegion ? activeRegion : null);
-    if (regionToFilter) {
-      const caseRegion =
-        (c as { region?: string; regionCode?: string }).regionCode ??
-        (c as { region?: string; regionCode?: string }).region ??
-        null;
+  // Filtro efectivo: con rol local fijo la comuna se deriva de assignedCommuneEffective (evita setState en effect)
+  const effectiveFilterState = useMemo(() => {
+    if (!fixedLocalRole) return filterState;
+    const nextCommune = assignedCommuneEffective || "";
+    if ((filterState.commune || "") === nextCommune) return filterState;
+    return { ...filterState, commune: nextCommune };
+  }, [fixedLocalRole, assignedCommuneEffective, filterState]);
 
-      // si el caso no tiene región, NO debe pasar el filtro
-      if (!caseRegion) return false;
-
-      if (caseRegion !== regionToFilter) return false;
-    }
-
-    if (!isFixedLocalRole(currentUser)) {
-      if (!canDo("viewAll", currentUser, c)) {
-        if (c.createdBy !== currentUser?.id && c.assignedTo !== currentUser?.id) return false;
-      }
-    }
-
-    if (filterState.criticality && c.criticality !== filterState.criticality) return false;
-    if (filterState.status) {
-      const cs = normalizeStatus(c.status);
-      const fs = normalizeStatus(filterState.status);
-      if (cs !== fs) return false;
-    }
-    if (filterState.commune && c.commune !== filterState.commune) return false;
-
-    if (filterState.search) {
-      const q = filterState.search.toLowerCase();
-      const localText = (c.local || "") + " " + ((c as { localSnapshot?: { nombre?: string }; localRef?: { label?: string } }).localSnapshot?.nombre || "") + " " + ((c as { localRef?: { label?: string } }).localRef?.label || "");
-      if (!String(c.summary ?? "").toLowerCase().includes(q) && !String(c.id ?? "").toLowerCase().includes(q) && !localText.toLowerCase().includes(q)) return false;
-    }
-
-    return true;
-  }), [cases, currentUser, activeRegion, filterState, fixedLocalRole, assignedLocalIdEffective, localCatalogById, isCentral]);
+  const visibleCases = useMemo(
+    () =>
+      cases.filter((c) =>
+        isCaseVisible(c, {
+          currentUser,
+          activeRegion,
+          filterState: effectiveFilterState,
+          fixedLocalRole,
+          assignedLocalIdEffective,
+          localCatalogById,
+          isCentral,
+        })
+      ),
+    [cases, currentUser, activeRegion, effectiveFilterState, fixedLocalRole, assignedLocalIdEffective, localCatalogById, isCentral]
+  );
 
   const metrics=useMemo(()=>({
     total:visibleCases.length,
     critica:visibleCases.filter(c=>c.criticality==="CRITICA").length,
     alta:visibleCases.filter(c=>c.criticality==="ALTA").length,
     open:visibleCases.filter(c=>!["Resuelto","Cerrado"].includes(normalizeStatus(c.status))).length,
-    avgComp:visibleCases.length?Math.round(visibleCases.reduce((s,c)=>s+(c.completeness ?? 0),0)/visibleCases.length):0,
+    slaVencido:visibleCases.filter(c=>isSlaVencido(c)).length,
     flagged:visibleCases.filter(c=>c.bypassFlagged&&!c.bypassValidated).length,
   }),[visibleCases]);
 
-  // ─── SUB-COMPONENTS ───────────────────────────────────────────────────────
-  const SlaBadge = ({ c }: { c: CaseItem }) =>
-    isSlaVencido(c) ? (
-      <Badge style={{ ...S.badge(themeColor("danger")) }} size="xs">
-        SLA VENCIDO
-      </Badge>
-    ) : null;
-
-  const RecBadge = ({
-    c,
-    variant = "FULL",
-  }: {
-    c: CaseItem;
-    variant?: "FULL" | "OP";
-  }) => {
-    const rec = getRecommendation(c, variant);
-    const showTip = variant === "FULL";
-
-    const badgeEl = (
-      <Badge
-        style={{
-          ...S.badge(recColor(rec.level as RecLevel)),
-          cursor: showTip ? "help" : "default",
-        }}
-        size="xs"
-      >
-        {rec.icon} {rec.label}
-      </Badge>
-    );
-
-    if (!showTip) return badgeEl;
-
-    return (
-      <Tooltip
-        placement="bottom-start"
-        maxWidth={280}
-        panelStyle={{
-          background: themeColor("bgSurface"),
-          color: themeColor("textPrimary"),
-          border: "1px solid #e5e7eb",
-        }}
-        content={
-          <div>
-            <div style={{ fontWeight: 800, marginBottom: 4, color: themeColor("white") }}>
-              {rec.text}
-            </div>
-            <div style={{ color: themeColor("mutedAlt") }}>{rec.reason}</div>
-          </div>
-        }
-      >
-        {badgeEl}
-      </Tooltip>
-    );
-  };
-
-  const DivBadge = ({ c }: { c: CaseItem }) => {
-    const div = checkLocalDivergence(c, localCatalog);
-    if (!div) return null;
-
-    return (
-      <Tooltip
-        placement="bottom-start"
-        maxWidth={300}
-        panelStyle={{
-          background: themeColor("orangeBlock"),
-          color: themeColor("textPrimary"),
-          border: "1px solid #f9731644",
-        }}
-        content={
-          <div>
-            <div style={{ fontWeight: 800, marginBottom: 4, color: themeColor("warning") }}>
-              ⚡ Divergencia de catálogo
-            </div>
-            <div style={{ color: themeColor("mutedAlt") }}>{div.msg}</div>
-            <div style={{ color: themeColor("muted"), marginTop: 4, fontSize: "10px" }}>
-              El caso es válido. Revisar estado operacional del local.
-            </div>
-          </div>
-        }
-      >
-        <Badge style={{ ...S.badge(themeColor("warning")), cursor: "help" }} size="xs">
-          ⚡ CAT
-        </Badge>
-      </Tooltip>
-    );
-  };
-
-  const ClosedOverlay=()=>(
-    <div style={{position:"absolute",inset:0,background:"rgba(15,17,23,.82)",zIndex:50,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:"6px"}}>
-      <div style={{background:themeColor("bgSurface"),border:"1px solid #e5e7eb",borderRadius:"6px",padding:"14px 24px",textAlign:"center"}}>
-        <div style={{fontWeight:700,color:themeColor("mutedAlt")}}>🔒 REGISTRO CERRADO</div>
-        <div style={{fontSize:"11px",color:themeColor("mutedDark"),marginTop:3}}>Solo lectura</div>
-      </div>
-    </div>
-  );
-
-  const CaseCard=({c,onClick}:{c:CaseItem;onClick:()=>void})=>{
-    const div=checkLocalDivergence(c,localCatalog);
-    return(
-      <div style={{...S.card,cursor:"pointer",borderLeft:`3px solid ${critColor(c.criticality)}`,marginBottom:6,position:"relative"}} onClick={onClick}>
-        {div&&<div style={{position:"absolute",top:0,right:0,width:3,bottom:0,background:themeColor("warning"),borderRadius:"0 6px 6px 0"}}/>}
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3,flexWrap:"wrap",gap:4}}>
-          <span style={{fontSize:"11px",color:themeColor("muted"),fontFamily:"monospace"}}>{c.id}</span>
-          <span style={{ opacity: 0.8, marginLeft: 8, fontSize: "11px", color: themeColor("muted") }}>
-            Región: {c.region ?? (c as { regionCode?: string }).regionCode ?? "—"}
-          </span>
-          <div style={{display:"flex",gap:4,alignItems:"center",flexWrap:"wrap"}}>
-            {c.bypassFlagged&&!c.bypassValidated&&(
-              <Badge style={{...S.badge(themeColor("danger")),fontSize:"9px"}} size="xs">⚠️ {UI_TEXT.states.modoUrgente}</Badge>
-            )}
-            {c.isSim&&(
-              <Badge style={{...S.badge(themeColor("purple")),fontSize:"9px"}} size="xs">SIM</Badge>
-            )}
-            <SlaBadge c={c}/><RecBadge c={c}/><DivBadge c={c}/>
-            <Badge style={S.badge(critColor(c.criticality))} size="sm">{c.criticality}</Badge>
-            <Badge style={S.badge(statusColor(normalizeStatus(c.status) as CaseStatus))} size="sm">
-              {normalizeStatus(c.status) === "Otros / Desconocido" ? String(c.status) : normalizeStatus(c.status)}
-            </Badge>
-          </div>
-        </div>
-        <div style={{fontWeight:600,marginBottom:4}}>{c.summary}</div>
-        <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
-          <span style={{fontSize:"10px",background:themeColor("infoBg"),color:themeColor("infoText"),border:"1px solid #93c5fd",borderRadius:"3px",padding:"1px 7px",fontWeight:600}}>🏫 {c.local||"—"}</span>
-          <span style={{fontSize:"10px",color:themeColor("mutedDark")}}>{(CONFIG.regions as Record<string,{communes?:Record<string,{name?:string}>}>)[c.region]?.communes?.[c.commune]?.name||c.commune}</span>
-        </div>
-        <div style={{display:"flex",gap:10,color:themeColor("muted"),fontSize:"11px",flexWrap:"wrap",alignItems:"center"}}>
-          <span>🕐 {fmtDate(c.createdAt)}</span>
-          {(()=>{const comp=c.completeness??0;return <span style={{color:comp>=80?themeColor("success"):comp>=50?themeColor("warningAlt"):themeColor("danger")}}>✓ {comp}%</span>;})()}
-          {canDo("recepcionar",currentUser,c)&&c.status==="Nuevo"&&!c.bypass&&(
-            <button style={{...S.btn("primary"),fontSize:"10px",padding:"1px 8px"}} onClick={e=>{e.stopPropagation();recepcionar(c.id);}}>Recepcionar</button>
-          )}
-        </div>
-      </div>
-    );
-  };
-
-  // ─── GATE A: LOGIN ───────────────────────────────────────────────────────
-  if (!authToken) {
-    return (
-      <div style={{ ...S.app, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <style>{`.tipWrap:hover .tip{display:block!important}`}</style>
-
-        <div style={{ ...S.card, width: 360 }}>
-          <div style={{ textAlign: "center", marginBottom: 16 }}>
-            <div style={{ fontSize: "24px", fontWeight: 800, color: themeColor("primary"), letterSpacing: 1 }}>SCCE</div>
-            <div style={{ color: themeColor("mutedDark"), fontSize: "12px" }}>Sistema de Comunicación de Contingencias Electorales</div>
-            <div style={{ color: themeColor("mutedDarker"), fontSize: "10px", marginTop: 2 }}>v{APP_VERSION} · SERVEL Chile</div>
-            <div style={{ color: themeColor("muted"), fontSize: "10px", marginTop: 6 }}>
-              API: <span style={{ fontFamily: "monospace" }}>{API_BASE_URL}</span>
-            </div>
-          </div>
-
-          <div style={{ marginBottom: 8 }}>
-            <label style={S.lbl}>Email</label>
-            <input
-              style={S.inp}
-              value={loginForm.email}
-              onChange={e => setLoginForm(p => ({ ...p, email: e.target.value }))}
-              onKeyDown={e => e.key === "Enter" && !authBusy && doLogin()}
-            />
-          </div>
-
-          <div style={{ marginBottom: 12 }}>
-            <label style={S.lbl}>Contraseña</label>
-            <div style={{ display: "flex", alignItems: "stretch", gap: 6 }}>
-              <input
-                style={{ ...S.inp, flex: 1, minWidth: 0 }}
-                type={showPassword ? "text" : "password"}
-                value={loginForm.password}
-                onChange={e => setLoginForm(p => ({ ...p, password: e.target.value }))}
-                onKeyDown={e => e.key === "Enter" && !authBusy && doLogin()}
-              />
-              <button
-                type="button"
-                aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
-                style={{
-                  ...S.inp,
-                  width: 44,
-                  minWidth: 44,
-                  padding: "6px 8px",
-                  flexShrink: 0,
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: "18px",
-                }}
-                onClick={() => setShowPassword(prev => !prev)}
-                title={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
-              >
-                {showPassword ? "🙈" : "👁"}
-              </button>
-            </div>
-          </div>
-
-          {(loginErr || ctxErr) && (
-            <div style={{ color: themeColor("danger"), fontSize: "11px", marginBottom: 8 }}>
-              {loginErr || ctxErr}
-            </div>
-          )}
-
-          <button
-            style={{ ...S.btn("primary"), width: "100%", padding: "8px", opacity: authBusy ? 0.7 : 1 }}
-            disabled={authBusy}
-            onClick={doLogin}
-          >
-            {authBusy ? "Ingresando..." : "Ingresar"}
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // ─── GATE B: SELECTOR DE CONTEXTO ────────────────────────────────────────
-  if (!activeMembership) {
-    return (
-      <div style={{ ...S.app, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <div style={{ ...S.card, width: 520 }}>
-          <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 6 }}>Seleccionar contexto</div>
-          <div style={{ color: themeColor("muted"), fontSize: 11, marginBottom: 12 }}>
-            Debes seleccionar un contexto antes de continuar.
-          </div>
-
-          {ctxErr && <div style={{ color: themeColor("danger"), fontSize: "11px", marginBottom: 8 }}>{ctxErr}</div>}
-
-          {memberships.length === 0 ? (
-            <div style={{ color: themeColor("mutedAlt"), fontSize: 11 }}>
-              Cargando contextos...
-            </div>
-          ) : (
-            <div style={{ display: "grid", gap: 8 }}>
-              {memberships.map(m => {
-                const scopeList = m.regionScopeMode === "LIST" && Array.isArray(m.regionScope) && m.regionScope.length
-                  ? m.regionScope
-                  : [];
-                const regionLabels = scopeList.map(code => (CONFIG.regions as Record<string, { name?: string }>)[code]?.name ?? code).join(", ") || (m.regionScopeMode === "ALL" ? "Todas las regiones" : null);
-                const regionText = regionLabels ? ` · ${regionLabels}` : "";
-                return (
-                  <button
-                    key={m.id}
-                    style={{ ...S.btn("dark"), justifyContent: "space-between", display: "flex", alignItems: "center" }}
-                    onClick={() => {
-                      setActiveMembership(m);
-                      setActiveMembershipState(m);
-                      setAuditLog(prev => appendEvent(prev, "CONTEXT_SET", "api", "API", null, `Contexto ${m.contextType}/${m.contextId} (${m.role})`));
-                    }}
-                  >
-                    <span style={{ fontSize: 12, fontWeight: 700 }}>
-                      {m.contextType} / {m.contextId}{regionText}
-                    </span>
-                    <Badge style={{ ...S.badge(themeColor("blueDark")) }} size="xs">
-                    {m.role}
-                  </Badge>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
-          <div style={{ marginTop: 12, borderTop: "1px solid #e5e7eb", paddingTop: 10, display: "flex", justifyContent: "space-between" }}>
-            <span style={{ color: themeColor("muted"), fontSize: 10 }}>{apiUser?.email ?? ""}</span>
-            <button
-              style={{ ...S.btn("dark"), fontSize: "11px" }}
-              onClick={() => {
-                clearSession();
-                setAuthToken(null);
-                setApiUser(null);
-                setMemberships([]);
-                setActiveMembershipState(null);
-                setCurrentUser(null);
-                setLoginErr("");
-                setCtxErr("");
-              }}
-            >
-              Cerrar sesión
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // currentUser se rellena por useEffect desde apiUser + activeMembership
-  if (!currentUser) {
-    return (
-      <div style={{ ...S.app, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <div style={{ color: themeColor("mutedAlt"), fontSize: 12 }}>Cargando sesión...</div>
-      </div>
-    );
-  }
-
-  // ─── DASHBOARD ────────────────────────────────────────────────────────────
+  // ─── DASHBOARD (gate inyectado en views/dashboard) ─────────────────────────
   const regionsMap = CONFIG.regions as Record<string, { name?: string; communes?: Record<string, { name?: string }> }>;
-  const Dashboard=()=>{
-    return (
-    <div>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:6}}>
-        <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-          <h2 style={{margin:0,fontSize:"16px"}}>Panel de Operación</h2>
-          {metrics.critica > 0 && (
-          <Badge style={S.badge(themeColor("danger"))} size="sm">
-            🚨 {metrics.critica} CRÍTICOS
-          </Badge>
-        )}
-        {metrics.flagged > 0 && (
-          <Badge style={S.badge(themeColor("danger"))} size="sm">
-            ⚠️ {metrics.flagged} {UI_TEXT.states.flagged}
-          </Badge>
-        )}
-        {divergencias.length > 0 && (
-          <Badge
-            style={{ ...S.badge(themeColor("warning")) }}
-            size="sm"
-            onClick={() => setView("catalog")}
-          >
-            ⚡ {divergencias.length} LOCAL(ES) MOD.
-          </Badge>
-        )}
-        </div>
-        <button style={S.btn(crisisMode?"danger":"dark")} onClick={()=>setCrisisMode(p=>!p)}>{crisisMode?"🔄 Normal":"⚡ Crisis"}</button>
-      </div>
-
-      {divergencias.length>0&&(
-        <div style={{...S.card,background:themeColor("orangeBlock"),border:"1px solid #f9731644",marginBottom:10}}>
-          <div style={{color:themeColor("warning"),fontWeight:700,fontSize:"12px",marginBottom:6}}>⚡ Locales modificados en catálogo post-creación ({divergencias.length})</div>
-          {divergencias.map(x=>(
-            <div key={x.caseId} style={{display:"flex",gap:6,alignItems:"center",marginBottom:3,fontSize:"11px",flexWrap:"wrap"}}>
-              <span style={{fontFamily:"monospace",color:themeColor("muted")}}>{x.caseId}</span>
-              <span style={{color:themeColor("mutedAlt")}}>{x.caseSummary.slice(0,40)}</span>
-              <span style={{color:themeColor("warning")}}>→ {x.div?.msg}</span>
-              <button style={{...S.btn("dark"),fontSize:"9px",padding:"1px 6px"}} onClick={()=>{const found=cases.find((c:CaseItem)=>c.id===x.caseId)??null;setSelectedCase(found);setView("detail");}}>Ver</button>
-            </div>
-          ))}
-          <div style={{fontSize:"10px",color:themeColor("muted"),marginTop:4}}>Los casos son válidos. Verificar estado operacional del local.</div>
-        </div>
-      )}
-
-      <div style={{...S.g4,marginBottom:10}}>
-        {[{l:"Total",v:metrics.total,c:themeColor("primary")},{l:"Abiertos",v:metrics.open,c:themeColor("warning")},{l:"Críticos+Altos",v:metrics.critica+metrics.alta,c:themeColor("danger")},{l:"Completitud",v:metrics.avgComp+"%",c:themeColor("success")}].map(k=>(
-          <div key={k.l} style={S.card}><div style={{color:k.c,fontSize:"22px",fontWeight:700}}>{k.v}</div><div style={{color:themeColor("muted"),fontSize:"11px"}}>{k.l}</div></div>
-        ))}
-      </div>
-
-      {!crisisMode&&(
-        <div style={{...S.card,marginBottom:8,display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
-          <select
-            style={{ ...S.inp, width: "180px", borderColor: themeColor("primary") }}
-            value={isCentral ? (filterState.region || "ALL") : regionEffective}
-            disabled={!isCentral}
-            onChange={(e) => {
-              if (!isCentral) return;
-              const v = e.target.value;
-              setFilterState((p) => ({ ...p, region: v === "ALL" ? "" : v, commune: "" }));
-            }}
-          >
-            {regionOptions.map((o) => (
-              <option key={o.code} value={o.code}>
-                {o.code} — {o.name}
-              </option>
-            ))}
-          </select>
-          <input style={{...S.inp,width:"150px"}} placeholder="🔍 ID, resumen, local..." value={filterState.search} onChange={e=>setFilterState(p=>({...p,search:e.target.value}))}/>
-          <select style={{...S.inp,width:"120px"}} value={filterState.criticality} onChange={e=>setFilterState(p=>({...p,criticality:e.target.value}))}>
-            {["","CRITICA","ALTA","MEDIA","BAJA"].map(o=><option key={o} value={o}>{o||"Criticidad"}</option>)}
-          </select>
-          <select style={{...S.inp,width:"130px"}} value={filterState.status} onChange={e=>setFilterState(p=>({...p,status:e.target.value}))}>
-            {["","Nuevo","Recepcionado por DR","En gestión","Escalado","Mitigado","Resuelto","Cerrado"].map(o=><option key={o} value={o}>{o||"Estado"}</option>)}
-          </select>
-          <select style={{...S.inp,width:"150px"}} disabled={fixedLocalRole || (isCentral ? !(filterState.region || activeRegion) : !filterState.region)} value={fixedLocalRole ? (assignedCommuneEffective || "") : filterState.commune} onChange={e=>{if(fixedLocalRole)return;const regionForCommune=isCentral?(filterState.region||activeRegion):filterState.region;if(!regionForCommune)return;setFilterState(p=>({...p,commune:e.target.value}));}}>
-            <option value="">Todas las comunas</option>
-            {Object.entries(regionsMap[(isCentral ? (filterState.region || activeRegion) : regionEffective)]?.communes || {}).map(([k,v])=><option key={k} value={k}>{(v as { name?: string })?.name}</option>)}
-          </select>
-          {fixedLocalRole&&<div style={{fontSize:12,opacity:0.85,color:assignedLocal?themeColor("mutedAlt"):themeColor("warning")}}>{assignedLocal?`📍 Comuna fijada por local asignado: ${assignedLocal.nombre}`:"⚠️ Sin local asignado válido (no se mostrarán casos)"}</div>}
-          <IconButton onClick={()=>setFilterState((p)=>({...p,criticality:"",status:"",commune:"",search:"",region:isCentral?"":regionEffective}))} title="Limpiar filtros">✕</IconButton>
-        </div>
-      )}
-
-      {fixedLocalRole && (
-        <div
-          style={{
-            ...S.card,
-            marginBottom: 8,
-            padding: "8px 10px",
-            fontSize: 13,
-            opacity: 0.95,
-          }}
-        >
-          {assignedLocal ? (
-            <div>
-              📍 Local asignado: {assignedLocal.nombre} — {assignedCommuneEffective} (
-              {assignedLocalIdEffective})
-              <div style={{ fontSize: 12, opacity: 0.85, marginTop: 4 }}>
-                Alcance: solo este local.
-              </div>
-            </div>
-          ) : (
-            <div>
-              ⚠️ Sin local asignado válido — No se mostrarán casos.
-            </div>
-          )}
-        </div>
-      )}
-
-      {crisisMode?(
-        <div>
-          <div style={{color:themeColor("danger"),fontWeight:700,marginBottom:8}}>⚡ MODO CRISIS — Críticos y altos activos</div>
-          {visibleCases.filter(c=>["CRITICA","ALTA"].includes(c.criticality)&&!["Resuelto","Cerrado"].includes(normalizeStatus(c.status))).map(c=>(
-            <div key={c.id} style={{...S.card,borderLeft:`4px solid ${critColor(c.criticality)}`,marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:6}}>
-              <div style={{display:"flex",gap:4,alignItems:"center",flexWrap:"wrap"}}>
-                <span style={{fontFamily:"monospace",color:themeColor("muted"),fontSize:"11px"}}>{c.id}</span>
-                <span style={{fontWeight:600}}>{c.summary}</span>
-                <Badge style={S.badge(critColor(c.criticality))} size="sm">{c.criticality}</Badge>
-                <RecBadge c={c}/><DivBadge c={c}/>
-              </div>
-              <div style={{display:"flex",gap:4}}>
-                <button style={S.btn("primary")} onClick={()=>{const found=cases.find(x=>x.id===c.id)??null;setSelectedCase(found);setView("detail");}}>Ver</button>
-                {canDo("assign",currentUser,c)&&<button style={S.btn("warning")} onClick={()=>changeStatus(c.id,"Escalado")}>Escalar</button>}
-              </div>
-            </div>
-          ))}
-        </div>
-      ):(
-        <div>
-          {(()=>{
-            const KNOWN_STATUSES = ["Nuevo","Recepcionado por DR","En gestión","Escalado","Mitigado","Resuelto","Cerrado"];
-            const unknownCases = visibleCases.filter(c => normalizeStatus(c.status) === "Otros / Desconocido");
-
-            return (
-              <>
-                {KNOWN_STATUSES.map(st=>{
-                  const bucket=visibleCases.filter(c=>normalizeStatus(c.status) === st);
-                  if(!bucket.length)return null;
-                  return(
-                    <div key={st} style={{marginBottom:10}}>
-                      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
-                        <div style={{width:8,height:8,borderRadius:"50%",background:statusColor(st as CaseStatus)}}/>
-                        <span style={{fontWeight:600,fontSize:"12px",color:themeColor("mutedAlt")}}>{st} ({bucket.length})</span>
-                      </div>
-                      {bucket.map(c=><CaseCard key={c.id} c={c} onClick={()=>{const found=cases.find(x=>x.id===c.id)??null;setSelectedCase(found);setView("detail");}}/>)}
-                    </div>
-                  );
-                })}
-                {unknownCases.length > 0 && (
-                  <div style={{marginBottom:10}}>
-                    <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
-                      <div style={{width:8,height:8,borderRadius:"50%",background:themeColor("muted")}}/>
-                      <span style={{fontWeight:600,fontSize:"12px",color:themeColor("mutedAlt")}}>Otros / Desconocido ({unknownCases.length})</span>
-                    </div>
-                    {unknownCases.map(c=><CaseCard key={c.id} c={c} onClick={()=>{const found=cases.find(x=>x.id===c.id)??null;setSelectedCase(found);setView("detail");}}/>)}
-                  </div>
-                )}
-              </>
-            );
-          })()}
-          {visibleCases.length === 0 && (
-            <div style={{ ...S.card, padding: 10, opacity: 0.85 }}>
-              No hay casos para los filtros actuales
-              {filterState.region ? ` (Región: ${filterState.region})` : ""}.
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-    );
+  const dashboardGate = {
+    setView: (v: string) => setViewAndCloseHelp(v as ViewKey),
+    setSelectedCase,
+    cases,
+    visibleCases,
+    metrics,
+    divergencias,
+    S,
+    themeColor,
+    crisisMode,
+    setCrisisMode,
+    filterState: effectiveFilterState,
+    setFilterState,
+    regionOptions,
+    isCentral,
+    regionEffective,
+    activeRegion,
+    fixedLocalRole,
+    assignedCommuneEffective,
+    assignedLocal,
+    assignedLocalIdEffective,
+    regionsMap,
+    normalizeStatus,
+    statusColor,
+    critColor,
+    isSlaVencido,
+    currentUser,
+    canDo,
+    changeStatus,
+    RecBadge,
+    recepcionar,
+    checkLocalDivergence,
+    localCatalog,
+    fmtDate,
+    UI_TEXT,
+    UI_TEXT_GOVERNANCE,
+    Badge,
+    Tooltip,
+    SlaBadge,
+    IconButton,
   };
 
-  // ─── NEW CASE FORM ────────────────────────────────────────────────────────
-  const NewCaseForm=({ hideBack = false }: { hideBack?: boolean })=>{
-    const detailStepRef = useRef<DetailStepContentRef>(null);
-    const[lnc,setLnc]=useState<LncDraft>(newCase?{...newCase}:{});
-    const[le,setLe]=useState(evalForm);
-    const[lb,setLb]=useState(bypassForm);
-    const er=calcCriticality(le);
-    const maxVar=Math.max(...Object.values(le));
-    const rData=regionsMap[lnc.region||"TRP"];
-    const availableLocals=useMemo(()=>getActiveLocals(localCatalog,lnc.region||"TRP",lnc.commune||""),[lnc.region,lnc.commune]);
-
-    const isFixedLocal = Boolean(assignedLocalIdEffective);
-    const isFixedCommune = Boolean(assignedCommuneEffective);
-    const lockCommune = isFixedCommune;
-    const lockLocal = isFixedLocal;
-
-    useEffect(()=>{
-      if (!lnc.origin?.detectedAt) {
-        setLnc(p=>({ ...p, origin: { ...(p.origin||{}), detectedAt: nowLocalInput() } }));
-      }
-      if (lockCommune && lnc.commune !== assignedCommuneEffective) {
-        setLnc(p=>({ ...p, commune: assignedCommuneEffective, local: "" }));
-        return;
-      }
-      if (lockLocal && lnc.local !== (assignedLocal?.nombre ?? "")) {
-        setLnc(p=>({ ...p, local: assignedLocal?.nombre ?? "" }));
-      }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    },[lockCommune, lockLocal, assignedCommuneEffective, assignedLocalIdEffective]);
-
-    // Autoseleccionar local cuando la comuna tiene exactamente 1 local (estado real, no solo visual)
-    useEffect(() => {
-      if (!lockLocal && availableLocals.length === 1) {
-        setLnc((prev) => ({ ...prev, local: availableLocals[0].nombre }));
-      }
-    }, [availableLocals, lockLocal]);
-
-    const varDefs=[
-      {key:"continuidad",   label:"1. Continuidad del acto",     desc:"0=Sin impacto · 1=Parcial · 2=Mesa suspendida · 3=Local sin funcionar"},
-      {key:"integridad",    label:"2. Integridad jurídica",       desc:"0=Sin riesgo · 1=Dudas · 2=Posible nulidad · 3=Nulidad evidente"},
-      {key:"seguridad",     label:"3. Seguridad / orden público", desc:"0=Normal · 1=Tensión · 2=Incidente activo · 3=Violencia/amenaza grave"},
-      {key:"exposicion",    label:"4. Exposición pública",        desc:"0=Interna · 1=Testigos · 2=Medios/redes · 3=Atención nacional"},
-      {key:"capacidadLocal",label:"5. Capacidad local",           desc:"0=Resuelven · 1=Orientación · 2=Apoyo externo · 3=Sin capacidad"},
-    ];
-    return(
-      <div>
-        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
-          {!hideBack && (
-            <button style={S.btn("dark")} onClick={()=>setView("dashboard")}>← Volver</button>
-          )}
-          <h2 style={{margin:0,fontSize:"16px"}}>Nuevo Incidente — Ficha 60s</h2>
-        </div>
-        <div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap"}}>
-          {["Identificación","Evaluación","Detalles","Confirmar"].map((st,i)=>(
-            <div key={st} style={{padding:"4px 10px",borderRadius:4,fontSize:"11px",fontWeight:600,background:step===i+1?themeColor("primary"):step>i+1?themeColor("greenLight"):themeColor("stepInactive"),color:step===i+1?themeColor("white"):step>i+1?themeColor("greenText"):themeColor("textSecondary"),border:"1px solid "+(step===i+1?themeColor("primary"):step>i+1?themeColor("success"):themeColor("border"))}}>
-              {step>i+1?"✓ ":""}{st}
-            </div>
-          ))}
-        </div>
-
-        {step===1&&(
-          <div style={S.card}>
-            <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:10}}>PASO 1 — IDENTIFICACIÓN</div>
-            <div style={{...S.g2,marginBottom:8}}>
-              <div>
-                <label style={S.lbl}>Región</label>
-                <select style={S.inp} value={lnc.region||"TRP"} onChange={e=>setLnc(p=>({...p,region:e.target.value,commune:"",local:""}))}>
-                  {Object.entries(regionsMap).map(([k,v])=><option key={k} value={k}>{v?.name}</option>)}
-                </select>
-              </div>
-              <div>
-                <label style={S.lbl}>Comuna *</label>
-                <select
-                  style={S.inp}
-                  value={lnc.commune||""}
-                  disabled={lockCommune}
-                  onChange={e=>setLnc(p=>({...p,commune:e.target.value,local:""}))}
-                >
-                  <option value="">Seleccione...</option>
-                  {Object.entries(rData?.communes||{}).map(([k,v])=><option key={k} value={k}>{v.name}</option>)}
-                </select>
-              </div>
-            </div>
-            <div style={{marginBottom:8}}>
-              <label style={S.lbl}>Local de Votación *</label>
-              {!lnc.commune?(
-                <div style={{...S.inp,color:themeColor("mutedDark"),cursor:"not-allowed"}}>Seleccione una comuna primero</div>
-              ):availableLocals.length===0?(
-                <div style={{...S.inp,color:themeColor("danger"),cursor:"not-allowed",borderColor:"#ef444444"}}>⚠️ Sin locales activos — administre el catálogo</div>
-              ):(
-                <select
-                  style={{...S.inp,borderColor:lnc.local?"#22c55e44":"#ef444444"}}
-                  value={lnc.local||""}
-                  disabled={lockLocal || !lnc.commune}
-                  onChange={e=>setLnc(p=>({...p,local:e.target.value}))}
-                >
-                  {availableLocals.length>1&&<option value="">Seleccione local...</option>}
-                  {availableLocals.map(l=><option key={l.idLocal} value={l.nombre}>{l.nombre}</option>)}
-                </select>
-              )}
-              {lnc.local&&<div style={{fontSize:"9px",color:themeColor("purple"),marginTop:2}}>📸 Se guardará snapshot del local al registrar</div>}
-            </div>
-            <div style={{...S.g2,marginBottom:8}}>
-              <div>
-                <label style={S.lbl}>Canal</label>
-                <select style={S.inp} value={lnc.origin?.channel||"Teams"} onChange={e=>setLnc(p=>({...p,origin:{...p.origin,channel:e.target.value}}))}>
-                  {["Teams","Teléfono","WhatsApp","Correo","Presencial"].map(c=><option key={c}>{c}</option>)}
-                </select>
-              </div>
-              <div>
-                <label style={S.lbl}>Hora del incidente *</label>
-                <input style={S.inp} type="datetime-local" value={(lnc.origin?.detectedAt||"").slice(0,16)} onChange={e=>setLnc(p=>({...p,origin:{...p.origin,detectedAt:e.target.value}}))}/>
-                <div style={{fontSize:"10px",color:themeColor("muted"),marginTop:2}}>Hora en que ocurrió/detectó. Se permite hasta 5 min por desfase de reloj. La hora de registro se guarda al enviar.</div>
-              </div>
-            </div>
-            <div style={{marginBottom:10}}>
-              <label style={S.lbl}>Resumen *</label>
-              <input style={S.inp} placeholder="Ej: Urna sellada incorrectamente en mesa 12" value={lnc.summary||""} onChange={e=>setLnc(p=>({...p,summary:e.target.value}))}/>
-            </div>
-            {canDo("bypass",currentUser)&&(
-              <div style={{...S.card,background:themeColor("violetBlock"),border:"1px solid #7c3aed44"}}>
-                <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer"}} title={UI_TEXT.tooltips.modoUrgente}>
-                  <input type="checkbox" checked={lb.active} onChange={e=>setLb(p=>({...p,active:e.target.checked,confirmed:false}))}/>
-                  <span style={{color:themeColor("purpleLight"),fontWeight:600,fontSize:"12px"}}>⚡ Activar Modo urgente (Excepción operativa)</span>
-                </label>
-                {lb.active&&(
-                  <div style={{marginTop:8}}>
-                    <div style={{color:themeColor("mutedAlt"),fontSize:"11px",marginBottom:6}}>Úselo solo si no es posible seguir el procedimiento normal. Queda registrado como excepción.</div>
-                    <label style={S.lbl}>Causal de la excepción *</label>
-                    <select style={S.inp} value={lb.cause} onChange={e=>setLb(p=>({...p,cause:e.target.value as BypassCause}))}>
-                      <option value="">Seleccione...</option>
-                      <option value="system_down">Sistema institucional no disponible</option>
-                      <option value="risk_imminent">Riesgo inminente (seguridad/orden público/continuidad)</option>
-                      <option value="critical_level_3">Evaluación crítica máxima (Nivel 3)</option>
-                      <option value="other">Otra (requiere explicación detallada)</option>
-                    </select>
-                    <label style={S.lbl}>Motivo / respaldo *</label>
-                    <input style={S.inp} placeholder="Motivo o respaldo de la excepción" value={lb.motivo} onChange={e=>setLb(p=>({...p,motivo:e.target.value}))}/>
-                  </div>
-                )}
-              </div>
-            )}
-            <div style={{marginTop:10,textAlign:"right"}}>
-              <button style={S.btn("primary")} onClick={()=>{
-                const errs=validateCaseSchema({...lnc,origin:{...lnc.origin}},localCatalog);
-                if(errs.length)return notify("⚠️ "+errs[0],"error");
-                if(lb.active&&!lb.cause)return notify("Seleccione la causal de la excepción","error");
-                if(lb.active&&!lb.motivo)return notify("El Modo urgente requiere motivo o respaldo","error");
-                if(lb.active&&lb.cause==="other"&&lb.motivo.trim().length<15)return notify("Otra causal requiere explicación detallada (mín. 15 caracteres)","error");
-                setNewCase({...lnc} as CaseItem);setBypassForm(lb);setStep(2);
-              }}>Siguiente →</button>
-            </div>
-          </div>
-        )}
-
-        {step===2&&(
-          <div style={S.card}>
-            <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:10}}>PASO 2 — FICHA DE EVALUACIÓN (inmutable tras guardar)</div>
-            {varDefs.map(v=>(
-              <div key={v.key} style={{...S.card,background:themeColor("bgSurface"),marginBottom:6}}>
-                <div style={{fontWeight:600,marginBottom:1}}>{v.label}</div>
-                <div style={{color:themeColor("muted"),fontSize:"10px",marginBottom:6}}>{v.desc}</div>
-                <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                  {[0,1,2,3].map(n=>(
-                    <button key={n} onClick={()=>setLe(p=>({...p,[v.key]:n} as typeof evalForm))} style={{padding:"6px 14px",borderRadius:4,border:"2px solid",cursor:"pointer",fontWeight:700,fontSize:"13px",background:(le as Record<string, number>)[v.key]===n?[themeColor("success"),themeColor("warningAlt"),themeColor("warning"),themeColor("danger")][n]:"transparent",borderColor:["#22c55e44","#eab30844","#f9731644","#ef444444"][n],color:(le as Record<string, number>)[v.key]===n?themeColor("white"):[themeColor("success"),themeColor("warningAlt"),themeColor("warning"),themeColor("danger")][n]}}>{n}</button>
-                  ))}
-                  {(le as Record<string, number>)[v.key]===3&&<span style={{color:themeColor("danger"),fontWeight:700,fontSize:"11px"}}>⚠️ ESCALAR</span>}
-                </div>
-              </div>
-            ))}
-            {lb.active&&maxVar<3&&lb.cause!=="system_down"&&lb.cause!=="critical_level_3"&&(
-              <div style={{...S.card,background:themeColor("redBlock"),border:"2px solid #ef4444",marginTop:8}}>
-                <div style={{color:themeColor("danger"),fontWeight:700,marginBottom:6}}>⚠️ {UI_TEXT.misc.excepcionSinFundamentoObjetivo}</div>
-                <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer"}}>
-                  <input type="checkbox" checked={lb.confirmed||false} onChange={e=>setLb(p=>({...p,confirmed:e.target.checked}))}/>
-                  <span style={{color:themeColor("danger"),fontSize:"12px",fontWeight:600}}>{UI_TEXT.misc.confirmarExcepcionOperativa}</span>
-                </label>
-              </div>
-            )}
-            <div style={{...S.card,background:themeColor("bgSurface"),border:`2px solid ${critColor(er.criticality as Criticality)}`,marginTop:8}}>
-              <Badge style={S.badge(critColor(er.criticality as Criticality))} size="sm">
-                CRITICIDAD: {er.criticality}
-              </Badge>
-              <span style={{marginLeft:8,color:themeColor("muted"),fontSize:"11px"}}>Prioridad sugerida: {er.score}/15</span>
-              <div style={{marginTop:6,color:themeColor("mutedAlt"),fontSize:"12px"}}>{er.recommendation}</div>
-            </div>
-            <div style={{display:"flex",justifyContent:"space-between",marginTop:10}}>
-              <button style={S.btn("dark")} onClick={()=>setStep(1)}>← Atrás</button>
-              <button style={S.btn("primary")} onClick={()=>{if(lb.active&&maxVar<3&&lb.cause!=="system_down"&&lb.cause!=="critical_level_3"&&!lb.confirmed)return notify("Confirmar Modo urgente atípico","error");setEvalForm(le);setBypassForm(lb);setStep(3);}}>Siguiente →</button>
-            </div>
-          </div>
-        )}
-
-        {step===3&&(
-          <DetailStepContent
-            ref={detailStepRef}
-            initialDetail={newCase?.detail ?? ""}
-            newCase={newCase}
-            setNewCase={setNewCase}
-            onConfirm={() => {
-              const d = detailStepRef.current?.getDetail?.() ?? newCase?.detail ?? "";
-              setNewCase((p) => (p ? { ...p, detail: d } : p));
-              setStep(4);
-            }}
-            onBack={() => setStep(2)}
-          />
-        )}
-
-        {step===4&&(
-          <div style={S.card}>
-            <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:10}}>PASO 4 — CONFIRMAR Y REGISTRAR</div>
-            <div style={{...S.g2,marginBottom:8}}>
-              <div><span style={{color:themeColor("muted")}}>Región:</span> {regionsMap[newCase?.region ?? ""]?.name}</div>
-              <div><span style={{color:themeColor("muted")}}>Comuna:</span> {regionsMap[newCase?.region ?? ""]?.communes?.[newCase?.commune ?? ""]?.name||newCase?.commune}</div>
-              <div><span style={{color:themeColor("muted")}}>Canal:</span> {newCase?.origin?.channel}</div>
-              <div>
-              <span style={{color:themeColor("muted")}}>Criticidad:</span>{" "}
-              <Badge style={S.badge(critColor(calcCriticality(evalForm).criticality as Criticality))} size="sm">{calcCriticality(evalForm).criticality}</Badge>
-            </div>
-            </div>
-            <div style={{marginBottom:8,padding:"6px 10px",background:themeColor("infoBg"),border:"1px solid #93c5fd",borderRadius:4}}>
-              <span style={{fontSize:"11px",color:themeColor("infoIcon")}}>🏫 Local: </span>
-              <span style={{fontWeight:700}}>{newCase?.local}</span>
-              <div style={{fontSize:"9px",color:themeColor("purple"),marginTop:2}}>📸 Se registrará snapshot del local</div>
-            </div>
-            <div style={{marginBottom:8}}><span style={{color:themeColor("muted")}}>Resumen:</span> {newCase?.summary}</div>
-            <div style={{...S.card,background:themeColor("bgSurface"),marginBottom:8,fontSize:"11px",color:themeColor("textSecondary")}}>
-              Estado inicial: <strong style={{color:themeColor("purpleLight")}}>{bypassForm.active?"En gestión ("+UI_TEXT.states.modoUrgenteActive+")":"Nuevo → requiere recepción"}</strong>
-            </div>
-            <div style={{display:"flex",justifyContent:"space-between",marginTop:10}}>
-              <button style={S.btn("dark")} onClick={()=>setStep(3)}>← Atrás</button>
-              <button
-                disabled={!!busyAction["submit_case"]}
-                style={{...S.btn("success"),padding:"8px 20px"}}
-                onClick={() => withBusy("submit_case", submitCase)}
-              >
-                ✓ Registrar Incidente
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    );
+  // ─── NEW CASE FORM (componente a nivel de módulo; datos vía gate) ─────────
+  const newCaseFormGate: NewCaseFormGate = {
+    newCase,
+    setNewCase,
+    evalForm,
+    setEvalForm,
+    bypassForm,
+    setBypassForm,
+    step,
+    setStep,
+    regionsMap,
+    assignedCommuneEffective,
+    assignedLocalIdEffective: assignedLocalIdEffective ?? null,
+    assignedLocal,
+    localCatalog,
+    setView: setViewAndCloseHelp,
+    canDo: canDo as (action: string, user: User | null) => boolean,
+    currentUser,
+    notify,
+    submitCase,
+    withBusy,
+    busyAction,
+    nowLocalInput,
   };
 
-  // ─── CASE DETAIL ─────────────────────────────────────────────────────────
-  // Hooks NO pueden ir después de returns condicionales. Wrapper sin hooks + contenido con hooks.
-  const CaseDetail = () => {
-    const c = cases.find((x): x is CaseItem => x.id === selectedCase?.id);
-    if (!c) return <div style={{ color: themeColor("mutedDark"), padding: 20 }}>Caso no encontrado</div>;
-    return <CaseDetailContent c={c} />;
+  // ─── CASE DETAIL (gate inyectado en views/case/CaseDetailView) ───────────
+  const caseDetailGate = {
+    setView: (v: string) => setViewAndCloseHelp(v as ViewKey),
+    cases,
+    setCases,
+    setAuditLog,
+    auditLog,
+    localCatalog,
+    currentUser: currentUser ?? null,
+    uiMode,
+    notify,
+    exportCaseTXT,
+    assignCaseResponsible,
+    changeStatus,
+    canDo,
+    addAction,
+    addDecision,
+    addComment,
+    validateBypass,
+    addOperationalValidation,
+    requestReassessment,
+    ackInstruction,
+    closeInstruction,
+    addInstructionReply,
+    createInstruction,
+    withBusy,
+    busyAction,
+    chainResult,
+    isNivelCentral,
+    normalizeStatus,
+    critColor,
+    statusColor,
+    USERS,
+    regionsMap,
+    S,
+    themeColor,
+    ClosedOverlay,
+    SlaBadge,
+    RecBadge,
+    isInstructionAckedByUser,
+    lastAck,
   };
 
-  const CaseDetailContent = ({ c }: { c: CaseItem }) => {
-    const [aForm, setAForm] = useState({ action: "", responsible: currentUser.id, result: "" });
-    const [cmtTxt, setCmtTxt] = useState("");
-    const [decForm, setDecForm] = useState("");
-    const [insScope, setInsScope] = useState("");
-    const [insAudience, setInsAudience] = useState("");
-    const [insSummary, setInsSummary] = useState("");
-    const [insDetails, setInsDetails] = useState("");
-    const [insImpactLevel, setInsImpactLevel] = useState<ImpactLevel>("L1");
-    const [insScopeFunctional, setInsScopeFunctional] = useState<ScopeFunctional>("OPERACIONES");
-    const [insBypassEnabled, setInsBypassEnabled] = useState(false);
-    const [insBypassReason, setInsBypassReason] = useState("");
-    const [showRA, setShowRA] = useState(false);
-    const [raEval, setRaEval] = useState({ ...(c.evaluation ?? {}) });
-    const [raJust, setRaJust] = useState("");
-    const [motDraft, setMotDraft] = useState(c.closingMotivo ?? "");
-    const [bvForm, setBvForm] = useState({ decision: "VALIDATED", fundament: "" });
-    const [replyingToInstructionId, setReplyingToInstructionId] = useState<string | null>(null);
-    const [replyDraft, setReplyDraft] = useState("");
-    const [draftCc, setDraftCc] = useState<{ role?: string; userId?: string; label: string }[]>([]);
-    const [showOpValDialog, setShowOpValDialog] = useState(false);
-    const [opValForm, setOpValForm] = useState<{ result: "OK" | "OBSERVATIONS" | "FAIL"; note: string }>({ result: "OK", note: "" });
-    const [opValBusy, setOpValBusy] = useState(false);
-    const [isMobile, setIsMobile] = useState(() => (typeof window !== "undefined" ? window.innerWidth <= 768 : false));
-    useEffect(() => {
-      const onResize = () => setIsMobile(window.innerWidth <= 768);
-      window.addEventListener("resize", onResize);
-      return () => window.removeEventListener("resize", onResize);
-    }, []);
-
-    const isClosed = c.status === "Cerrado";
-    const hasOperationalValidation = (c.timeline ?? []).some((ev) => ev.type === "OPERATIONAL_VALIDATION");
-    const canAssign =
-      !isClosed &&
-      canDo("assign", currentUser, c) &&
-      (c.status === "Recepcionado por DR" || c.bypass || c.status === "En gestión" || c.status === "Escalado");
-    const ca = auditLog.filter((e) => e.caseId === c.id);
-    const assignee = USERS.find((u) => u.id === c.assignedTo);
-    const div = checkLocalDivergence(c, localCatalog);
-    const tlC: Record<string, string> = {
-      DETECTED: themeColor("success"), REPORTED: themeColor("primary"), FIRST_ACTION: themeColor("warning"), ESCALATED: themeColor("danger"), RESOLVED: themeColor("success"),
-      CLOSED: themeColor("gray"), BYPASS: themeColor("purpleLight"), COMMENT: themeColor("muted"), MITIGATED: themeColor("warningAlt"), RECEPCIONADO: themeColor("purpleLight"),
-      REASSESSMENT: themeColor("warning"), IN_MANAGEMENT: themeColor("primary"), BYPASS_VALIDATED: themeColor("success"), BYPASS_REVOKED: themeColor("danger"),
-      OPERATIONAL_VALIDATION: themeColor("success"),
-    };
-    const insUserId = currentUser?.id ?? null;
-    const insUserRole = (currentUser as { role?: string } | null)?.role ?? null;
-    /* eslint-disable react-hooks/exhaustive-deps -- deps insUserId/insUserRole evitan closure obsoleto; el linter no ve uso directo */
-    const instructionsSorted = useMemo(() => {
-      const list = (c.instructions ?? []).filter((ins) =>
-        isInstructionForUser(ins, currentUser ?? undefined)
-      );
-      return [...list].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    }, [c.instructions, insUserId, insUserRole]);
-    /* eslint-enable react-hooks/exhaustive-deps */
-    const isOpView = uiMode === "OP";
-    return (
-      <div style={{position:"relative"}}>
-        {isClosed&&<ClosedOverlay/>}
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:6}}>
-          <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
-            <button style={S.btn("dark")} onClick={()=>setView("dashboard")}>← Volver</button>
-            {!isOpView&&<span style={{fontFamily:"monospace",color:themeColor("muted"),fontSize:"12px"}}>{c.id}</span>}
-            <Badge style={S.badge(critColor(c.criticality))} size="sm">{c.criticality}</Badge>
-            <Badge style={S.badge(statusColor(normalizeStatus(c.status) as CaseStatus))} size="sm">
-              {normalizeStatus(c.status) === "Otros / Desconocido" ? String(c.status) : normalizeStatus(c.status)}
-            </Badge>
-            {c.bypass && (
-              <Badge style={S.badge(c.bypassFlagged && !c.bypassValidated ? themeColor("danger") : themeColor("warning"))} size="sm">
-                ⚡ {UI_TEXT.states.modoUrgente}{c.bypassFlagged&&!c.bypassValidated?" ⚠️ "+UI_TEXT.states.flaggedShort:""}{c.bypassValidated?" ["+c.bypassValidated+"]":""}
-              </Badge>
-            )}
-            {!isOpView && <SlaBadge c={c}/>}<RecBadge c={c} variant={isOpView?"OP":"FULL"}/>
-          </div>
-          {!isOpView&&(
-          <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-            <button style={S.btn("dark")} onClick={()=>exportCaseTXT(c)}>⬇ TXT</button>
-            <button style={S.btn("dark")} onClick={()=>{const txt=`MINUTA SCCE\nID: ${c.id} | ${fmtDate(nowISO())}\nLocal: ${c.local||"—"}\nResumen: ${c.summary}\nCriticidad: ${c.criticality} | Estado: ${c.status}`;navigator.clipboard?.writeText(txt);notify(UI_TEXT.buttons.minutaCopiada);}}>📋 Minuta</button>
-            {canAssign&&(
-              <select style={{...S.inp,width:"auto"}} onChange={e=>e.target.value&&(()=>{setCases(prev=>prev.map(x=>x.id!==c.id?x:{...x,assignedTo:e.target.value,updatedAt:nowISO()}));setAuditLog(prev=>appendEvent(prev,"ASSIGNED",currentUser.id,currentUser.role,c.id,"Asignado a "+USERS.find(u=>u.id===e.target.value)?.name));})()}>
-                <option value="">Asignar a...</option>
-                {USERS.filter(u=>u.region===c.region||!u.region).map(u=><option key={u.id} value={u.id}>{u.name}</option>)}
-              </select>
-            )}
-            {c.status==="Resuelto"&&(
-              hasOperationalValidation ? (
-                <button id="btn-operational-validate" type="button" style={{...S.btn("dark"),opacity:0.8,cursor:"default"}} disabled title={UI_TEXT.buttons.operationalValidated}>
-                  {UI_TEXT.buttons.operationalValidated}
-                </button>
-              ) : (
-                <button id="btn-operational-validate" type="button" style={S.btn("primary")} onClick={()=>setShowOpValDialog(true)}>
-                  {UI_TEXT.buttons.operationalValidate}
-                </button>
-              )
-            )}
-            {(canDo("update",currentUser,c)||canDo("close",currentUser,c))&&(
-              <select style={{...S.inp,width:"auto"}} value={c.status} onChange={e=>changeStatus(c.id,e.target.value as CaseStatus)}>
-                {["Nuevo","Recepcionado por DR","En gestión","Escalado","Mitigado","Resuelto","Cerrado"].map(st=><option key={st}>{st}</option>)}
-              </select>
-            )}
-          </div>
-          )}
-        </div>
-
-        {!isOpView && div&&(
-          <div style={{...S.card,background:themeColor("orangeBlock"),border:"2px solid #f97316",marginBottom:8}}>
-            <div style={{color:themeColor("warning"),fontWeight:700,marginBottom:4}}>⚡ Divergencia de catálogo</div>
-            <div style={{fontSize:"12px",color:themeColor("legacyAmberText"),marginBottom:4}}>{div.msg}</div>
-            <div style={{fontSize:"11px",color:themeColor("muted")}}>Snapshot: <span style={{color:themeColor("mutedAlt"),fontFamily:"monospace"}}>{c.localSnapshot?.nombre} [{c.localSnapshot?.idLocal}]</span> @ {fmtDate(c.localSnapshot?.snapshotAt)}</div>
-            <div style={{fontSize:"10px",color:themeColor("mutedDark"),marginTop:4}}>El caso es jurídicamente válido. Verificar disponibilidad del local y registrar acción si corresponde.</div>
-          </div>
-        )}
-
-        {c.bypassFlagged&&!c.bypassValidated&&(
-          <div style={{...S.card,background:themeColor("redBlock"),border:"2px solid #ef4444",marginBottom:8}}>
-            <div style={{color:themeColor("danger"),fontWeight:700,marginBottom:4}}>⚠️ {UI_TEXT.states.modoUrgente} — {UI_TEXT.misc.validacionExpost}</div>
-            <div style={{fontSize:"11px",color:themeColor("legacyRedText"),marginBottom:8}}>Motivo: {c.bypassMotivo||"—"}</div>
-            {canDo("validateBypass",currentUser)&&(
-              <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
-                <select style={{...S.inp,width:"auto"}} value={bvForm.decision} onChange={e=>setBvForm(p=>({...p,decision:e.target.value}))}>
-                  <option value="VALIDATED">{UI_TEXT.labels.validarExcepcion}</option>
-                  <option value="REVOKED">{UI_TEXT.labels.revocarExcepcion}</option>
-                </select>
-                <input style={{...S.inp,flex:1,minWidth:200}} placeholder={UI_TEXT.labels.fundamentoObligatorio} value={bvForm.fundament} onChange={e=>setBvForm(p=>({...p,fundament:e.target.value}))}/>
-                <button style={S.btn(bvForm.decision==="VALIDATED"?"success":"danger")} onClick={()=>validateBypass(c.id,bvForm.decision,bvForm.fundament)}>{bvForm.decision==="VALIDATED"?UI_TEXT.labels.validar:UI_TEXT.labels.revocar}</button>
-              </div>
-            )}
-          </div>
-        )}
-
-        <div style={{display:"grid",gridTemplateColumns: isOpView ? "1fr" : "1fr 1fr",gap:10}}>
-          <div>
-            <div style={{...S.card,marginBottom:8}}>
-              <div style={{fontWeight:700,fontSize:"14px",marginBottom:4}}>{c.summary}</div>
-              <div style={{display:"flex",alignItems:"flex-start",gap:6,marginBottom:8,padding:"5px 8px",background:themeColor("infoBg"),border:"1px solid #93c5fd",borderRadius:4}}>
-                <div>
-                  <div style={{display:"flex",alignItems:"center",gap:4}}>
-                    <span style={{fontSize:"11px",color:themeColor("infoIcon"),fontWeight:700}}>🏫 Local:</span>
-                    <span style={{fontWeight:600}}>{c.local||"—"}</span>
-                    {div && (
-                      <Badge style={{...S.badge(themeColor("warning")),fontSize:"8px"}} size="xs">⚡ MODIF.</Badge>
-                    )}
-                  </div>
-                  {c.localSnapshot&&<div style={{fontSize:"9px",color:themeColor("mutedDark"),marginTop:1}}>📸 {c.localSnapshot.idLocal} · {fmtDate(c.localSnapshot.snapshotAt)}</div>}
-                </div>
-              </div>
-              <div style={{color:themeColor("mutedAlt"),fontSize:"12px",marginBottom:8}}>
-                {c.detail || "—"}
-              </div>
-
-              {/* EVIDENCIA */}
-              <div style={{marginBottom:8}}>
-                <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:6}}>
-                  {UI_TEXT.labels.evidenceTitle}
-                </div>
-
-                {c.evidence && c.evidence.length > 0 ? (
-                  c.evidence.map((ev, i) => (
-                    <div key={i} style={{fontSize:"12px",marginBottom:4}}>
-                      📎 {ev}
-                    </div>
-                  ))
-                ) : (
-                  <div style={{fontSize:"12px",color:themeColor("mutedAlt")}}>—</div>
-                )}
-              </div>
-              <div style={S.g2}>
-                <div><span style={{color:themeColor("muted")}}>Región:</span> {regionsMap[c.region]?.name}</div>
-                <div><span style={{color:themeColor("muted")}}>Comuna:</span> {regionsMap[c.region]?.communes?.[c.commune]?.name||c.commune}</div>
-                <div><span style={{color:themeColor("muted")}}>Canal:</span> {c.origin?.channel}</div>
-                <div><span style={{color:themeColor("muted")}}>Asignado:</span> {assignee?.name||"—"}</div>
-                {!isOpView&&(
-                  <>
-                    <div><span style={{color:themeColor("muted")}}>SLA:</span> {c.slaMinutes} min</div>
-                    {(()=>{const comp=c.completeness??0;return <div><span style={{color:themeColor("muted")}}>Complet.:</span> <span style={{color:comp>=80?themeColor("success"):comp>=50?themeColor("warningAlt"):themeColor("danger")}}>{comp}%</span></div>;})()}
-                  </>
-                )}
-              </div>
-            </div>
-
-            {!isClosed&&(canDo("close",currentUser,c)||c.status==="Resuelto")&&(
-              <div style={{...S.card,marginBottom:8,border:"1px solid #22c55e44"}}>
-                <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:6}}>MOTIVO DE CIERRE</div>
-                <textarea style={{...S.inp,height:50,resize:"vertical"}} value={motDraft} onChange={e=>setMotDraft(e.target.value)} placeholder="Fundamento formal..."/>
-                <button style={{...S.btn("success"),marginTop:4,fontSize:"11px"}} onClick={()=>{if(!motDraft)return notify("Ingresa el motivo","error");setCases(prev=>prev.map(x=>x.id!==c.id?x:{...x,closingMotivo:motDraft,updatedAt:nowISO()}));setAuditLog(prev=>appendEvent(prev,"CASE_UPDATED",currentUser.id,currentUser.role,c.id,"Motivo de cierre registrado"));notify("Motivo guardado","success");}}>{c.closingMotivo?"✓ Actualizar":"Guardar motivo"}</button>
-                {c.closingMotivo&&<div style={{marginTop:4,fontSize:"11px",color:themeColor("success")}}>✓ {c.closingMotivo.slice(0,60)}</div>}
-              </div>
-            )}
-
-            {!isOpView&&(
-            <div style={{...S.card,marginBottom:8}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600}}>FICHA EVALUACIÓN</div>
-                <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                  <Badge style={{...S.badge(themeColor("success")),fontSize:"9px"}} size="xs">
-                    🔒 BLOQUEADA
-                  </Badge>
-                  {!isClosed&&canDo("update",currentUser,c)&&(
-                    <button style={{...S.btn("dark"),fontSize:"10px",padding:"2px 8px"}} onClick={()=>setShowRA(p=>!p)}>{showRA?"✕":"✏ Reevaluar"}</button>
-                  )}
-                </div>
-              </div>
-              {(()=>{const ev=(c.evaluation??{}) as Record<string, number>;return Object.entries({continuidad:"Continuidad",integridad:"Integridad jurídica",seguridad:"Seguridad",exposicion:"Exposición",capacidadLocal:"Capacidad local"}).map(([k,lbl])=>(
-                <div key={k} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
-                  <span style={{color:themeColor("mutedAlt"),fontSize:"11px"}}>{lbl}</span>
-                  <div style={{display:"flex",gap:3,alignItems:"center"}}>
-                    {[0,1,2,3].map(n=><div key={n} style={{width:14,height:14,borderRadius:2,background:(ev[k]??0)>=n?[themeColor("success"),themeColor("warningAlt"),themeColor("warning"),themeColor("danger")][n]:themeColor("border")}}/>)}
-                    <span style={{marginLeft:4,color:[themeColor("success"),themeColor("warningAlt"),themeColor("warning"),themeColor("danger")][ev[k]??0],fontWeight:700}}>{ev[k]??0}</span>
-                  </div>
-                </div>
-              ));})()}
-              <div
-                style={{
-                  marginTop: 6,
-                  borderTop: "1px solid #e5e7eb",
-                  paddingTop: 6,
-                  display: "flex",
-                  justifyContent: "space-between",
-                }}
-              >
-                {!isOpView ? (
-                  <>
-                    <span style={{ color: themeColor("muted"), fontSize: "11px" }}>
-                      Nivel:
-                    </span>
-                    <span
-                      style={{
-                        color: critColor(c.criticality),
-                        fontWeight: 700,
-                      }}
-                    >
-                      {c.criticalityScore}/15 — {c.criticality}
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <span style={{ color: themeColor("muted"), fontSize: "11px" }}>
-                      Criticidad:
-                    </span>
-                    <span
-                      style={{
-                        color: critColor(c.criticality),
-                        fontWeight: 700,
-                      }}
-                    >
-                      {c.criticality}
-                    </span>
-                  </>
-                )}
-              </div>
-              {showRA&&(
-                <div style={{...S.card,background:themeColor("bgSurface"),marginTop:8,border:"1px solid #f9731644"}}>
-                  <div style={{color:themeColor("warning"),fontSize:"11px",fontWeight:600,marginBottom:8}}>REEVALUACIÓN</div>
-                  {Object.entries({continuidad:"Continuidad",integridad:"Integridad",seguridad:"Seguridad",exposicion:"Exposición",capacidadLocal:"Cap. Local"}).map(([k,lbl])=>(
-                    <div key={k} style={{marginBottom:6,display:"flex",gap:6,alignItems:"center"}}>
-                      <span style={{color:themeColor("mutedAlt"),fontSize:"11px",width:90,flexShrink:0}}>{lbl}</span>
-                      {[0,1,2,3].map(n=>(
-                        <button key={n} onClick={()=>setRaEval(p=>({...p,[k]:n}))} style={{padding:"3px 9px",borderRadius:3,border:"1px solid",cursor:"pointer",fontWeight:700,fontSize:"12px",background:raEval[k]===n?[themeColor("success"),themeColor("warningAlt"),themeColor("warning"),themeColor("danger")][n]:"transparent",borderColor:["#22c55e44","#eab30844","#f9731644","#ef444444"][n],color:raEval[k]===n?themeColor("white"):[themeColor("success"),themeColor("warningAlt"),themeColor("warning"),themeColor("danger")][n]}}>{n}</button>
-                      ))}
-                    </div>
-                  ))}
-                  <label style={S.lbl}>Justificación *</label>
-                  <input style={S.inp} placeholder="Fundamento..." value={raJust} onChange={e=>setRaJust(e.target.value)}/>
-                  <button style={{...S.btn("warning"),marginTop:6}} onClick={()=>{if(!raJust)return notify("Justificación obligatoria","error");requestReassessment(c.id,raEval,raJust);setShowRA(false);setRaJust("");}}>Registrar Reevaluación</button>
-                </div>
-              )}
-            </div>
-            )}
-
-            {!isOpView&&(
-            <div style={S.card}>
-              <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:6}}>MÉTRICAS</div>
-              {[["T. Activación",timeDiff(c.origin?.detectedAt,c.reportedAt)],["T. 1ª Acción",timeDiff(c.reportedAt,c.firstActionAt)],["T. Escalamiento",timeDiff(c.reportedAt,c.escalatedAt)],["T. Resolución",timeDiff(c.reportedAt,c.resolvedAt)]].map(([l,v])=>(
-                <div key={l} style={{display:"flex",justifyContent:"space-between",marginBottom:3,fontSize:"12px"}}>
-                  <span style={{color:themeColor("muted")}}>{l}</span>
-                  <span style={{color:v!=null?themeColor("legacySlate"):themeColor("mutedDark")}}>{v!=null?`${v} min`:"—"}</span>
-                </div>
-              ))}
-            </div>
-            )}
-          </div>
-
-          <div>
-            <div style={{...S.card,marginBottom:8}}>
-              <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:8}}>LÍNEA DE TIEMPO</div>
-              <div style={{maxHeight:200,overflowY:"auto"}}>
-                {(c.timeline??[]).map((t,i)=>{const u=USERS.find(u=>u.id===t.actor);const te=t as typeof t & { eventId?: string; kind?: string; refInstructionId?: string };const eventKey=te.eventId??`${t.at}_${t.actor}_${i}`;const formalLabels: Record<string, string> = { INSTRUCTION_CREATED: UI_TEXT.labels.instructionCreated, INSTRUCTION_ACK: UI_TEXT.labels.instructionAck, INSTRUCTION_CLOSED: UI_TEXT.labels.instructionClosed };const formalLabel=te.kind&&formalLabels[te.kind];const typeLabels: Record<string, string> = { OPERATIONAL_VALIDATION: "Validación operativa" };const typeLabelOverride=typeLabels[te.type];const isReply=te.kind==="INSTRUCTION_REPLY"&&te.refInstructionId;const ins=isReply?(c.instructions??[]).find(ins=>ins.id===te.refInstructionId):null;const impact=ins?.impactLevel??"L1";const scopeFLabel={OPERACIONES:UI_TEXT.labels.scopeOperaciones,FISCALIZACION:UI_TEXT.labels.scopeFiscalizacion,SEGURIDAD:UI_TEXT.labels.scopeSeguridad,TI:UI_TEXT.labels.scopeTI,INFRAESTRUCTURA:UI_TEXT.labels.scopeInfraestructura,OTRO:UI_TEXT.labels.scopeOtro}[ins?.scopeFunctional??"OPERACIONES"]??ins?.scopeFunctional??"";const replyPrefix=ins?`Respuesta a instrucción ${impact} ${scopeFLabel} (${fmtTime(ins.createdAt)}): `:(isReply?`${UI_TEXT.labels.instructionUnavailable}: `:"");const ovResult=(te as { result?: string }).result;const ovNote=te.type==="OPERATIONAL_VALIDATION"?`${ovResult||""}${(t.note||"")?`: ${t.note}`:""}`:"";const displayNote=te.type==="OPERATIONAL_VALIDATION"?ovNote:formalLabel?(t.note??""):replyPrefix?(replyPrefix+(t.note??"")):(t.note??"");const typeLabel=formalLabel??typeLabelOverride??(isReply?UI_TEXT.labels.instructionReplyLabel:t.type);return(
-                  <div key={eventKey} style={{display:"flex",gap:8,alignItems:"flex-start",paddingBottom:8,borderBottom:"1px solid #e5e7eb"}}>
-                    <div style={{width:6,height:6,borderRadius:"50%",background:tlC[t.type]||themeColor("muted"),marginTop:5,flexShrink:0}}/>
-                    <div>
-                      <div style={{fontSize:"10px",color:themeColor("mutedDark")}}>{fmtDate(t.at)}</div>
-                      <div style={{fontSize:"11px",color:tlC[t.type]||themeColor("muted"),fontWeight:600}}>{typeLabel}</div>
-                      <div style={{fontSize:"11px",color:themeColor("mutedAlt")}}>{displayNote}{u&&<span style={{color:themeColor("mutedDark")}}> — {u.name}</span>}</div>
-                    </div>
-                  </div>
-                );})}
-              </div>
-            </div>
-
-            <div style={{...S.card,marginBottom:8}}>
-              <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:6}}>ACCIONES</div>
-              {((c.actions??[]) as { id?: string; action?: string; responsible?: string; at?: string; result?: string }[]).map((a)=>{const u=USERS.find(u=>u.id===a.responsible);return(
-                <div key={a.id ?? ""} style={{...S.card,background:themeColor("bgSurface"),marginBottom:4}}>
-                  <div style={{fontWeight:600,fontSize:"12px"}}>{a.action}</div>
-                  <div style={{fontSize:"10px",color:themeColor("mutedDark")}}>{u?.name} | {fmtDate(a.at)}</div>
-                  {a.result&&<div style={{fontSize:"11px",color:themeColor("success"),marginTop:2}}>→ {a.result}</div>}
-                </div>
-              );})}
-              {!isClosed&&canDo("update",currentUser,c)&&(
-                <div style={{marginTop:6,borderTop:"1px solid #e5e7eb",paddingTop:6}}>
-                  <input style={{...S.inp,marginBottom:4}} placeholder="Acción..." value={aForm.action} onChange={e=>setAForm(p=>({...p,action:e.target.value}))}/>
-                  <div style={{...S.g2,marginBottom:4}}>
-                    <select style={S.inp} value={aForm.responsible} onChange={e=>setAForm(p=>({...p,responsible:e.target.value}))}>
-                      {USERS.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}
-                    </select>
-                    <input style={S.inp} placeholder="Resultado..." value={aForm.result} onChange={e=>setAForm(p=>({...p,result:e.target.value}))}/>
-                  </div>
-                  <button style={S.btn("primary")} onClick={()=>{if(!aForm.action)return;addAction(c.id,aForm.action,aForm.responsible,aForm.result);setAForm({action:"",responsible:currentUser.id,result:""});notify("Acción registrada");}}>+ Acción</button>
-                </div>
-              )}
-            </div>
-
-            <div style={{...S.card,marginBottom:8}}>
-              <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:6}}>DECISIONES</div>
-              {((c.decisions??[]) as { who?: string; fundament?: string }[]).map((d,i)=>{const u=USERS.find(u=>u.id===d.who);return(
-                <div key={i} style={{fontSize:"11px",marginBottom:4,padding:4,background:themeColor("legacyGrayBg"),borderRadius:3}}>
-                  <span style={{color:themeColor("muted")}}>{u?.name}: </span>{d.fundament}
-                </div>
-              );})}
-              {!isClosed&&(canDo("update",currentUser,c)||canDo("close",currentUser,c))&&(
-                <div style={{marginTop:6}}>
-                  <input style={S.inp} placeholder="Fundamento de decisión..." value={decForm} onChange={e=>setDecForm(e.target.value)}/>
-                  <button style={{...S.btn("dark"),marginTop:4}} onClick={()=>{if(!decForm)return;addDecision(c.id,decForm);setDecForm("");notify("Decisión registrada");}}>+ Decisión</button>
-                </div>
-              )}
-              {canDo("close",currentUser,c)&&c.status!=="Cerrado"&&(
-                <div style={{marginTop:8,padding:6,background:themeColor("legacyGrayBg"),borderRadius:4,fontSize:"10px"}}>
-                  <div style={{color:themeColor("muted"),fontWeight:600,marginBottom:3}}>PRE-REQUISITOS DE CIERRE:</div>
-                  {[[c.actions?.length,"Al menos 1 acción"],[c.decisions?.length,"Al menos 1 decisión"],[c.status==="Resuelto","Estado = Resuelto"],[hasOperationalValidation,"Validación operativa"],[!!c.closingMotivo,"Motivo guardado"],[!c.bypassFlagged||!!c.bypassValidated,"Bypass resuelto"]].map(([ok,lbl],idx)=>(
-                    <div key={`req-${idx}-${String(lbl)}`} style={{color:ok?themeColor("success"):themeColor("danger")}}>{ok?"✓":"✕"} {lbl}</div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* INSTRUCCIONES — lista */}
-            <div style={{...S.card,marginBottom:8}}>
-              <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:8}}>{UI_TEXT.labels.instructionsTitle}</div>
-              {instructionsSorted.length === 0 ? (
-                <div style={{fontSize:"12px",color:themeColor("muted")}}>{UI_TEXT.labels.instructionsEmpty}</div>
-              ) : (
-                <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                  {instructionsSorted.map((ins) => {
-                    const acked = currentUser?.id && isInstructionAckedByUser(ins, currentUser.id);
-                    const last = lastAck(ins);
-                    const impact = ins.impactLevel ?? "L1";
-                    const scopeF = ins.scopeFunctional ?? "OPERACIONES";
-                    const scopeFLabel = { OPERACIONES: UI_TEXT.labels.scopeOperaciones, FISCALIZACION: UI_TEXT.labels.scopeFiscalizacion, SEGURIDAD: UI_TEXT.labels.scopeSeguridad, TI: UI_TEXT.labels.scopeTI, INFRAESTRUCTURA: UI_TEXT.labels.scopeInfraestructura, OTRO: UI_TEXT.labels.scopeOtro }[scopeF] ?? scopeF;
-                    const hasBypass = ins.bypass?.enabled === true;
-                    return (
-                      <div key={ins.id} style={{...S.card,background:themeColor("bgSurface"),padding:8}}>
-                        <div style={{fontSize:"11px",color:themeColor("muted"),marginBottom:4,display:"flex",flexWrap:"wrap",gap:6,alignItems:"center"}}>
-                          <span>{ins.scope} · {ins.audience} · {fmtDate(ins.createdAt)}</span>
-                          <Badge style={S.badge(impact === "L3" ? themeColor("danger") : impact === "L2" ? themeColor("warning") : themeColor("muted"))} size="sm">
-                            {impact}
-                          </Badge>
-                          <span style={{color:themeColor("mutedAlt")}}>{scopeFLabel}</span>
-                          {hasBypass && (
-                            <Tooltip content={ins.bypass?.reason || ""}>
-                              <Badge style={{ ...S.badge(themeColor("legacyRedDark")), cursor:"help" }} size="sm">
-                                {UI_TEXT.labels.instructionBypassBadge}
-                              </Badge>
-                            </Tooltip>
-                          )}
-                        </div>
-                        <div style={{fontSize:"10px",color:themeColor("mutedDark"),marginBottom:2}}>{USERS.find(u=>u.id===ins.createdBy)?.name ?? ins.createdBy}</div>
-                        <div style={{fontWeight:600,fontSize:"12px",marginBottom:4}}>{ins.summary}</div>
-                        {ins.details && <div style={{fontSize:"11px",color:themeColor("mutedAlt"),marginBottom:4}}>{ins.details}</div>}
-                        {ins.cc?.length ? (
-                          <div style={{fontSize:10,color:themeColor("muted"),marginBottom:4}}>{UI_TEXT.labelsCc?.ccReadOnly ?? "Con copia:"} {ins.cc.map(x=>x.label).join(", ")}</div>
-                        ) : null}
-                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:4}}>
-                          <Badge style={S.badge(acked ? themeColor("success") : themeColor("warningAlt"))} size="sm">
-                            {acked ? UI_TEXT.labels.statusAcked : UI_TEXT.labels.statusPending}
-                          </Badge>
-                          {isClosedStatus(ins.status) && (
-                            <Badge style={S.badge(themeColor("muted"))} size="sm">Cerrada</Badge>
-                          )}
-                          {last && <span style={{fontSize:"10px",color:themeColor("muted")}}>Acusado: {USERS.find(u=>u.id===last.userId)?.name ?? last.userId} @ {fmtDate(last.at)}</span>}
-                          {!acked && currentUser?.id && ins.ackRequired && (
-                            <button style={{...S.btn("primary"),fontSize:"10px",padding:"4px 8px"}} title={UI_TEXT.tooltips.ackConfirmReceipt} disabled={!!busyAction[`ack_${c.id}_${ins.id}`]} onClick={()=>withBusy(`ack_${c.id}_${ins.id}`,()=>ackInstruction(c.id,ins.id))}>{UI_TEXT.buttons.ackConfirmReceipt}</button>
-                          )}
-                          {!isClosedStatus(ins.status) && canDo("instruct", currentUser) && (
-                            <button style={{...S.btn("dark"),fontSize:"10px",padding:"4px 8px"}} disabled={!!busyAction[`close_${c.id}_${ins.id}`]} onClick={()=>withBusy(`close_${c.id}_${ins.id}`,()=>closeInstruction(c.id,ins.id))}>{UI_TEXT.buttons.closeInstruction}</button>
-                          )}
-                        </div>
-                        {/* Fase 3.5 — Responder a instrucción (COMMENT en timeline con refInstructionId) */}
-                        {currentUser?.id && (
-                          <div style={{marginTop:6,borderTop:"1px solid #e5e7eb",paddingTop:6}}>
-                            {replyingToInstructionId !== ins.id ? (
-                              <button style={{...S.btn("dark"),fontSize:"10px",padding:"4px 8px"}} onClick={()=>{setReplyingToInstructionId(ins.id);setReplyDraft("");}}>{UI_TEXT.buttons.replyToInstruction}</button>
-                            ) : (
-                              <div style={{display:"flex",flexDirection:"column",gap:4}}>
-                                <textarea style={{...S.inp,height:48,resize:"vertical",fontSize:"11px"}} placeholder={UI_TEXT.misc.instructionReplyPlaceholder} value={replyDraft} onChange={e=>setReplyDraft(e.target.value)} rows={2}/>
-                                <div style={{display:"flex",gap:6}}>
-                                  <button style={{...S.btn("primary"),fontSize:"10px",padding:"4px 10px"}} onClick={()=>{if(!replyDraft.trim())return;addInstructionReply(c.id,ins.id,replyDraft);setReplyDraft("");setReplyingToInstructionId(null);notify(UI_TEXT.misc.instructionReplySaved);}}>{UI_TEXT.buttons.sendReply}</button>
-                                  <button style={{...S.btn("dark"),fontSize:"10px",padding:"4px 8px"}} onClick={()=>{setReplyingToInstructionId(null);setReplyDraft("");}}>Cancelar</button>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* CREAR INSTRUCCIÓN — solo si instruct */}
-            {canDo("instruct", currentUser) && (
-              <div style={{...S.card,marginBottom:8}}>
-                <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:8}}>{UI_TEXT.labels.instructionCreateTitle}</div>
-                <div style={S.g2}>
-                  <label style={S.lbl}>{UI_TEXT.labels.scopeLabel}</label>
-                  <select style={S.inp} value={insScope} onChange={e=>setInsScope(e.target.value)}>
-                    <option value="LOCAL">{UI_TEXT.labels.scopeLocal}</option>
-                    <option value="COMUNAL">{UI_TEXT.labels.scopeComunal}</option>
-                    <option value="REGIONAL">{UI_TEXT.labels.scopeRegional}</option>
-                  </select>
-                  <label style={S.lbl}>{UI_TEXT.labels.audienceLabel}</label>
-                  <select style={S.inp} value={insAudience} onChange={e=>setInsAudience(e.target.value)}>
-                    <option value="AMBOS">{UI_TEXT.labels.audienceBoth}</option>
-                    <option value="PESE">{UI_TEXT.labels.audiencePese}</option>
-                    <option value="DELEGADO">{UI_TEXT.labels.audienceDelegado}</option>
-                  </select>
-                  <label style={S.lbl}>{UI_TEXT.labels.impactLevelLabel}</label>
-                  <select style={S.inp} value={insImpactLevel} onChange={e=>setInsImpactLevel(e.target.value as ImpactLevel)}>
-                    <option value="L1">{UI_TEXT.labels.impactL1}</option>
-                    <option value="L2">{UI_TEXT.labels.impactL2}</option>
-                    <option value="L3">{UI_TEXT.labels.impactL3}</option>
-                  </select>
-                  <label style={S.lbl}>{UI_TEXT.labels.scopeFunctionalLabel}</label>
-                  <select style={S.inp} value={insScopeFunctional} onChange={e=>setInsScopeFunctional(e.target.value as ScopeFunctional)}>
-                    <option value="OPERACIONES">{UI_TEXT.labels.scopeOperaciones}</option>
-                    <option value="FISCALIZACION">{UI_TEXT.labels.scopeFiscalizacion}</option>
-                    <option value="SEGURIDAD">{UI_TEXT.labels.scopeSeguridad}</option>
-                    <option value="TI">{UI_TEXT.labels.scopeTI}</option>
-                    <option value="INFRAESTRUCTURA">{UI_TEXT.labels.scopeInfraestructura}</option>
-                    <option value="OTRO">{UI_TEXT.labels.scopeOtro}</option>
-                  </select>
-                </div>
-                {isNivelCentral(currentUser?.id ?? "") && (insAudience === "PESE" || insAudience === "DELEGADO") && (
-                  <div style={{marginBottom:8,padding:8,background:"rgba(245,158,11,0.15)",border:"1px solid rgba(245,158,11,0.5)",borderRadius:4,fontSize:11,color:themeColor("legacyAmberBadge")}}>
-                    {UI_TEXT.warnings?.centralToPeseOrDelegado ?? "Advertencia: instrucción desde Nivel Central a PESE/DELEGADO."}
-                  </div>
-                )}
-                <label style={S.lbl}>{UI_TEXT.labels.summaryLabelRequired}</label>
-                <input style={S.inp} placeholder={UI_TEXT.misc.instructionSummaryPlaceholder} value={insSummary} onChange={e=>setInsSummary(e.target.value)}/>
-                <label style={S.lbl}>{UI_TEXT.labels.detailsLabelOptional}</label>
-                <textarea style={{...S.inp,height:40,resize:"vertical"}} placeholder={UI_TEXT.misc.instructionDetailsPlaceholder} value={insDetails} onChange={e=>setInsDetails(e.target.value)}/>
-                <div style={{marginTop:8,marginBottom:6,display:"flex",alignItems:"center",gap:8}}>
-                  <input type="checkbox" id="ins-bypass" checked={insBypassEnabled} onChange={e=>setInsBypassEnabled(e.target.checked)}/>
-                  <label htmlFor="ins-bypass" style={{...S.lbl,margin:0}}>{UI_TEXT.labels.bypassLabel}</label>
-                </div>
-                {insBypassEnabled && (
-                  <textarea style={{...S.inp,height:36,resize:"vertical",marginBottom:6}} placeholder={UI_TEXT.labels.bypassReasonPlaceholder} value={insBypassReason} onChange={e=>setInsBypassReason(e.target.value)}/>
-                )}
-                <div style={{marginTop:8,marginBottom:6}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
-                    <span style={S.lbl}>{UI_TEXT.labelsCc?.ccLabel ?? "Con copia (CC)"}</span>
-                    <button type="button" style={{...S.btn("dark"),fontSize:10,padding:"4px 8px"}} onClick={()=>setDraftCc(prev=>[...prev,{label:"Copia",role:undefined,userId:undefined}])}>{UI_TEXT.buttons.addCc ?? "+ Agregar copia"}</button>
-                  </div>
-                  {draftCc.map((ccRow,i)=>(
-                    <div key={i} style={{display:"flex",gap:6,alignItems:"center",marginBottom:4}}>
-                      <input style={{...S.inp,flex:1}} value={ccRow.label} onChange={e=>setDraftCc(prev=>prev.map((x,idx)=>idx===i?{...x,label:e.target.value}:x))} placeholder={UI_TEXT.labelsCc?.ccPlaceholder ?? "Ej: Dirección Regional"} />
-                      <button type="button" style={{...S.btn("dark"),fontSize:10,padding:"4px 6px"}} onClick={()=>setDraftCc(prev=>prev.filter((_,idx)=>idx!==i))}>{UI_TEXT.buttons.removeCc ?? "Quitar"}</button>
-                    </div>
-                  ))}
-                </div>
-                <button style={{...S.btn("primary"),marginTop:6}} title={UI_TEXT.tooltips.caseCreateInstruction} onClick={()=>{createInstruction(c.id, insScope, insAudience, insSummary, insDetails, insImpactLevel, insScopeFunctional, insBypassEnabled ? { enabled: true, reason: insBypassReason } : undefined, draftCc.length?draftCc:undefined);setInsSummary("");setInsDetails("");setInsBypassReason("");setInsBypassEnabled(false);setDraftCc([]);}}>{UI_TEXT.buttons.caseCreateInstruction}</button>
-              </div>
-            )}
-
-            {/* COMENTARIO */}
-            <div style={S.card}>
-              <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:6}}>{UI_TEXT.labels.commentTitle}</div>
-              <textarea style={{...S.inp,height:50,resize:"vertical"}} value={cmtTxt} onChange={e=>setCmtTxt(e.target.value)} placeholder={UI_TEXT.misc.commentPlaceholder}/>
-              <button style={{...S.btn("dark"),marginTop:4}} onClick={()=>{if(!cmtTxt)return;addComment(c.id, cmtTxt);setCmtTxt("");notify("Registrado");}}>+ {UI_TEXT.buttons.addComment}</button>
-            </div>
-          </div>
-        </div>
-
-        {!isOpView&&(
-        <div style={{...S.card,marginTop:10}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-            <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600}}>AUDITORÍA ({ca.length} eventos)</div>
-            <Tooltip content={chainResult.ok ? "Cadena íntegra (hashes coinciden)" : "Cadena comprometida (revisar eventos y hash previo)"}>
-              <Badge
-                style={{ ...S.badge(chainResult.ok ? themeColor("success") : themeColor("danger")), cursor:"help" }}
-                size="sm"
-              >
-                {chainResult.ok ? "🔗 Cadena íntegra" : "⚠️ Comprometida"}
-              </Badge>
-            </Tooltip>
-          </div>
-          <div style={{maxHeight:140,overflowY:"auto"}}>
-            {ca.map((e,i)=>{const u=USERS.find(u=>u.id===e.actor);const tc: Record<string, string> = {CASE_CREATED:themeColor("success"),BYPASS_USED:themeColor("warning"),BYPASS_FLAGGED:themeColor("danger"),INSTRUCTION_BYPASS_USED:themeColor("legacyRedDarkText"),ESCALATED:themeColor("danger"),STATUS_CHANGED:themeColor("warningAlt"),ACTION_ADDED:themeColor("mutedAlt"),EXPORT_DONE:themeColor("purple"),COMMENT_ADDED:themeColor("muted"),REASSESSMENT:themeColor("warning"),DECISION_ADDED:themeColor("primary"),ASSIGNED:themeColor("purpleLight"),OPERATIONAL_VALIDATION:themeColor("success")};
-              return<div key={i} style={{display:"flex",gap:6,fontSize:"10px",padding:"3px 0",borderBottom:"1px solid #e5e7eb",flexWrap:"wrap"}}>
-                <span style={{color:themeColor("mutedDark"),flexShrink:0,width:108}}>{fmtDate(e.at)}</span>
-                <span style={{color:tc[e.type]||themeColor("muted"),fontWeight:600,flexShrink:0,width:130}}>{e.type}</span>
-                <span style={{color:themeColor("muted"),flexShrink:0,width:100}}>{u?.name||e.actor}</span>
-                <span style={{color:themeColor("mutedAlt"),flexGrow:1}}>{e.summary}</span>
-                <span style={{color:themeColor("legacyGrayBorder"),fontFamily:"monospace",fontSize:"9px"}}>{e.hash}</span>
-              </div>;
-            })}
-          </div>
-        </div>
-        )}
-
-        {/* Diálogo Validación operativa */}
-        {showOpValDialog && (
-          <>
-            <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.4)",zIndex:1000}} onClick={()=>setShowOpValDialog(false)} aria-hidden="true"/>
-            <div
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="opval-title"
-              style={{
-                position:"fixed",
-                ...(isMobile?{bottom:0,left:0,right:0,maxHeight:"80vh",borderRadius:"12px 12px 0 0"}:{top:"50%",left:"50%",transform:"translate(-50%,-50%)",width:"min(400px,95vw)",borderRadius:12}),
-                background:themeColor("white"),
-                boxShadow:"0 12px 40px rgba(0,0,0,0.25)",
-                zIndex:1001,
-                padding:20,
-                display:"flex",
-                flexDirection:"column",
-                gap:12,
-              }}
-            >
-              <div id="opval-title" style={{fontWeight:800,fontSize:16}}>{UI_TEXT.buttons.operationalValidate}</div>
-              <label style={S.lbl}>{UI_TEXT.misc.operationalValidationResultLabel}</label>
-              <select style={S.inp} value={opValForm.result} onChange={e=>setOpValForm(p=>({...p,result:e.target.value as "OK"|"OBSERVATIONS"|"FAIL"}))}>
-                <option value="OK">{UI_TEXT.misc.operationalValidationResultOk}</option>
-                <option value="OBSERVATIONS">{UI_TEXT.misc.operationalValidationResultObservations}</option>
-                <option value="FAIL">{UI_TEXT.misc.operationalValidationResultFail}</option>
-              </select>
-              {(opValForm.result==="OBSERVATIONS"||opValForm.result==="FAIL")&&(
-                <>
-                  <label style={S.lbl}>{UI_TEXT.misc.operationalValidationNotePlaceholder}</label>
-                  <textarea style={{...S.inp,minHeight:80,resize:"vertical"}} value={opValForm.note} onChange={e=>setOpValForm(p=>({...p,note:e.target.value}))} placeholder={UI_TEXT.misc.operationalValidationNotePlaceholder}/>
-                </>
-              )}
-              <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:8}}>
-                <button style={S.btn("dark")} onClick={()=>setShowOpValDialog(false)}>Cancelar</button>
-                <button
-                  style={S.btn("primary")}
-                  disabled={opValBusy||((opValForm.result==="OBSERVATIONS"||opValForm.result==="FAIL")&&!opValForm.note.trim())}
-                  onClick={async ()=>{
-                    if((opValForm.result==="OBSERVATIONS"||opValForm.result==="FAIL")&&!opValForm.note.trim())return;
-                    setOpValBusy(true);
-                    await addOperationalValidation(c.id,opValForm.result,opValForm.note.trim());
-                    setOpValBusy(false);
-                    setShowOpValDialog(false);
-                    setOpValForm({result:"OK",note:""});
-                  }}
-                >
-                  {opValBusy?"Guardando...":UI_TEXT.buttons.confirmOperationalValidation}
-                </button>
-              </div>
-            </div>
-          </>
-        )}
-      </div>
-    );
-  };
-
-  // ─── CATALOG VIEW ─────────────────────────────────────────────────────────
-  const CatalogView=()=>{
-    const[catRegion,setCatRegion]=useState(activeRegion);
-    const[catCommune,setCatCommune]=useState("");
-    const[newNombre,setNewNombre]=useState("");
-    const[showInactive,setShowInactive]=useState(false);
-    const[searchCat,setSearchCat]=useState("");
-    const violations=useMemo(()=>catalogSelfCheck(localCatalog),[]);
-    const filtered=useMemo(()=>localCatalog.filter(l=>{
-      if(catRegion!=="ALL"&&l.region!==catRegion)return false;
-      if(catCommune&&l.commune!==catCommune)return false;
-      if(!showInactive&&!l.activoGlobal)return false;
-      if(searchCat&&!l.nombre.toLowerCase().includes(searchCat.toLowerCase()))return false;
-      return true;
-    }),[catRegion,catCommune,showInactive,searchCat]);
-    const rData=catRegion==="ALL"?undefined:regionsMap[catRegion];
-    return(
-      <div>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:6}}>
-          <h2 style={{margin:0,fontSize:"16px"}}>🗂 Catálogo Maestro de Locales</h2>
-          <Badge style={{ ...S.badge(themeColor("mutedDarker")), fontSize: "9px" }} size="xs">
-            v1.9 · Modelo B + Snapshots
-          </Badge>
-        </div>
-        {violations.length>0&&(
-          <div style={{...S.card,background:themeColor("redBlock"),border:"2px solid #ef4444",marginBottom:10}}>
-            <div style={{color:themeColor("danger"),fontWeight:700,marginBottom:4}}>⛔ INVARIANTES VIOLADAS ({violations.length})</div>
-            {violations.map((v,i)=><div key={i} style={{fontSize:"11px",color:themeColor("legacyRedText")}}>{v}</div>)}
-          </div>
-        )}
-        {divergencias.length>0&&(
-          <div style={{...S.card,background:themeColor("orangeBlock"),border:"1px solid #f9731644",marginBottom:10}}>
-            <div style={{color:themeColor("warning"),fontWeight:700,fontSize:"12px",marginBottom:4}}>⚡ {divergencias.length} caso(s) abierto(s) afectado(s) por cambios en catálogo</div>
-            {divergencias.map(x=>(
-              <div key={x.caseId} style={{fontSize:"11px",color:themeColor("mutedAlt"),marginBottom:2}}>
-                <span style={{fontFamily:"monospace",color:themeColor("muted")}}>{x.caseId}</span> — {x.div?.msg}
-              </div>
-            ))}
-          </div>
-        )}
-        <div style={{...S.g4,marginBottom:10}}>
-          {[{l:"Total",v:localCatalog.length,c:themeColor("primary")},{l:"Activos global",v:localCatalog.filter(l=>l.activoGlobal).length,c:themeColor("success")},{l:"Activos elección",v:localCatalog.filter(l=>l.activoEnEleccionActual).length,c:themeColor("purpleLight")},{l:"Inactivos (SD)",v:localCatalog.filter(l=>!l.activoGlobal).length,c:themeColor("danger")}].map(k=>(
-            <div key={k.l} style={S.card}><div style={{color:k.c,fontSize:"20px",fontWeight:700}}>{k.v}</div><div style={{color:themeColor("muted"),fontSize:"11px"}}>{k.l}</div></div>
-          ))}
-        </div>
-        <div style={{...S.card,marginBottom:8,display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
-          <select style={{...S.inp,width:"180px"}} value={catRegion} onChange={e=>{setCatRegion(e.target.value);setCatCommune("");}}>
-            {regionOptions.map((o)=><option key={o.code} value={o.code}>{o.name}</option>)}
-          </select>
-          <select style={{...S.inp,width:"160px"}} value={catCommune} onChange={e=>setCatCommune(e.target.value)} disabled={catRegion==="ALL"}>
-            <option value="">Todas las comunas</option>
-            {Object.entries(rData?.communes||{}).map(([k,v])=><option key={k} value={k}>{(v as { name?: string }).name}</option>)}
-          </select>
-          <input style={{...S.inp,width:"160px"}} placeholder="🔍 Buscar local..." value={searchCat} onChange={e=>setSearchCat(e.target.value)}/>
-          <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:"12px",color:themeColor("mutedAlt"),whiteSpace:"nowrap"}}>
-            <input type="checkbox" checked={showInactive} onChange={e=>setShowInactive(e.target.checked)}/>
-            Ver inactivos
-          </label>
-        </div>
-        <div style={{...S.card,marginBottom:10,border:"1px solid #22c55e44"}}>
-          <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:8}}>+ AGREGAR LOCAL</div>
-          <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"flex-end"}}>
-            <div style={{flex:1,minWidth:150}}>
-              <label style={S.lbl}>Región</label>
-              <select style={S.inp} value={catRegion} onChange={e=>{setCatRegion(e.target.value);setCatCommune("");}}>
-                {Object.entries(regionsMap).map(([k,v])=><option key={k} value={k}>{v?.name}</option>)}
-              </select>
-            </div>
-            <div style={{flex:1,minWidth:140}}>
-              <label style={S.lbl}>Comuna *</label>
-              <select style={S.inp} value={catCommune} onChange={e=>setCatCommune(e.target.value)}>
-                <option value="">Seleccione...</option>
-                {Object.entries(rData?.communes||{}).map(([k,v])=><option key={k} value={k}>{v.name}</option>)}
-              </select>
-            </div>
-            <div style={{flex:2,minWidth:200}}>
-              <label style={S.lbl}>Nombre *</label>
-              <input style={S.inp} placeholder="Ej: Liceo Nuevo 2027" value={newNombre} onChange={e=>setNewNombre(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"){catalogAddLocal(newNombre,catRegion,catCommune,currentUser);setNewNombre("");}}}/>
-            </div>
-            <button style={{...S.btn("success"),height:32,whiteSpace:"nowrap"}} onClick={()=>{catalogAddLocal(newNombre,catRegion,catCommune,currentUser);setNewNombre("");}}>+ Agregar</button>
-          </div>
-        </div>
-        <div style={S.card}>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 110px 80px 80px 70px 120px",gap:6,padding:"4px 0",borderBottom:"1px solid #e5e7eb",fontSize:"10px",color:themeColor("mutedDark"),fontWeight:700}}>
-            <span>LOCAL</span><span>CÓDIGO</span><span>GLOBAL</span><span>ELECCIÓN</span><span>ORIGEN</span><span>ACCIONES</span>
-          </div>
-          <div style={{maxHeight:400,overflowY:"auto"}}>
-            {filtered.length===0&&<div style={{color:themeColor("mutedDark"),textAlign:"center",padding:20}}>Sin locales para los filtros</div>}
-            {filtered.map(l=>{
-              const hasDivCase=divergencias.some(d=>cases.find(c=>c.id===d.caseId)?.localSnapshot?.idLocal===l.idLocal);
-              return(
-                <div key={l.idLocal} style={{display:"grid",gridTemplateColumns:"1fr 110px 80px 80px 70px 120px",gap:6,padding:"5px 0",borderBottom:"1px solid #e5e7eb",alignItems:"center",opacity:l.activoGlobal?1:0.5}}>
-                  <div>
-                    <div style={{fontWeight:600,fontSize:"12px",color:l.activoGlobal?themeColor("legacySlate"):themeColor("mutedDark"),display:"flex",alignItems:"center",gap:4}}>
-                      {l.nombre}
-                      {hasDivCase && (
-                        <Badge style={{ ...S.badge(themeColor("warning")), fontSize: "8px" }} size="xs">⚡ caso activo</Badge>
-                      )}
-                    </div>
-                    <div style={{fontSize:"10px",color:themeColor("mutedDark")}}>{regionsMap[l.region]?.communes?.[l.commune]?.name||l.commune}</div>
-                    {l.fechaDesactivacion&&<div style={{fontSize:"9px",color:themeColor("danger")}}>SD: {fmtDate(l.fechaDesactivacion)}</div>}
-                  </div>
-                  <span style={{fontFamily:"monospace",fontSize:"10px",color:themeColor("mutedDark")}}>{l.idLocal}</span>
-                  <Badge style={S.badge(l.activoGlobal ? themeColor("success") : themeColor("danger"))} size="sm">{l.activoGlobal ? "Activo" : "Inactivo"}</Badge>
-                  <Badge style={S.badge(l.activoEnEleccionActual ? themeColor("purpleLight") : themeColor("mutedDarker"))} size="sm">{l.activoEnEleccionActual ? "Sí" : "No"}</Badge>
-                  <span style={{fontSize:"10px",color:themeColor("mutedDark")}}>{l.origenSeed?"Seed":"Manual"}</span>
-                  <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                    {l.activoGlobal?(
-                      <>
-                        <button style={{...S.btn(l.activoEnEleccionActual?"dark":"primary"),fontSize:"9px",padding:"2px 6px"}} onClick={()=>catalogToggleEleccion(l.idLocal,currentUser)}>{l.activoEnEleccionActual?"↓ Elec.":"↑ Elec."}</button>
-                        <button style={{...S.btn("danger"),fontSize:"9px",padding:"2px 6px"}} onClick={()=>{if(window.confirm(`¿Desactivar "${l.nombre}"?${hasDivCase?" ⚠️ Tiene caso(s) activo(s)":""}`))catalogDeactivate(l.idLocal,currentUser);}}>SD</button>
-                      </>
-                    ):(
-                      <button style={{...S.btn("success"),fontSize:"9px",padding:"2px 6px"}} onClick={()=>catalogReactivate(l.idLocal,currentUser)}>Reactiv.</button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-        <div style={{...S.card,marginTop:10}}>
-          <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:6}}>AUDITORÍA DE CATÁLOGO</div>
-          <div style={{maxHeight:130,overflowY:"auto"}}>
-            {[...auditLog].filter(e=>["LOCAL_CREATED","LOCAL_DEACTIVATED","LOCAL_REACTIVATED","LOCAL_ELECTION_TOGGLED"].includes(e.type)).slice(-20).reverse().map((e,i)=>{
-              const u=USERS.find(u=>u.id===e.actor);
-              const tc: Record<string, string> = {LOCAL_CREATED:themeColor("success"),LOCAL_DEACTIVATED:themeColor("danger"),LOCAL_REACTIVATED:themeColor("warning"),LOCAL_ELECTION_TOGGLED:themeColor("purpleLight")};
-              return<div key={i} style={{display:"flex",gap:6,fontSize:"10px",padding:"3px 0",borderBottom:"1px solid #e5e7eb",flexWrap:"wrap"}}>
-                <span style={{color:themeColor("mutedDark"),width:108,flexShrink:0}}>{fmtDate(e.at)}</span>
-                <span style={{color:tc[e.type]||themeColor("muted"),fontWeight:600,width:160,flexShrink:0}}>{e.type}</span>
-                <span style={{color:themeColor("muted"),width:100,flexShrink:0}}>{u?.name||e.actor}</span>
-                <span style={{color:themeColor("mutedAlt"),flexGrow:1}}>{e.summary}</span>
-              </div>;
-            })}
-            {!auditLog.some(e=>["LOCAL_CREATED","LOCAL_DEACTIVATED","LOCAL_REACTIVATED","LOCAL_ELECTION_TOGGLED"].includes(e.type))&&(
-              <div style={{color:themeColor("mutedDark"),textAlign:"center",padding:12}}>Sin operaciones de catálogo</div>
-            )}
-          </div>
-        </div>
-      </div>
-    );
+  // ─── CATALOG VIEW (gate inyectado en views/catalog) ────────────────────────
+  const catalogGate = {
+    activeRegion,
+    regionOptions,
+    regionsMap,
+    localCatalog,
+    divergencias,
+    cases,
+    S,
+    themeColor,
+    catalogSelfCheck,
+    currentUser,
+    catalogAddLocal,
+    catalogToggleEleccion,
+    catalogDeactivate,
+    catalogReactivate,
+    auditLog,
+    USERS,
+    fmtDate,
+    UI_TEXT_GOVERNANCE,
+    Badge,
   };
 
   // ─── REPORTS ─────────────────────────────────────────────────────────────
-  const Reports=()=>{
-    const avgAct=cases.filter(c=>c.reportedAt&&c.origin?.detectedAt).map(c=>timeDiff(c.origin!.detectedAt,c.reportedAt!)).filter(v=>v!=null);
-    const avgAcc=cases.filter(c=>c.firstActionAt&&c.reportedAt).map(c=>timeDiff(c.reportedAt,c.firstActionAt)).filter(v=>v!=null);
-    const metricas=[
-      ["T. prom. activación", avgAct.length?Math.round(avgAct.reduce((a,b)=>a+b,0)/avgAct.length):null, "min"],
-      ["T. prom. 1ª acción",  avgAcc.length?Math.round(avgAcc.reduce((a,b)=>a+b,0)/avgAcc.length):null, "min"],
-      ["SLA vencidos",        cases.filter(c=>isSlaVencido(c)).length, "casos"],
-      ["Completitud promedio",cases.length?Math.round(cases.reduce((s,c)=>s+(c.completeness??0),0)/cases.length):0, "%"],
-      ["Divergencias activas",divergencias.length, "casos"],
-    ];
-    return(
-      <div>
-        <h2 style={{margin:"0 0 12px",fontSize:"16px"}}>Respaldos y reportes</h2>
-        <div style={{...S.g4,marginBottom:10}}>
-          {[{l:"Total casos",v:cases.length,c:themeColor("primary")},{l:"Críticos",v:cases.filter(c=>c.criticality==="CRITICA").length,c:themeColor("danger")},{l:"Bypass Flagged",v:cases.filter(c=>c.bypassFlagged&&!c.bypassValidated).length,c:themeColor("warning")},{l:"Con Snapshot",v:cases.filter(c=>c.localSnapshot).length,c:themeColor("purple")}].map(k=>(
-            <div key={k.l} style={S.card}><div style={{color:k.c,fontSize:"22px",fontWeight:700}}>{k.v}</div><div style={{color:themeColor("muted"),fontSize:"11px"}}>{k.l}</div></div>
-          ))}
-        </div>
-        <div style={{...S.g2,marginBottom:10}}>
-          <div style={S.card}>
-            <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:8}}>MÉTRICAS</div>
-            {metricas.map(([l,v,u])=>(
-              <div key={l} style={{display:"flex",justifyContent:"space-between",marginBottom:4,fontSize:"12px"}}>
-                <span style={{color:themeColor("muted")}}>{l}</span>
-                <span style={{color:v!=null?themeColor("legacySlate"):themeColor("mutedDark"),fontWeight:600}}>{v!=null?`${v} ${u}`:"—"}</span>
-              </div>
-            ))}
-          </div>
-          <div style={S.card}>
-            <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:8}}>CRITICIDAD</div>
-            {(["CRITICA","ALTA","MEDIA","BAJA"] as Criticality[]).map(cr=>{const n=cases.filter(c=>c.criticality===cr).length;return(
-              <div key={cr} style={{marginBottom:6}}>
-                <div style={{display:"flex",justifyContent:"space-between",fontSize:"11px",marginBottom:2}}>
-                  <span style={{color:critColor(cr)}}>{cr}</span><span style={{color:themeColor("mutedAlt")}}>{n}</span>
-                </div>
-                <div style={{height:4,background:themeColor("legacyDark3"),borderRadius:2}}>
-                  <div style={{height:"100%",width:cases.length?`${n/cases.length*100}%`:"0%",background:critColor(cr),borderRadius:2}}/>
-                </div>
-              </div>
-            );})}
-          </div>
-        </div>
-        <div id="reports-export" style={{...S.card,marginBottom:10,scrollMarginTop:80}}>
-          <div style={{color:themeColor("muted"),fontSize:"11px",fontWeight:700,marginBottom:8}}>RESPALDOS</div>
-          <input ref={importJsonInputRef} type="file" accept="application/json,.json" style={{display:"none"}} onChange={importJSONSelected} />
-          <input ref={importFileRef} type="file" accept="application/json" style={{display:"none"}} onChange={(e)=>{const f=e.target.files?.[0];e.currentTarget.value="";if(f)void onImportStateFile(f);}} />
-          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-            {canDo("export",currentUser)&&<button style={S.btn("primary")} onClick={exportCSV}>📊 Excel — Lista de casos</button>}
-            {canDo("export",currentUser)&&<button style={S.btn("primary")} onClick={exportJSON}>📦 Respaldo completo</button>}
-            <span id="reports-import">{canDo("export",currentUser)&&<button style={S.btn("primary")} onClick={importJSONClick}>⬆️ Cargar respaldo</button>}</span>
-            {canDo("export",currentUser)&&<button style={S.btn("dark")} onClick={exportAuditCSV}>📑 Excel — Historial</button>}
-          </div>
-          <div style={{fontSize:"11px",color:themeColor("muted"),marginTop:8}}>Puedes descargar un respaldo del sistema o cargar uno oficial cuando sea necesario.</div>
-        </div>
-        {divergencias.length>0&&(
-          <div style={{...S.card,border:"1px solid #f9731644"}}>
-            <div style={{color:themeColor("warning"),fontWeight:700,fontSize:"12px",marginBottom:8}}>⚡ Divergencias catálogo activas ({divergencias.length})</div>
-            {divergencias.map(x=>(
-              <div key={x.caseId} style={{display:"flex",gap:8,alignItems:"center",marginBottom:4,fontSize:"11px",padding:"4px 0",borderBottom:"1px solid #e5e7eb"}}>
-                <span style={{fontFamily:"monospace",color:themeColor("muted"),flexShrink:0}}>{x.caseId}</span>
-                <span style={{color:themeColor("mutedAlt"),flex:1}}>{x.caseSummary.slice(0,50)}</span>
-                <span style={{color:themeColor("warning")}}>{x.div?.msg}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    );
+  const reportsGate: ReportsGate = {
+    cases,
+    divergencias,
+    S,
+    themeColor: themeColor as (key: string) => string,
+    critColor,
+    timeDiff,
+    isSlaVencido,
+    importJsonInputRef,
+    importFileRef,
+    importJSONSelected: (e: React.ChangeEvent<HTMLInputElement>): void => { void importJSONSelected(e); },
+    onImportStateFile: (file: File): void => { void onImportStateFile(file); },
+    canDo: canDo as (action: string, user: unknown, c?: CaseItem | null) => boolean,
+    currentUser,
+    exportCSV,
+    exportJSON,
+    importJSONClick,
+    exportAuditCSV,
   };
 
   // ─── AUDIT VIEW ───────────────────────────────────────────────────────────
-  const AuditView=()=>{
-    const{ok,failIndex}=chainResult;
-    return(
-      <div>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:6}}>
-          <h2 style={{margin:0,fontSize:"16px"}}>Auditoría — Cadena Hash</h2>
-          <div style={{display:"flex",gap:6,alignItems:"center"}}>
-            <Tooltip content={ok ? "Cadena íntegra (hashes coinciden)" : "Cadena comprometida (revisar integridad desde el índice indicado)"}>
-              <Badge
-                style={{ ...S.badge(ok ? themeColor("success") : themeColor("danger")), cursor: "help" }}
-                size="sm"
-              >
-                {ok ? `🔗 Íntegra (${auditLog.length} eventos)` : `⚠️ Comprometida en evento ${failIndex}`}
-              </Badge>
-            </Tooltip>
-            {canDo("export",currentUser)&&<button style={S.btn("dark")} onClick={exportAuditCSV}>⬇ CSV</button>}
-          </div>
-        </div>
-        <div style={S.card}>
-          <div style={{display:"grid",gridTemplateColumns:"110px 150px 100px 100px 1fr 80px",gap:4,padding:"4px 0",borderBottom:"1px solid #e5e7eb",fontSize:"10px",color:themeColor("mutedDark"),fontWeight:700}}>
-            <span>TIMESTAMP</span><span>TIPO</span><span>ACTOR</span><span>CASO</span><span>RESUMEN</span><span>HASH</span>
-          </div>
-          <div style={{maxHeight:500,overflowY:"auto"}}>
-            {[...auditLog].reverse().map((e,i)=>{
-              const u=USERS.find(u=>u.id===e.actor);
-              const realIdx=auditLog.length-1-i;
-              const isFail=!ok&&realIdx===failIndex;
-              const tc: Record<string, string> = {CASE_CREATED:themeColor("success"),BYPASS_USED:themeColor("warning"),BYPASS_FLAGGED:themeColor("danger"),ESCALATED:themeColor("danger"),STATUS_CHANGED:themeColor("warningAlt"),ACTION_ADDED:themeColor("mutedAlt"),EXPORT_DONE:themeColor("purple"),LOCAL_CREATED:themeColor("success"),LOCAL_DEACTIVATED:themeColor("danger"),LOCAL_REACTIVATED:themeColor("warning"),LOCAL_ELECTION_TOGGLED:themeColor("purpleLight")};
-              return<div key={i} style={{display:"grid",gridTemplateColumns:"110px 150px 100px 100px 1fr 80px",gap:4,padding:"4px 0",borderBottom:"1px solid #e5e7eb",fontSize:"10px",background:isFail?themeColor("legacyRedBlock"):"transparent"}}>
-                <span style={{color:themeColor("mutedDark")}}>{fmtDate(e.at)}</span>
-                <span style={{color:tc[e.type]||themeColor("muted"),fontWeight:600}}>{e.type}</span>
-                <span style={{color:themeColor("muted")}}>{u?.name||e.actor}</span>
-                <span style={{color:themeColor("mutedDark"),fontFamily:"monospace"}}>{e.caseId?.slice(-10)||"—"}</span>
-                <span style={{color:themeColor("mutedAlt")}}>{e.summary}</span>
-                <span style={{color:isFail?themeColor("danger"):themeColor("legacyGrayBorder"),fontFamily:"monospace"}}>{e.hash}</span>
-              </div>;
-            })}
-          </div>
-        </div>
-      </div>
-    );
+  const auditGate: AuditGate = {
+    auditLog,
+    chainResult,
+    S,
+    themeColor: themeColor as (key: string) => string,
+    fmtDate,
+    USERS,
+    UI_TEXT_GOVERNANCE,
+    canDo: canDo as (action: string, user: unknown, c?: CaseItem | null) => boolean,
+    currentUser,
+    exportAuditCSV,
+    Badge: Badge as unknown as AuditGate["Badge"],
+    Tooltip: Tooltip as unknown as AuditGate["Tooltip"],
   };
 
   // ─── SIMULATION VIEW ──────────────────────────────────────────────────────
-  const SimulationView=()=>(
-    <div>
-      <h2 style={{margin:"0 0 12px",fontSize:"16px"}}>Simulación de Día de Elección</h2>
-      <div style={{...S.card,marginBottom:10,border:"1px solid #6366f144"}}>
-        <div style={{color:themeColor("mutedAlt"),fontSize:"11px",marginBottom:8}}>Genera 10 incidentes para entrenamiento. Los casos incluyen snapshot de local (v1.9).</div>
-        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-          <button style={S.btn("primary")} onClick={runSimulation}>▶ Generar Simulación</button>
-          {simCases.length>0&&<button style={S.btn("warning")} onClick={loadSimCases}>Cargar en Dashboard</button>}
-        </div>
-      </div>
-      {simReport&&(
-        <div style={{...S.g4,marginBottom:10}}>
-          {[{l:"Total",v:simReport.total,c:themeColor("primary")},{l:"Críticos",v:simReport.critica,c:themeColor("danger")},{l:"Altos",v:simReport.alta,c:themeColor("warning")},{l:"Score prom.",v:simReport.avgScore,c:themeColor("warningAlt")}].map(k=>(
-            <div key={k.l} style={S.card}><div style={{color:k.c,fontSize:"22px",fontWeight:700}}>{k.v}</div><div style={{color:themeColor("muted"),fontSize:"11px"}}>{k.l}</div></div>
-          ))}
-        </div>
-      )}
-      {simCases.map(c=>(
-        <div key={c.id} style={{...S.card,borderLeft:`3px solid ${critColor(c.criticality)}`,marginBottom:4}}>
-          <div style={{display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:4}}>
-            <div style={{display:"flex",gap:4,alignItems:"center",flexWrap:"wrap"}}>
-              <span style={{fontFamily:"monospace",color:themeColor("muted"),fontSize:"10px"}}>{c.id}</span>
-              <Badge style={S.badge(critColor(c.criticality))} size="sm">{c.criticality}</Badge>
-              <span style={{fontSize:"11px",fontWeight:600}}>{c.summary}</span>
-            </div>
-            <div style={{display:"flex",gap:4,alignItems:"center"}}>
-              <span style={{fontSize:"10px",color:themeColor("infoIcon")}}>🏫 {c.local}</span>
-              {c.localSnapshot&&<span style={{fontSize:"9px",color:themeColor("purple")}}>📸</span>}
-            </div>
-          </div>
-        </div>
-      ))}
-      {simCases.length>0&&!simSurvey.submitted&&(
-        <div style={{...S.card,marginTop:10,border:"1px solid #6366f144"}}>
-          <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:8}}>Encuesta post-simulación</div>
-          {[{key:"claridad",label:"¿El sistema fue claro bajo presión?"},{key:"respaldo",label:"¿Los snapshots de local aportan confianza?"}].map(q=>(
-            <div key={q.key} style={{marginBottom:8}}>
-              <div style={{fontSize:"12px",color:themeColor("mutedAlt"),marginBottom:4}}>{q.label}</div>
-              <div style={{display:"flex",gap:4}}>
-                {[1,2,3,4,5].map(n=>(
-                  <button key={n} onClick={()=>setSimSurvey(p=>({...p,[q.key]:n}))} style={{padding:"4px 10px",borderRadius:3,border:"1px solid",cursor:"pointer",background:(simSurvey as Record<string, number|boolean>)[q.key]===n?themeColor("primary"):"transparent",borderColor:(simSurvey as Record<string, number|boolean>)[q.key]===n?themeColor("primary"):themeColor("mutedDarker"),color:(simSurvey as Record<string, number|boolean>)[q.key]===n?themeColor("white"):themeColor("muted")}}>{n}</button>
-                ))}
-              </div>
-            </div>
-          ))}
-          <button style={S.btn("success")} onClick={()=>setSimSurvey(p=>({...p,submitted:true}))}>Enviar</button>
-        </div>
-      )}
-      {simSurvey.submitted&&<div style={{...S.card,marginTop:10,color:themeColor("success"),fontWeight:600}}>✓ Encuesta registrada — Claridad: {simSurvey.claridad}/5 · Snapshots: {simSurvey.respaldo}/5</div>}
-    </div>
-  );
+  const simulationGate: SimulationGate = {
+    simCases,
+    simReport,
+    simSurvey,
+    setSimSurvey,
+    runSimulation,
+    loadSimCases,
+    S,
+    themeColor: themeColor as (key: string) => string,
+    critColor: critColor as (criticality: string) => string,
+    Badge: Badge as unknown as SimulationGate["Badge"],
+  };
 
   // ─── CHECKLIST ────────────────────────────────────────────────────────────
-  const ChecklistView=()=>{
-    const[checks,setChecks]=useState<Record<string, boolean>>({});
-    const items=[
-      {id:"c1",cat:"Pre-apertura",text:"Verificar locales activos en catálogo (activoGlobal + activoEnEleccionActual)"},
-      {id:"c2",cat:"Pre-apertura",text:"Confirmar año electoral correcto en Config"},
-      {id:"c3",cat:"Pre-apertura",text:"Revisar divergencias pendientes del catálogo (panel naranja)"},
-      {id:"c4",cat:"Pre-apertura",text:"Verificar acceso de todos los roles al SCCE"},
-      {id:"c5",cat:"Apertura",    text:"Confirmar apertura de mesas en locales críticos"},
-      {id:"c6",cat:"Apertura",    text:"Testear registro de incidente con snapshot de local"},
-      {id:"c7",cat:"Operación",   text:"Monitorear panel de divergencias en Dashboard"},
-      {id:"c8",cat:"Operación",   text:"Revisar bypass flagged pendientes de validación"},
-      {id:"c9",cat:"Operación",   text:"Verificar integridad cadena auditoría (badge verde)"},
-      {id:"c10",cat:"Cierre",     text:"Exportar CSV y JSON de casos"},
-      {id:"c11",cat:"Cierre",     text:"Exportar auditoría completa"},
-      {id:"c12",cat:"Cierre",     text:"Verificar casos sin cerrar y completitud ≥80%"},
-    ];
-    const cats=[...new Set(items.map(i=>i.cat))];
-    const done=Object.values(checks).filter(Boolean).length;
-    return(
-      <div>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-          <h2 style={{margin:0,fontSize:"16px"}}>Checklist Electoral</h2>
-          <Badge style={S.badge(done===items.length?themeColor("success"):themeColor("primary"))} size="sm">
-            {done}/{items.length}
-          </Badge>
-        </div>
-        {cats.map(cat=>(
-          <div key={cat} style={{...S.card,marginBottom:8}}>
-            <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:6}}>{cat.toUpperCase()}</div>
-            {items.filter(i=>i.cat===cat).map(it=>(
-              <label key={it.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,cursor:"pointer"}}>
-                <input type="checkbox" checked={!!checks[it.id]} onChange={e=>setChecks(p=>({...p,[it.id]:e.target.checked}))}/>
-                <span style={{color:checks[it.id]?themeColor("success"):themeColor("legacySlate"),fontSize:"12px",textDecoration:checks[it.id]?"line-through":"none"}}>{it.text}</span>
-              </label>
-            ))}
-          </div>
-        ))}
-      </div>
-    );
+  const checklistGate: ChecklistGate = {
+    S,
+    themeColor: themeColor as (key: string) => string,
+    Badge: Badge as unknown as ChecklistGate["Badge"],
   };
 
   // ─── CONFIG VIEW ──────────────────────────────────────────────────────────
-  const ConfigView=()=>{
-    const[draft,setDraft]=useState({...electionConfig});
-    const[confirmYear,setConfirmYear]=useState(false);
-    const yearChanged=draft.year!==electionConfig.year;
-    const activeCatalogCount=localCatalog.filter(l=>l.activoEnEleccionActual).length;
-    function applyConfig(){
-      if(!currentUser)return;
-      if(yearChanged&&!confirmYear)return notify("Confirma el cambio de año electoral","error");
-      setElectionConfig({...draft,name:draft.name||`Elecciones Generales ${draft.year}`});
-      if(yearChanged){
-        setAuditLog(prev=>appendEvent(prev,"ELECTION_YEAR_CHANGED",currentUser.id,currentUser.role,null,`Año: ${electionConfig.year} → ${draft.year}. Locales activos: ${activeCatalogCount}`));
-        notify(`Año actualizado a ${draft.year}. Revise activación de locales en Catálogo.`,"warning");
-      } else {
-        notify("Configuración guardada","success");
-      }
-      setConfirmYear(false);
+  const applyConfig = (draft: ElectionConfigShape, confirmYear: boolean) => {
+    if (!currentUser) return;
+    const yearChanged = draft.year !== electionConfig.year;
+    const activeCatalogCount = localCatalog.filter((l) => l.activoEnEleccionActual).length;
+    if (yearChanged && !confirmYear) return notify("Confirma el cambio de año electoral", "error");
+    setElectionConfig({ ...draft, name: draft.name || `Elecciones Generales ${draft.year}` });
+    if (yearChanged) {
+      setAuditLog((prev) =>
+        appendEvent(
+          prev,
+          "ELECTION_YEAR_CHANGED",
+          currentUser.id,
+          currentUser.role,
+          null,
+          `Año: ${electionConfig.year} → ${draft.year}. Locales activos: ${activeCatalogCount}`
+        )
+      );
+      notify(`Año actualizado a ${draft.year}. Revise activación de locales en Catálogo.`, "warning");
+    } else {
+      notify("Configuración guardada", "success");
     }
-    return(
-      <div>
-        <h2 style={{margin:"0 0 12px",fontSize:"16px"}}>Configuración</h2>
-        <div style={{...S.card,marginBottom:10}}>
-          <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:10}}>DATOS DE LA ELECCIÓN</div>
-          <div style={{...S.g2,marginBottom:8}}>
-            <div>
-              <label style={S.lbl}>Nombre del proceso</label>
-              <input style={S.inp} value={draft.name} onChange={e=>setDraft(p=>({...p,name:e.target.value}))}/>
-            </div>
-            <div>
-              <label style={S.lbl}>Fecha</label>
-              <input style={S.inp} type="date" value={draft.date} onChange={e=>setDraft(p=>({...p,date:e.target.value}))}/>
-            </div>
-          </div>
-          <div style={{marginBottom:10}}>
-            <label style={S.lbl}>Año Electoral (≥{MIN_ELECTION_YEAR})</label>
-            <div style={{display:"flex",gap:6,alignItems:"flex-start",flexWrap:"wrap"}}>
-              <input style={{...S.inp,width:100}} type="number" min={MIN_ELECTION_YEAR} max={2099} value={draft.year}
-                onChange={e=>{const y=parseInt(e.target.value);if(y>=MIN_ELECTION_YEAR&&y<=2099){setDraft(p=>({...p,year:y,name:`Elecciones Generales ${y}`,date:`${y}-11-15`}));setConfirmYear(false);}}}
-              />
-              {yearChanged&&(
-                <div style={{...S.card,background:themeColor("orangeBlock"),border:"1px solid #f9731644",padding:"8px 10px",flex:1}}>
-                  <div style={{color:themeColor("warning"),fontSize:"11px",fontWeight:600,marginBottom:4}}>⚠️ Cambio: {electionConfig.year} → {draft.year}</div>
-                  <div style={{color:themeColor("muted"),fontSize:"10px",marginBottom:6}}>{activeCatalogCount} local(es) activos en elección actual. Snapshots existentes quedan intactos.</div>
-                  <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}>
-                    <input type="checkbox" checked={confirmYear} onChange={e=>setConfirmYear(e.target.checked)}/>
-                    <span style={{fontSize:"11px",color:themeColor("warning"),fontWeight:600}}>Confirmo el cambio de año</span>
-                  </label>
-                </div>
-              )}
-            </div>
-          </div>
-          <button style={S.btn("success")} onClick={applyConfig}>Guardar configuración</button>
-        </div>
-        <div style={{...S.card,marginBottom:10}}>
-          <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:6}}>INFORMACIÓN DEL SISTEMA</div>
-          <div style={{fontSize:"12px",color:themeColor("muted")}}>
-            {[["Versión",`SCCE v${APP_VERSION}`],["Elección activa",electionConfig.name],["Año electoral",electionConfig.year],["Locales en catálogo",localCatalog.length],["Activos en elección",activeCatalogCount],["Cadena auditoría",chainResult.ok?"ÍNTEGRA ✓":"COMPROMETIDA ⚠️"],["Divergencias activas",divergencias.length]].map(([l,v])=>(
-              <div key={l} style={{marginBottom:3}}><span style={{color:themeColor("mutedDark")}}>{l}:</span> <span style={{color:themeColor("mutedAlt")}}>{String(v)}</span></div>
-            ))}
-            <div style={{marginTop:6,color:themeColor("mutedDarker"),fontSize:"10px"}}>Sin backend · Sin BD · Auditoría append-only · Snapshots v1.9</div>
-          </div>
-        </div>
-        <div id="config-reset" style={{...S.card,scrollMarginTop:80}}>
-          <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:6}}>RESETEAR SISTEMA</div>
-          <div style={{color:themeColor("muted"),fontSize:"11px",marginBottom:6}}>Restaura datos de demostración. No reversible.</div>
-          <button style={S.btn("danger")} onClick={()=>{if(window.confirm("¿Resetear todo el sistema?"))doReset();}}>Reset Demo</button>
-        </div>
-      </div>
-    );
+  };
+  const configGate: ConfigGate = {
+    electionConfig,
+    applyConfig,
+    localCatalog,
+    chainResult,
+    divergencias,
+    APP_VERSION,
+    MIN_ELECTION_YEAR,
+    doReset,
+    S,
+    themeColor: themeColor as (key: string) => string,
   };
 
   // ─── FIRMA Y CONFIANZA (4.3.b) ─────────────────────────────────────────────
-  const TrustView = () => {
-    const [status, setStatus] = useState<{ cryptoAvailable: boolean; hasKey: boolean; trustedCount: number } | null>(null);
-    const [entriesWithFp, setEntriesWithFp] = useState<{ alias: string; addedAt: string; reason: string; publicKeyB64: string; fingerprint: string }[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [addForm, setAddForm] = useState({ alias: "", publicKeyB64: "", reason: "" });
-
-    const load = async () => {
-      setLoading(true);
-      let cryptoAvailable = false;
-      try {
-        await crypto.subtle.digest("SHA-256", new Uint8Array(1));
-        cryptoAvailable = true;
-      } catch {
-        cryptoAvailable = false;
-      }
-      const hasKey = await hasSigningKey();
-      const entries = await getTrustedEntries();
-      const trustedCount = entries.length;
-      const withFp = await Promise.all(
-        entries.map(async (e) => ({
-          ...e,
-          fingerprint: await publicKeyFingerprintShort(e.publicKeyB64),
-        }))
+  const onTrustKeyAdded = (alias: string, fingerprint: string): void => {
+    if (currentUser?.id)
+      setAuditLog((prev) =>
+        appendEvent(prev, "TRUST_KEY_ADDED", currentUser.id, currentUser.role, null, `${alias} – ${fingerprint}`)
       );
-      setStatus({ cryptoAvailable, hasKey, trustedCount });
-      setEntriesWithFp(withFp);
-      setLoading(false);
-    };
-
-    useEffect(() => {
-      void load();
-    }, []);
-
-    const recommendation =
-      status == null
-        ? ""
-        : !status.cryptoAvailable
-          ? (UI_TEXT.misc.trustRecommendationNoSupport ?? "Usar sin firma.")
-          : !status.hasKey
-            ? (UI_TEXT.misc.trustRecommendationNoKey ?? "Crear llave para firmar exports.")
-            : (UI_TEXT.misc.trustRecommendationOk ?? "Puedes firmar y verificar autoría.");
-
-    const handleAdd = async () => {
-      const alias = addForm.alias.trim();
-      const pub = addForm.publicKeyB64.trim();
-      const reason = addForm.reason.trim();
-      if (alias.length < 3) return notify(UI_TEXT.errors.trustAddInvalid ?? "Revisa alias, clave pública y motivo.", "error");
-      if (reason.length < 5) return notify(UI_TEXT.errors.trustAddInvalid ?? "Revisa alias, clave pública y motivo.", "error");
-      let validB64 = false;
-      try {
-        atob(pub.replace(/\s/g, ""));
-        if (pub.length >= 40 && pub.length <= 500) validB64 = true;
-      } catch {
-        validB64 = false;
-      }
-      if (!validB64) return notify(UI_TEXT.errors.trustAddInvalid ?? "Revisa alias, clave pública y motivo.", "error");
-      try {
-        await addTrustedKey({ publicKeyB64: pub, alias, reason });
-        const fp = await publicKeyFingerprintShort(pub);
-        if (currentUser?.id)
-          setAuditLog((prev) =>
-            appendEvent(prev, "TRUST_KEY_ADDED", currentUser.id, currentUser.role, null, `${alias} – ${fp}`)
-          );
-        notify(UI_TEXT.misc.trustAddedOk ?? "Firmante agregado a confianza.", "success");
-        setAddForm({ alias: "", publicKeyB64: "", reason: "" });
-        void load();
-      } catch {
-        notify(UI_TEXT.errors.trustAddFailed ?? "No se pudo agregar el firmante.", "error");
-      }
-    };
-
-    const handleRemove = async (publicKeyB64: string, alias: string, fingerprint: string) => {
-      if (!globalThis.confirm(`¿Quitar a "${alias}" de la lista de confianza?`)) return;
-      try {
-        await removeTrustedKey(publicKeyB64);
-        if (currentUser?.id)
-          setAuditLog((prev) =>
-            appendEvent(prev, "TRUST_KEY_REMOVED", currentUser.id, currentUser.role, null, `${alias} – ${fingerprint}`)
-          );
-        notify(UI_TEXT.misc.trustRemovedOk ?? "Firmante eliminado de confianza.", "success");
-        void load();
-      } catch {
-        notify(UI_TEXT.errors.trustRemoveFailed ?? "No se pudo quitar el firmante.", "error");
-      }
-    };
-
-    if (loading && status == null) return <div style={S.card}>Cargando…</div>;
-
-    return (
-      <div>
-        <h2 style={{ margin: "0 0 12px", fontSize: "16px" }}>
-          {UI_TEXT.labels.trustPanelTitle ?? "Firma y confianza"}
-        </h2>
-        <button style={{ ...S.btn("dark"), marginBottom: 12 }} onClick={() => setView("dashboard")}>← Volver</button>
-
-        <div style={{ ...S.card, marginBottom: 10 }}>
-          <div style={{ color: themeColor("mutedAlt"), fontSize: "11px", fontWeight: 600, marginBottom: 8 }}>
-            {UI_TEXT.labels.trustStatusTitle ?? "Estado de verificación"}
-          </div>
-          <div style={{ fontSize: "12px", color: themeColor("legacySlate") }}>
-            <div style={{ marginBottom: 4 }}>
-              La verificación de autoría está:{" "}
-              <strong>{status?.cryptoAvailable ? (UI_TEXT.misc.trustVerificationAvailable ?? "Disponible") : (UI_TEXT.misc.trustVerificationUnavailable ?? "No disponible")}</strong>
-            </div>
-            <div style={{ marginBottom: 4 }}>
-              Llave local:{" "}
-              <strong>{status?.hasKey ? (UI_TEXT.misc.trustLocalKeyConfigured ?? "Configurada") : (UI_TEXT.misc.trustLocalKeyNotConfigured ?? "No configurada")}</strong>
-            </div>
-            <div style={{ marginBottom: 4 }}>
-              Firmantes confiables: <strong>{status?.trustedCount ?? 0}</strong>
-            </div>
-            <div style={{ marginTop: 6, color: themeColor("mutedAlt") }}>{recommendation}</div>
-          </div>
-        </div>
-
-        <div style={{ ...S.card, marginBottom: 10 }}>
-          <div style={{ color: themeColor("mutedAlt"), fontSize: "11px", fontWeight: 600, marginBottom: 8 }}>
-            {UI_TEXT.labels.trustTrustedListTitle ?? "Firmantes confiables"}
-          </div>
-          {entriesWithFp.length === 0 ? (
-            <div style={{ color: themeColor("muted"), fontSize: "12px" }}>Ninguno. Agrega uno más abajo.</div>
-          ) : (
-            <table style={{ width: "100%", fontSize: "12px", borderCollapse: "collapse" }}>
-              <thead>
-                <tr style={{ textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>
-                  <th style={{ padding: "6px 8px" }}>{UI_TEXT.labels.trustAliasLabel ?? "Alias"}</th>
-                  <th style={{ padding: "6px 8px" }}>{UI_TEXT.labels.trustFingerprintLabel ?? "Huella"}</th>
-                  <th style={{ padding: "6px 8px" }}>Agregada</th>
-                  <th style={{ padding: "6px 8px" }}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {entriesWithFp.map((e) => (
-                  <tr key={e.publicKeyB64} style={{ borderBottom: "1px solid #1e293b" }}>
-                    <td style={{ padding: "6px 8px" }}>{e.alias}</td>
-                    <td style={{ padding: "6px 8px", fontFamily: "monospace", fontSize: "11px" }}>{e.fingerprint}</td>
-                    <td style={{ padding: "6px 8px", color: themeColor("muted") }}>{e.addedAt.slice(0, 10)}</td>
-                    <td style={{ padding: "6px 8px" }}>
-                      <button type="button" style={{ ...S.btn("danger"), fontSize: "10px", padding: "2px 8px" }} onClick={() => handleRemove(e.publicKeyB64, e.alias, e.fingerprint)}>🗑 Quitar</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-
-        <div style={{ ...S.card, marginBottom: 10 }}>
-          <div style={{ color: themeColor("mutedAlt"), fontSize: "11px", fontWeight: 600, marginBottom: 8 }}>
-            {UI_TEXT.labels.trustAddTitle ?? "Agregar firmante confiable"}
-          </div>
-          <div style={{ marginBottom: 8 }}>
-            <label style={S.lbl}>{UI_TEXT.labels.trustAliasLabel ?? "Alias"}</label>
-            <input style={S.inp} value={addForm.alias} onChange={(e) => setAddForm((p) => ({ ...p, alias: e.target.value }))} placeholder="Ej: SERVEL Tarapacá – Piloto" />
-          </div>
-          <div style={{ marginBottom: 8 }}>
-            <label style={S.lbl}>{UI_TEXT.labels.trustPublicKeyLabel ?? "Clave pública"}</label>
-            <textarea style={{ ...S.inp, minHeight: 80 }} value={addForm.publicKeyB64} onChange={(e) => setAddForm((p) => ({ ...p, publicKeyB64: e.target.value }))} placeholder="Pega aquí la clave pública en base64" />
-          </div>
-          <div style={{ marginBottom: 8 }}>
-            <label style={S.lbl}>{UI_TEXT.labels.trustReasonLabel ?? "Motivo"}</label>
-            <textarea style={{ ...S.inp, minHeight: 50 }} value={addForm.reason} onChange={(e) => setAddForm((p) => ({ ...p, reason: e.target.value }))} placeholder="Ej: Clave oficial para intercambio entre equipos" />
-          </div>
-          <button style={S.btn("success")} onClick={handleAdd}>
-            {UI_TEXT.misc.trustAddButton ?? "➕ Agregar a confianza"}
-          </button>
-        </div>
-      </div>
-    );
+  };
+  const onTrustKeyRemoved = (alias: string, fingerprint: string): void => {
+    if (currentUser?.id)
+      setAuditLog((prev) =>
+        appendEvent(prev, "TRUST_KEY_REMOVED", currentUser.id, currentUser.role, null, `${alias} – ${fingerprint}`)
+      );
+  };
+  const trustGate: TrustGate = {
+    notify,
+    onTrustKeyAdded,
+    onTrustKeyRemoved,
+    currentUser,
+    UI_TEXT,
+    S,
+    themeColor: themeColor as (key: string) => string,
+    setView: setViewAndCloseHelp as (v: string) => void,
   };
 
-  const OpHome = ({ onNew: _onNew }: { onNew: () => void }) => {
-    void _onNew;
-    return (
-      <div>
-        <div style={{ ...S.card, marginBottom: 10 }}>
-          <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 8 }}>
-            Respuestas recibidas
-          </div>
-          <div style={{ color: themeColor("mutedAlt"), fontSize: 12 }}>
-            Sin respuestas nuevas.
-          </div>
-        </div>
-      </div>
-    );
+  // Objeto único para compuertas (reduce complejidad cognitiva de App)
+  const app: SCCEAppGate = {
+    authToken,
+    activeMembership,
+    currentUser,
+    loginForm,
+    setLoginForm,
+    showPassword,
+    setShowPassword,
+    loginErr,
+    ctxErr,
+    authBusy,
+    doLogin: () => { void doLogin(); },
+    doReset,
+    memberships,
+    setActiveMembership,
+    setAuditLog,
+    apiUser,
+    clearSession,
+    setAuthToken,
+    setApiUser,
+    setMemberships,
+    setCurrentUser,
+    setLoginErr,
+    setCtxErr,
   };
+
+  if (!authToken) return <LoginScreen app={app} />;
+  if (!activeMembership) return <ContextSelectorScreen app={app} />;
+  if (!currentUser) return <LoadingScreen />;
+
+  const user = currentUser;
 
   // ─── LAYOUT PRINCIPAL ─────────────────────────────────────────────────────
   return (
     showTerrainShell ? (
       <TerrainShell
-        currentUser={currentUser}
+        currentUser={user}
         cases={visibleCases}
         selectedCaseId={selectedCase?.id ?? null}
         setSelectedCaseId={(id) => {
           const found = cases.find((x) => x.id === id) ?? null;
           setSelectedCase(found);
-          setView("detail");
+          setViewAndCloseHelp("detail");
         }}
         onGoToDashboard={() => {
           setUiModeAndPersist("FULL");
-          setView("dashboard");
+          setViewAndCloseHelp("dashboard");
           setSelectedCase(null);
         }}
         onLogout={() => {
@@ -3851,7 +4082,7 @@ export default function App(){
           setAuthToken(null);
           setApiUser(null);
           setMemberships([]);
-          setActiveMembershipState(null);
+          setActiveMembership(null);
           setCurrentUser(null);
           setLoginErr("");
           setCtxErr("");
@@ -3859,7 +4090,7 @@ export default function App(){
         membershipsCount={memberships.length}
         onSwitchContext={() => {
           clearActiveMembership();
-          setActiveMembershipState(null);
+          setActiveMembership(null);
         }}
         isCrisisMode={crisisMode}
       >
@@ -3875,13 +4106,11 @@ export default function App(){
               + Nuevo incidente
             </button>
           </div>
-          {view === "new_case" ? (
-            <NewCaseForm hideBack />
-          ) : view === "detail" && selectedCase ? (
-            <CaseDetail />
-          ) : (
-            <OpHome onNew={goNewCase} />
-          )}
+          {(() => {
+            if (view === "new_case") return <NewCaseForm gate={newCaseFormGate} hideBack />;
+            if (view === "detail" && selectedCase) return <CaseDetailView gate={caseDetailGate as CaseDetailGate} selectedCaseId={selectedCase?.id ?? null} />;
+            return <OpHome onNew={goNewCase} />;
+          })()}
         </div>
       </TerrainShell>
     ) : (
@@ -3891,8 +4120,8 @@ export default function App(){
         <span style={{fontWeight:800,color:themeColor("primary"),fontSize:"13px",marginRight:4,letterSpacing:.5}}>SCCE</span>
         <span style={{color:themeColor("mutedDarker"),fontSize:"10px",marginRight:8}}>v{APP_VERSION}</span>
         {(["dashboard","catalog","audit","reports","simulation","checklist","config"] as const).map(v=>(
-          <button key={v} style={S.nBtn(view===v)} onClick={()=>setView(v)}>
-            {v==="dashboard"?"Dashboard":v==="catalog"?"🗂 Catálogo":v==="audit"?"🔗 Auditoría":v==="reports"?"Reportes":v==="simulation"?"Simulación":v==="checklist"?"Checklist":"Config"}
+          <button key={v} style={S.nBtn(view===v)} onClick={()=>setViewAndCloseHelp(v)}>
+            {NAV_LABELS[v] ?? v}
           </button>
         ))}
         <button style={{background:themeColor("greenText"),color:themeColor("white"),border:"1px solid #22c55e66",padding:"5px 12px",borderRadius:"4px",cursor:"pointer",fontSize:"12px",fontWeight:700,boxShadow:"0 0 8px #16a34a44"}} onClick={startNewCase}>+ Incidente</button>
@@ -3908,7 +4137,7 @@ export default function App(){
                 <button type="button" role="menuitem" onClick={()=>importFileRef.current?.click()} style={{width:"100%",textAlign:"left",padding:"8px 10px",borderRadius:10,border:"0",background:"transparent",cursor:"pointer",fontSize:12,fontWeight:800}}>
                   📥 {UI_TEXT.buttons.importState ?? "Importar"}
                 </button>
-                <button type="button" role="menuitem" onClick={()=>{setView("trust");setActionsOpen(false);}} style={{width:"100%",textAlign:"left",padding:"8px 10px",borderRadius:10,border:"0",background:"transparent",cursor:"pointer",fontSize:12,fontWeight:800}}>
+                <button type="button" role="menuitem" onClick={()=>{setViewAndCloseHelp("trust");setActionsOpen(false);}} style={{width:"100%",textAlign:"left",padding:"8px 10px",borderRadius:10,border:"0",background:"transparent",cursor:"pointer",fontSize:12,fontWeight:800}}>
                   🔐 {UI_TEXT.labels.trustPanelTitle ?? "Firma y confianza"}
                 </button>
                 <div style={{height:1,background:"rgba(0,0,0,0.08)",margin:"6px 6px"}} />
@@ -3933,7 +4162,7 @@ export default function App(){
           <Badge
             style={{ ...S.badge(themeColor("warning")) }}
             size="xs"
-            onClick={() => setView("catalog")}
+            onClick={() => setViewAndCloseHelp("catalog")}
           >
             ⚡ {divergencias.length}
           </Badge>
@@ -3950,10 +4179,10 @@ export default function App(){
             </Badge>
           )}
           <Badge style={S.badge(themeColor("mutedDarker"))} size="sm">
-            {currentUser.name}
+            {user.name}
           </Badge>
           <Badge style={{ ...S.badge(themeColor("blueDark")) }} size="xs">
-            {ROLE_LABELS[currentUser.role]}
+            {ROLE_LABELS[user.role]}
           </Badge>
           <button
             style={{ ...S.btn("dark"), fontSize: "11px" }}
@@ -3962,7 +4191,7 @@ export default function App(){
               setAuthToken(null);
               setApiUser(null);
               setMemberships([]);
-              setActiveMembershipState(null);
+              setActiveMembership(null);
               setCurrentUser(null);
               setLoginErr("");
               setCtxErr("");
@@ -3980,16 +4209,16 @@ export default function App(){
       )}
 
       <div style={{maxWidth:1100,margin:"0 auto",padding:"12px 16px"}}>
-        {view==="dashboard"&&<Dashboard/>}
-        {view==="new_case"&&<NewCaseForm/>}
-        {view==="detail"&&<CaseDetail/>}
-        {view==="catalog"&&<CatalogView/>}
-        {view==="audit"&&<AuditView/>}
-        {view==="reports"&&<Reports/>}
-        {view==="simulation"&&<SimulationView/>}
-        {view==="checklist"&&<ChecklistView/>}
-        {view==="config"&&<ConfigView/>}
-        {view==="trust"&&<TrustView/>}
+        {view==="dashboard"&&<DashboardGateWrapper gate={dashboardGate as DashboardGate} />}
+        {view==="new_case"&&<NewCaseForm gate={newCaseFormGate} />}
+        {view==="detail"&&<CaseDetailView gate={caseDetailGate as CaseDetailGate} selectedCaseId={selectedCase?.id ?? null} />}
+        {view==="catalog"&&<CatalogGateWrapper gate={catalogGate as CatalogGate} />}
+        {view==="audit"&&<AuditGateWrapper gate={auditGate} />}
+        {view==="reports"&&<ReportsGateWrapper gate={reportsGate} />}
+        {view==="simulation"&&<SimulationGateWrapper gate={simulationGate} />}
+        {view==="checklist"&&<ChecklistGateWrapper gate={checklistGate} />}
+        {view==="config"&&<ConfigGateWrapper gate={configGate} />}
+        {view==="trust"&&<TrustGateWrapper gate={trustGate} />}
       </div>
       <HelpDrawer open={helpOpen} onClose={()=>setHelpOpen(false)} content={helpByView[view]??helpByView.dashboard} caseContext={view==="detail"?cases.find((x): x is CaseItem=>x.id===selectedCase?.id)??null:null} />
     </div>
