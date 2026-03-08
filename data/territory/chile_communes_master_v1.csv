@@ -1,0 +1,347 @@
+﻿regionCode,regionName,provinceCode,provinceName,communeCode,communeName,isActive,source,updatedAt
+01,Tarapacá,11,Iquique,1101,Iquique,true,CUT-2018,2018-09-06T00:00:00.000Z
+01,Tarapacá,11,Iquique,1107,Alto Hospicio,true,CUT-2018,2018-09-06T00:00:00.000Z
+01,Tarapacá,14,Tamarugal,1401,Pozo Almonte,true,CUT-2018,2018-09-06T00:00:00.000Z
+01,Tarapacá,14,Tamarugal,1402,Camiña,true,CUT-2018,2018-09-06T00:00:00.000Z
+01,Tarapacá,14,Tamarugal,1403,Colchane,true,CUT-2018,2018-09-06T00:00:00.000Z
+01,Tarapacá,14,Tamarugal,1404,Huara,true,CUT-2018,2018-09-06T00:00:00.000Z
+01,Tarapacá,14,Tamarugal,1405,Pica,true,CUT-2018,2018-09-06T00:00:00.000Z
+02,Antofagasta,21,Antofagasta,2101,Antofagasta,true,CUT-2018,2018-09-06T00:00:00.000Z
+02,Antofagasta,21,Antofagasta,2102,Mejillones,true,CUT-2018,2018-09-06T00:00:00.000Z
+02,Antofagasta,21,Antofagasta,2103,Sierra Gorda,true,CUT-2018,2018-09-06T00:00:00.000Z
+02,Antofagasta,21,Antofagasta,2104,Taltal,true,CUT-2018,2018-09-06T00:00:00.000Z
+02,Antofagasta,22,El Loa,2201,Calama,true,CUT-2018,2018-09-06T00:00:00.000Z
+02,Antofagasta,22,El Loa,2202,Ollagüe,true,CUT-2018,2018-09-06T00:00:00.000Z
+02,Antofagasta,22,El Loa,2203,San Pedro de Atacama,true,CUT-2018,2018-09-06T00:00:00.000Z
+02,Antofagasta,23,Tocopilla,2301,Tocopilla,true,CUT-2018,2018-09-06T00:00:00.000Z
+02,Antofagasta,23,Tocopilla,2302,María Elena,true,CUT-2018,2018-09-06T00:00:00.000Z
+03,Atacama,31,Copiapó,3101,Copiapó,true,CUT-2018,2018-09-06T00:00:00.000Z
+03,Atacama,31,Copiapó,3102,Caldera,true,CUT-2018,2018-09-06T00:00:00.000Z
+03,Atacama,31,Copiapó,3103,Tierra Amarilla,true,CUT-2018,2018-09-06T00:00:00.000Z
+03,Atacama,32,Chañaral,3201,Chañaral,true,CUT-2018,2018-09-06T00:00:00.000Z
+03,Atacama,32,Chañaral,3202,Diego de Almagro,true,CUT-2018,2018-09-06T00:00:00.000Z
+03,Atacama,33,Huasco,3301,Vallenar,true,CUT-2018,2018-09-06T00:00:00.000Z
+03,Atacama,33,Huasco,3302,Alto del Carmen,true,CUT-2018,2018-09-06T00:00:00.000Z
+03,Atacama,33,Huasco,3303,Freirina,true,CUT-2018,2018-09-06T00:00:00.000Z
+03,Atacama,33,Huasco,3304,Huasco,true,CUT-2018,2018-09-06T00:00:00.000Z
+04,Coquimbo,41,Elqui,4101,La Serena,true,CUT-2018,2018-09-06T00:00:00.000Z
+04,Coquimbo,41,Elqui,4102,Coquimbo,true,CUT-2018,2018-09-06T00:00:00.000Z
+04,Coquimbo,41,Elqui,4103,Andacollo,true,CUT-2018,2018-09-06T00:00:00.000Z
+04,Coquimbo,41,Elqui,4104,La Higuera,true,CUT-2018,2018-09-06T00:00:00.000Z
+04,Coquimbo,41,Elqui,4105,Paihuano,true,CUT-2018,2018-09-06T00:00:00.000Z
+04,Coquimbo,41,Elqui,4106,Vicuña,true,CUT-2018,2018-09-06T00:00:00.000Z
+04,Coquimbo,42,Choapa,4201,Illapel,true,CUT-2018,2018-09-06T00:00:00.000Z
+04,Coquimbo,42,Choapa,4202,Canela,true,CUT-2018,2018-09-06T00:00:00.000Z
+04,Coquimbo,42,Choapa,4203,Los Vilos,true,CUT-2018,2018-09-06T00:00:00.000Z
+04,Coquimbo,42,Choapa,4204,Salamanca,true,CUT-2018,2018-09-06T00:00:00.000Z
+04,Coquimbo,43,Limarí,4301,Ovalle,true,CUT-2018,2018-09-06T00:00:00.000Z
+04,Coquimbo,43,Limarí,4302,Combarbalá,true,CUT-2018,2018-09-06T00:00:00.000Z
+04,Coquimbo,43,Limarí,4303,Monte Patria,true,CUT-2018,2018-09-06T00:00:00.000Z
+04,Coquimbo,43,Limarí,4304,Punitaqui,true,CUT-2018,2018-09-06T00:00:00.000Z
+04,Coquimbo,43,Limarí,4305,Río Hurtado,true,CUT-2018,2018-09-06T00:00:00.000Z
+05,Valparaíso,51,Valparaíso,5101,Valparaíso,true,CUT-2018,2018-09-06T00:00:00.000Z
+05,Valparaíso,51,Valparaíso,5102,Casablanca,true,CUT-2018,2018-09-06T00:00:00.000Z
+05,Valparaíso,51,Valparaíso,5103,Concón,true,CUT-2018,2018-09-06T00:00:00.000Z
+05,Valparaíso,51,Valparaíso,5104,Juan Fernández,true,CUT-2018,2018-09-06T00:00:00.000Z
+05,Valparaíso,51,Valparaíso,5105,Puchuncaví,true,CUT-2018,2018-09-06T00:00:00.000Z
+05,Valparaíso,51,Valparaíso,5107,Quintero,true,CUT-2018,2018-09-06T00:00:00.000Z
+05,Valparaíso,51,Valparaíso,5109,Viña del Mar,true,CUT-2018,2018-09-06T00:00:00.000Z
+05,Valparaíso,52,Isla de Pascua,5201,Isla de Pascua,true,CUT-2018,2018-09-06T00:00:00.000Z
+05,Valparaíso,53,Los Andes,5301,Los Andes,true,CUT-2018,2018-09-06T00:00:00.000Z
+05,Valparaíso,53,Los Andes,5302,Calle Larga,true,CUT-2018,2018-09-06T00:00:00.000Z
+05,Valparaíso,53,Los Andes,5303,Rinconada,true,CUT-2018,2018-09-06T00:00:00.000Z
+05,Valparaíso,53,Los Andes,5304,San Esteban,true,CUT-2018,2018-09-06T00:00:00.000Z
+05,Valparaíso,54,Petorca,5401,La Ligua,true,CUT-2018,2018-09-06T00:00:00.000Z
+05,Valparaíso,54,Petorca,5402,Cabildo,true,CUT-2018,2018-09-06T00:00:00.000Z
+05,Valparaíso,54,Petorca,5403,Papudo,true,CUT-2018,2018-09-06T00:00:00.000Z
+05,Valparaíso,54,Petorca,5404,Petorca,true,CUT-2018,2018-09-06T00:00:00.000Z
+05,Valparaíso,54,Petorca,5405,Zapallar,true,CUT-2018,2018-09-06T00:00:00.000Z
+05,Valparaíso,55,Quillota,5501,Quillota,true,CUT-2018,2018-09-06T00:00:00.000Z
+05,Valparaíso,55,Quillota,5502,La Calera,true,CUT-2018,2018-09-06T00:00:00.000Z
+05,Valparaíso,55,Quillota,5503,Hijuelas,true,CUT-2018,2018-09-06T00:00:00.000Z
+05,Valparaíso,55,Quillota,5504,La Cruz,true,CUT-2018,2018-09-06T00:00:00.000Z
+05,Valparaíso,55,Quillota,5506,Nogales,true,CUT-2018,2018-09-06T00:00:00.000Z
+05,Valparaíso,56,San Antonio,5601,San Antonio,true,CUT-2018,2018-09-06T00:00:00.000Z
+05,Valparaíso,56,San Antonio,5602,Algarrobo,true,CUT-2018,2018-09-06T00:00:00.000Z
+05,Valparaíso,56,San Antonio,5603,Cartagena,true,CUT-2018,2018-09-06T00:00:00.000Z
+05,Valparaíso,56,San Antonio,5604,El Quisco,true,CUT-2018,2018-09-06T00:00:00.000Z
+05,Valparaíso,56,San Antonio,5605,El Tabo,true,CUT-2018,2018-09-06T00:00:00.000Z
+05,Valparaíso,56,San Antonio,5606,Santo Domingo,true,CUT-2018,2018-09-06T00:00:00.000Z
+05,Valparaíso,57,San Felipe de Aconcagua,5701,San Felipe,true,CUT-2018,2018-09-06T00:00:00.000Z
+05,Valparaíso,57,San Felipe de Aconcagua,5702,Catemu,true,CUT-2018,2018-09-06T00:00:00.000Z
+05,Valparaíso,57,San Felipe de Aconcagua,5703,Llay Llay,true,CUT-2018,2018-09-06T00:00:00.000Z
+05,Valparaíso,57,San Felipe de Aconcagua,5704,Panquehue,true,CUT-2018,2018-09-06T00:00:00.000Z
+05,Valparaíso,57,San Felipe de Aconcagua,5705,Putaendo,true,CUT-2018,2018-09-06T00:00:00.000Z
+05,Valparaíso,57,San Felipe de Aconcagua,5706,Santa María,true,CUT-2018,2018-09-06T00:00:00.000Z
+05,Valparaíso,58,Marga Marga,5801,Quilpué,true,CUT-2018,2018-09-06T00:00:00.000Z
+05,Valparaíso,58,Marga Marga,5802,Limache,true,CUT-2018,2018-09-06T00:00:00.000Z
+05,Valparaíso,58,Marga Marga,5803,Olmué,true,CUT-2018,2018-09-06T00:00:00.000Z
+05,Valparaíso,58,Marga Marga,5804,Villa Alemana,true,CUT-2018,2018-09-06T00:00:00.000Z
+06,Región del Libertador Gral. Bernardo O'Higgins,61,Cachapoal,6101,Rancagua,true,CUT-2018,2018-09-06T00:00:00.000Z
+06,Región del Libertador Gral. Bernardo O'Higgins,61,Cachapoal,6102,Codegua,true,CUT-2018,2018-09-06T00:00:00.000Z
+06,Región del Libertador Gral. Bernardo O'Higgins,61,Cachapoal,6103,Coinco,true,CUT-2018,2018-09-06T00:00:00.000Z
+06,Región del Libertador Gral. Bernardo O'Higgins,61,Cachapoal,6104,Coltauco,true,CUT-2018,2018-09-06T00:00:00.000Z
+06,Región del Libertador Gral. Bernardo O'Higgins,61,Cachapoal,6105,Doñihue,true,CUT-2018,2018-09-06T00:00:00.000Z
+06,Región del Libertador Gral. Bernardo O'Higgins,61,Cachapoal,6106,Graneros,true,CUT-2018,2018-09-06T00:00:00.000Z
+06,Región del Libertador Gral. Bernardo O'Higgins,61,Cachapoal,6107,Las Cabras,true,CUT-2018,2018-09-06T00:00:00.000Z
+06,Región del Libertador Gral. Bernardo O'Higgins,61,Cachapoal,6108,Machalí,true,CUT-2018,2018-09-06T00:00:00.000Z
+06,Región del Libertador Gral. Bernardo O'Higgins,61,Cachapoal,6109,Malloa,true,CUT-2018,2018-09-06T00:00:00.000Z
+06,Región del Libertador Gral. Bernardo O'Higgins,61,Cachapoal,6110,Mostazal,true,CUT-2018,2018-09-06T00:00:00.000Z
+06,Región del Libertador Gral. Bernardo O'Higgins,61,Cachapoal,6111,Olivar,true,CUT-2018,2018-09-06T00:00:00.000Z
+06,Región del Libertador Gral. Bernardo O'Higgins,61,Cachapoal,6112,Peumo,true,CUT-2018,2018-09-06T00:00:00.000Z
+06,Región del Libertador Gral. Bernardo O'Higgins,61,Cachapoal,6113,Pichidegua,true,CUT-2018,2018-09-06T00:00:00.000Z
+06,Región del Libertador Gral. Bernardo O'Higgins,61,Cachapoal,6114,Quinta de Tilcoco,true,CUT-2018,2018-09-06T00:00:00.000Z
+06,Región del Libertador Gral. Bernardo O'Higgins,61,Cachapoal,6115,Rengo,true,CUT-2018,2018-09-06T00:00:00.000Z
+06,Región del Libertador Gral. Bernardo O'Higgins,61,Cachapoal,6116,Requínoa,true,CUT-2018,2018-09-06T00:00:00.000Z
+06,Región del Libertador Gral. Bernardo O'Higgins,61,Cachapoal,6117,San Vicente,true,CUT-2018,2018-09-06T00:00:00.000Z
+06,Región del Libertador Gral. Bernardo O'Higgins,62,Cardenal Caro,6201,Pichilemu,true,CUT-2018,2018-09-06T00:00:00.000Z
+06,Región del Libertador Gral. Bernardo O'Higgins,62,Cardenal Caro,6202,La Estrella,true,CUT-2018,2018-09-06T00:00:00.000Z
+06,Región del Libertador Gral. Bernardo O'Higgins,62,Cardenal Caro,6203,Litueche,true,CUT-2018,2018-09-06T00:00:00.000Z
+06,Región del Libertador Gral. Bernardo O'Higgins,62,Cardenal Caro,6204,Marchihue,true,CUT-2018,2018-09-06T00:00:00.000Z
+06,Región del Libertador Gral. Bernardo O'Higgins,62,Cardenal Caro,6205,Navidad,true,CUT-2018,2018-09-06T00:00:00.000Z
+06,Región del Libertador Gral. Bernardo O'Higgins,62,Cardenal Caro,6206,Paredones,true,CUT-2018,2018-09-06T00:00:00.000Z
+06,Región del Libertador Gral. Bernardo O'Higgins,63,Colchagua,6301,San Fernando,true,CUT-2018,2018-09-06T00:00:00.000Z
+06,Región del Libertador Gral. Bernardo O'Higgins,63,Colchagua,6302,Chépica,true,CUT-2018,2018-09-06T00:00:00.000Z
+06,Región del Libertador Gral. Bernardo O'Higgins,63,Colchagua,6303,Chimbarongo,true,CUT-2018,2018-09-06T00:00:00.000Z
+06,Región del Libertador Gral. Bernardo O'Higgins,63,Colchagua,6304,Lolol,true,CUT-2018,2018-09-06T00:00:00.000Z
+06,Región del Libertador Gral. Bernardo O'Higgins,63,Colchagua,6305,Nancagua,true,CUT-2018,2018-09-06T00:00:00.000Z
+06,Región del Libertador Gral. Bernardo O'Higgins,63,Colchagua,6306,Palmilla,true,CUT-2018,2018-09-06T00:00:00.000Z
+06,Región del Libertador Gral. Bernardo O'Higgins,63,Colchagua,6307,Peralillo,true,CUT-2018,2018-09-06T00:00:00.000Z
+06,Región del Libertador Gral. Bernardo O'Higgins,63,Colchagua,6308,Placilla,true,CUT-2018,2018-09-06T00:00:00.000Z
+06,Región del Libertador Gral. Bernardo O'Higgins,63,Colchagua,6309,Pumanque,true,CUT-2018,2018-09-06T00:00:00.000Z
+06,Región del Libertador Gral. Bernardo O'Higgins,63,Colchagua,6310,Santa Cruz,true,CUT-2018,2018-09-06T00:00:00.000Z
+07,Región del Maule,71,Talca,7101,Talca,true,CUT-2018,2018-09-06T00:00:00.000Z
+07,Región del Maule,71,Talca,7102,Constitución,true,CUT-2018,2018-09-06T00:00:00.000Z
+07,Región del Maule,71,Talca,7103,Curepto,true,CUT-2018,2018-09-06T00:00:00.000Z
+07,Región del Maule,71,Talca,7104,Empedrado,true,CUT-2018,2018-09-06T00:00:00.000Z
+07,Región del Maule,71,Talca,7105,Maule,true,CUT-2018,2018-09-06T00:00:00.000Z
+07,Región del Maule,71,Talca,7106,Pelarco,true,CUT-2018,2018-09-06T00:00:00.000Z
+07,Región del Maule,71,Talca,7107,Pencahue,true,CUT-2018,2018-09-06T00:00:00.000Z
+07,Región del Maule,71,Talca,7108,Río Claro,true,CUT-2018,2018-09-06T00:00:00.000Z
+07,Región del Maule,71,Talca,7109,San Clemente,true,CUT-2018,2018-09-06T00:00:00.000Z
+07,Región del Maule,71,Talca,7110,San Rafael,true,CUT-2018,2018-09-06T00:00:00.000Z
+07,Región del Maule,72,Cauquenes,7201,Cauquenes,true,CUT-2018,2018-09-06T00:00:00.000Z
+07,Región del Maule,72,Cauquenes,7202,Chanco,true,CUT-2018,2018-09-06T00:00:00.000Z
+07,Región del Maule,72,Cauquenes,7203,Pelluhue,true,CUT-2018,2018-09-06T00:00:00.000Z
+07,Región del Maule,73,Curicó,7301,Curicó,true,CUT-2018,2018-09-06T00:00:00.000Z
+07,Región del Maule,73,Curicó,7302,Hualañé,true,CUT-2018,2018-09-06T00:00:00.000Z
+07,Región del Maule,73,Curicó,7303,Licantén,true,CUT-2018,2018-09-06T00:00:00.000Z
+07,Región del Maule,73,Curicó,7304,Molina,true,CUT-2018,2018-09-06T00:00:00.000Z
+07,Región del Maule,73,Curicó,7305,Rauco,true,CUT-2018,2018-09-06T00:00:00.000Z
+07,Región del Maule,73,Curicó,7306,Romeral,true,CUT-2018,2018-09-06T00:00:00.000Z
+07,Región del Maule,73,Curicó,7307,Sagrada Familia,true,CUT-2018,2018-09-06T00:00:00.000Z
+07,Región del Maule,73,Curicó,7308,Teno,true,CUT-2018,2018-09-06T00:00:00.000Z
+07,Región del Maule,73,Curicó,7309,Vichuquén,true,CUT-2018,2018-09-06T00:00:00.000Z
+07,Región del Maule,74,Linares,7401,Linares,true,CUT-2018,2018-09-06T00:00:00.000Z
+07,Región del Maule,74,Linares,7402,Colbún,true,CUT-2018,2018-09-06T00:00:00.000Z
+07,Región del Maule,74,Linares,7403,Longaví,true,CUT-2018,2018-09-06T00:00:00.000Z
+07,Región del Maule,74,Linares,7404,Parral,true,CUT-2018,2018-09-06T00:00:00.000Z
+07,Región del Maule,74,Linares,7405,Retiro,true,CUT-2018,2018-09-06T00:00:00.000Z
+07,Región del Maule,74,Linares,7406,San Javier,true,CUT-2018,2018-09-06T00:00:00.000Z
+07,Región del Maule,74,Linares,7407,Villa Alegre,true,CUT-2018,2018-09-06T00:00:00.000Z
+07,Región del Maule,74,Linares,7408,Yerbas Buenas,true,CUT-2018,2018-09-06T00:00:00.000Z
+08,Región del Biobío,81,Concepción,8101,Concepción,true,CUT-2018,2018-09-06T00:00:00.000Z
+08,Región del Biobío,81,Concepción,8102,Coronel,true,CUT-2018,2018-09-06T00:00:00.000Z
+08,Región del Biobío,81,Concepción,8103,Chiguayante,true,CUT-2018,2018-09-06T00:00:00.000Z
+08,Región del Biobío,81,Concepción,8104,Florida,true,CUT-2018,2018-09-06T00:00:00.000Z
+08,Región del Biobío,81,Concepción,8105,Hualqui,true,CUT-2018,2018-09-06T00:00:00.000Z
+08,Región del Biobío,81,Concepción,8106,Lota,true,CUT-2018,2018-09-06T00:00:00.000Z
+08,Región del Biobío,81,Concepción,8107,Penco,true,CUT-2018,2018-09-06T00:00:00.000Z
+08,Región del Biobío,81,Concepción,8108,San Pedro de la Paz,true,CUT-2018,2018-09-06T00:00:00.000Z
+08,Región del Biobío,81,Concepción,8109,Santa Juana,true,CUT-2018,2018-09-06T00:00:00.000Z
+08,Región del Biobío,81,Concepción,8110,Talcahuano,true,CUT-2018,2018-09-06T00:00:00.000Z
+08,Región del Biobío,81,Concepción,8111,Tomé,true,CUT-2018,2018-09-06T00:00:00.000Z
+08,Región del Biobío,81,Concepción,8112,Hualpén,true,CUT-2018,2018-09-06T00:00:00.000Z
+08,Región del Biobío,82,Arauco,8201,Lebu,true,CUT-2018,2018-09-06T00:00:00.000Z
+08,Región del Biobío,82,Arauco,8202,Arauco,true,CUT-2018,2018-09-06T00:00:00.000Z
+08,Región del Biobío,82,Arauco,8203,Cañete,true,CUT-2018,2018-09-06T00:00:00.000Z
+08,Región del Biobío,82,Arauco,8204,Contulmo,true,CUT-2018,2018-09-06T00:00:00.000Z
+08,Región del Biobío,82,Arauco,8205,Curanilahue,true,CUT-2018,2018-09-06T00:00:00.000Z
+08,Región del Biobío,82,Arauco,8206,Los Álamos,true,CUT-2018,2018-09-06T00:00:00.000Z
+08,Región del Biobío,82,Arauco,8207,Tirúa,true,CUT-2018,2018-09-06T00:00:00.000Z
+08,Región del Biobío,83,Biobío,8301,Los Ángeles,true,CUT-2018,2018-09-06T00:00:00.000Z
+08,Región del Biobío,83,Biobío,8302,Antuco,true,CUT-2018,2018-09-06T00:00:00.000Z
+08,Región del Biobío,83,Biobío,8303,Cabrero,true,CUT-2018,2018-09-06T00:00:00.000Z
+08,Región del Biobío,83,Biobío,8304,Laja,true,CUT-2018,2018-09-06T00:00:00.000Z
+08,Región del Biobío,83,Biobío,8305,Mulchén,true,CUT-2018,2018-09-06T00:00:00.000Z
+08,Región del Biobío,83,Biobío,8306,Nacimiento,true,CUT-2018,2018-09-06T00:00:00.000Z
+08,Región del Biobío,83,Biobío,8307,Negrete,true,CUT-2018,2018-09-06T00:00:00.000Z
+08,Región del Biobío,83,Biobío,8308,Quilaco,true,CUT-2018,2018-09-06T00:00:00.000Z
+08,Región del Biobío,83,Biobío,8309,Quilleco,true,CUT-2018,2018-09-06T00:00:00.000Z
+08,Región del Biobío,83,Biobío,8310,San Rosendo,true,CUT-2018,2018-09-06T00:00:00.000Z
+08,Región del Biobío,83,Biobío,8311,Santa Bárbara,true,CUT-2018,2018-09-06T00:00:00.000Z
+08,Región del Biobío,83,Biobío,8312,Tucapel,true,CUT-2018,2018-09-06T00:00:00.000Z
+08,Región del Biobío,83,Biobío,8313,Yumbel,true,CUT-2018,2018-09-06T00:00:00.000Z
+08,Región del Biobío,83,Biobío,8314,Alto Biobío,true,CUT-2018,2018-09-06T00:00:00.000Z
+16,Región de Ñuble,163,Diguillín,8401,Chillán,true,CUT-2018,2018-09-06T00:00:00.000Z
+16,Región de Ñuble,163,Diguillín,8402,Bulnes,true,CUT-2018,2018-09-06T00:00:00.000Z
+16,Región de Ñuble,162,Itata,8403,Cobquecura,true,CUT-2018,2018-09-06T00:00:00.000Z
+16,Región de Ñuble,162,Itata,8404,Coelemu,true,CUT-2018,2018-09-06T00:00:00.000Z
+16,Región de Ñuble,161,Punilla,8405,Coihueco,true,CUT-2018,2018-09-06T00:00:00.000Z
+16,Región de Ñuble,163,Diguillín,8406,Chillán Viejo,true,CUT-2018,2018-09-06T00:00:00.000Z
+16,Región de Ñuble,163,Diguillín,8407,El Carmen,true,CUT-2018,2018-09-06T00:00:00.000Z
+16,Región de Ñuble,162,Itata,8408,Ninhue,true,CUT-2018,2018-09-06T00:00:00.000Z
+16,Región de Ñuble,161,Punilla,8409,Ñiquén,true,CUT-2018,2018-09-06T00:00:00.000Z
+16,Región de Ñuble,163,Diguillín,8410,Pemuco,true,CUT-2018,2018-09-06T00:00:00.000Z
+16,Región de Ñuble,163,Diguillín,8411,Pinto,true,CUT-2018,2018-09-06T00:00:00.000Z
+16,Región de Ñuble,162,Itata,8412,Portezuelo,true,CUT-2018,2018-09-06T00:00:00.000Z
+16,Región de Ñuble,163,Diguillín,8413,Quillón,true,CUT-2018,2018-09-06T00:00:00.000Z
+16,Región de Ñuble,162,Itata,8414,Quirihue,true,CUT-2018,2018-09-06T00:00:00.000Z
+16,Región de Ñuble,162,Itata,8415,Ránquil,true,CUT-2018,2018-09-06T00:00:00.000Z
+16,Región de Ñuble,161,Punilla,8416,San Carlos,true,CUT-2018,2018-09-06T00:00:00.000Z
+16,Región de Ñuble,161,Punilla,8417,San Fabián,true,CUT-2018,2018-09-06T00:00:00.000Z
+16,Región de Ñuble,163,Diguillín,8418,San Ignacio,true,CUT-2018,2018-09-06T00:00:00.000Z
+16,Región de Ñuble,161,Punilla,8419,San Nicolás,true,CUT-2018,2018-09-06T00:00:00.000Z
+16,Región de Ñuble,162,Itata,8420,Treguaco,true,CUT-2018,2018-09-06T00:00:00.000Z
+16,Región de Ñuble,163,Diguillín,8421,Yungay,true,CUT-2018,2018-09-06T00:00:00.000Z
+09,Región de la Araucanía,91,Cautín,9101,Temuco,true,CUT-2018,2018-09-06T00:00:00.000Z
+09,Región de la Araucanía,91,Cautín,9102,Carahue,true,CUT-2018,2018-09-06T00:00:00.000Z
+09,Región de la Araucanía,91,Cautín,9103,Cunco,true,CUT-2018,2018-09-06T00:00:00.000Z
+09,Región de la Araucanía,91,Cautín,9104,Curarrehue,true,CUT-2018,2018-09-06T00:00:00.000Z
+09,Región de la Araucanía,91,Cautín,9105,Freire,true,CUT-2018,2018-09-06T00:00:00.000Z
+09,Región de la Araucanía,91,Cautín,9106,Galvarino,true,CUT-2018,2018-09-06T00:00:00.000Z
+09,Región de la Araucanía,91,Cautín,9107,Gorbea,true,CUT-2018,2018-09-06T00:00:00.000Z
+09,Región de la Araucanía,91,Cautín,9108,Lautaro,true,CUT-2018,2018-09-06T00:00:00.000Z
+09,Región de la Araucanía,91,Cautín,9109,Loncoche,true,CUT-2018,2018-09-06T00:00:00.000Z
+09,Región de la Araucanía,91,Cautín,9110,Melipeuco,true,CUT-2018,2018-09-06T00:00:00.000Z
+09,Región de la Araucanía,91,Cautín,9111,Nueva Imperial,true,CUT-2018,2018-09-06T00:00:00.000Z
+09,Región de la Araucanía,91,Cautín,9112,Padre las Casas,true,CUT-2018,2018-09-06T00:00:00.000Z
+09,Región de la Araucanía,91,Cautín,9113,Perquenco,true,CUT-2018,2018-09-06T00:00:00.000Z
+09,Región de la Araucanía,91,Cautín,9114,Pitrufquén,true,CUT-2018,2018-09-06T00:00:00.000Z
+09,Región de la Araucanía,91,Cautín,9115,Pucón,true,CUT-2018,2018-09-06T00:00:00.000Z
+09,Región de la Araucanía,91,Cautín,9116,Saavedra,true,CUT-2018,2018-09-06T00:00:00.000Z
+09,Región de la Araucanía,91,Cautín,9117,Teodoro Schmidt,true,CUT-2018,2018-09-06T00:00:00.000Z
+09,Región de la Araucanía,91,Cautín,9118,Toltén,true,CUT-2018,2018-09-06T00:00:00.000Z
+09,Región de la Araucanía,91,Cautín,9119,Vilcún,true,CUT-2018,2018-09-06T00:00:00.000Z
+09,Región de la Araucanía,91,Cautín,9120,Villarrica,true,CUT-2018,2018-09-06T00:00:00.000Z
+09,Región de la Araucanía,91,Cautín,9121,Cholchol,true,CUT-2018,2018-09-06T00:00:00.000Z
+09,Región de la Araucanía,92,Malleco,9201,Angol,true,CUT-2018,2018-09-06T00:00:00.000Z
+09,Región de la Araucanía,92,Malleco,9202,Collipulli,true,CUT-2018,2018-09-06T00:00:00.000Z
+09,Región de la Araucanía,92,Malleco,9203,Curacautín,true,CUT-2018,2018-09-06T00:00:00.000Z
+09,Región de la Araucanía,92,Malleco,9204,Ercilla,true,CUT-2018,2018-09-06T00:00:00.000Z
+09,Región de la Araucanía,92,Malleco,9205,Lonquimay,true,CUT-2018,2018-09-06T00:00:00.000Z
+09,Región de la Araucanía,92,Malleco,9206,Los Sauces,true,CUT-2018,2018-09-06T00:00:00.000Z
+09,Región de la Araucanía,92,Malleco,9207,Lumaco,true,CUT-2018,2018-09-06T00:00:00.000Z
+09,Región de la Araucanía,92,Malleco,9208,Purén,true,CUT-2018,2018-09-06T00:00:00.000Z
+09,Región de la Araucanía,92,Malleco,9209,Renaico,true,CUT-2018,2018-09-06T00:00:00.000Z
+09,Región de la Araucanía,92,Malleco,9210,Traiguén,true,CUT-2018,2018-09-06T00:00:00.000Z
+09,Región de la Araucanía,92,Malleco,9211,Victoria,true,CUT-2018,2018-09-06T00:00:00.000Z
+10,Región de Los Lagos,101,Llanquihue,10101,Puerto Montt,true,CUT-2018,2018-09-06T00:00:00.000Z
+10,Región de Los Lagos,101,Llanquihue,10102,Calbuco,true,CUT-2018,2018-09-06T00:00:00.000Z
+10,Región de Los Lagos,101,Llanquihue,10103,Cochamó,true,CUT-2018,2018-09-06T00:00:00.000Z
+10,Región de Los Lagos,101,Llanquihue,10104,Fresia,true,CUT-2018,2018-09-06T00:00:00.000Z
+10,Región de Los Lagos,101,Llanquihue,10105,Frutillar,true,CUT-2018,2018-09-06T00:00:00.000Z
+10,Región de Los Lagos,101,Llanquihue,10106,Los Muermos,true,CUT-2018,2018-09-06T00:00:00.000Z
+10,Región de Los Lagos,101,Llanquihue,10107,Llanquihue,true,CUT-2018,2018-09-06T00:00:00.000Z
+10,Región de Los Lagos,101,Llanquihue,10108,Maullín,true,CUT-2018,2018-09-06T00:00:00.000Z
+10,Región de Los Lagos,101,Llanquihue,10109,Puerto Varas,true,CUT-2018,2018-09-06T00:00:00.000Z
+10,Región de Los Lagos,102,Chiloé,10201,Castro,true,CUT-2018,2018-09-06T00:00:00.000Z
+10,Región de Los Lagos,102,Chiloé,10202,Ancud,true,CUT-2018,2018-09-06T00:00:00.000Z
+10,Región de Los Lagos,102,Chiloé,10203,Chonchi,true,CUT-2018,2018-09-06T00:00:00.000Z
+10,Región de Los Lagos,102,Chiloé,10204,Curaco de Vélez,true,CUT-2018,2018-09-06T00:00:00.000Z
+10,Región de Los Lagos,102,Chiloé,10205,Dalcahue,true,CUT-2018,2018-09-06T00:00:00.000Z
+10,Región de Los Lagos,102,Chiloé,10206,Puqueldón,true,CUT-2018,2018-09-06T00:00:00.000Z
+10,Región de Los Lagos,102,Chiloé,10207,Queilén,true,CUT-2018,2018-09-06T00:00:00.000Z
+10,Región de Los Lagos,102,Chiloé,10208,Quellón,true,CUT-2018,2018-09-06T00:00:00.000Z
+10,Región de Los Lagos,102,Chiloé,10209,Quemchi,true,CUT-2018,2018-09-06T00:00:00.000Z
+10,Región de Los Lagos,102,Chiloé,10210,Quinchao,true,CUT-2018,2018-09-06T00:00:00.000Z
+10,Región de Los Lagos,103,Osorno,10301,Osorno,true,CUT-2018,2018-09-06T00:00:00.000Z
+10,Región de Los Lagos,103,Osorno,10302,Puerto Octay,true,CUT-2018,2018-09-06T00:00:00.000Z
+10,Región de Los Lagos,103,Osorno,10303,Purranque,true,CUT-2018,2018-09-06T00:00:00.000Z
+10,Región de Los Lagos,103,Osorno,10304,Puyehue,true,CUT-2018,2018-09-06T00:00:00.000Z
+10,Región de Los Lagos,103,Osorno,10305,Río Negro,true,CUT-2018,2018-09-06T00:00:00.000Z
+10,Región de Los Lagos,103,Osorno,10306,San Juan de la Costa,true,CUT-2018,2018-09-06T00:00:00.000Z
+10,Región de Los Lagos,103,Osorno,10307,San Pablo,true,CUT-2018,2018-09-06T00:00:00.000Z
+10,Región de Los Lagos,104,Palena,10401,Chaitén,true,CUT-2018,2018-09-06T00:00:00.000Z
+10,Región de Los Lagos,104,Palena,10402,Futaleufú,true,CUT-2018,2018-09-06T00:00:00.000Z
+10,Región de Los Lagos,104,Palena,10403,Hualaihué,true,CUT-2018,2018-09-06T00:00:00.000Z
+10,Región de Los Lagos,104,Palena,10404,Palena,true,CUT-2018,2018-09-06T00:00:00.000Z
+11,Región Aisén del Gral. Carlos Ibáñez del Campo,111,Coihaique,11101,Coyhaique,true,CUT-2018,2018-09-06T00:00:00.000Z
+11,Región Aisén del Gral. Carlos Ibáñez del Campo,111,Coihaique,11102,Lago Verde,true,CUT-2018,2018-09-06T00:00:00.000Z
+11,Región Aisén del Gral. Carlos Ibáñez del Campo,112,Aisén,11201,Aysén,true,CUT-2018,2018-09-06T00:00:00.000Z
+11,Región Aisén del Gral. Carlos Ibáñez del Campo,112,Aisén,11202,Cisnes,true,CUT-2018,2018-09-06T00:00:00.000Z
+11,Región Aisén del Gral. Carlos Ibáñez del Campo,112,Aisén,11203,Guaitecas,true,CUT-2018,2018-09-06T00:00:00.000Z
+11,Región Aisén del Gral. Carlos Ibáñez del Campo,113,Capitán Prat,11301,Cochrane,true,CUT-2018,2018-09-06T00:00:00.000Z
+11,Región Aisén del Gral. Carlos Ibáñez del Campo,113,Capitán Prat,11302,O'Higgins,true,CUT-2018,2018-09-06T00:00:00.000Z
+11,Región Aisén del Gral. Carlos Ibáñez del Campo,113,Capitán Prat,11303,Tortel,true,CUT-2018,2018-09-06T00:00:00.000Z
+11,Región Aisén del Gral. Carlos Ibáñez del Campo,114,General Carrera,11401,Chile Chico,true,CUT-2018,2018-09-06T00:00:00.000Z
+11,Región Aisén del Gral. Carlos Ibáñez del Campo,114,General Carrera,11402,Río Ibáñez,true,CUT-2018,2018-09-06T00:00:00.000Z
+12,Región de Magallanes y de la Antártica Chilena,121,Magallanes,12101,Punta Arenas,true,CUT-2018,2018-09-06T00:00:00.000Z
+12,Región de Magallanes y de la Antártica Chilena,121,Magallanes,12102,Laguna Blanca,true,CUT-2018,2018-09-06T00:00:00.000Z
+12,Región de Magallanes y de la Antártica Chilena,121,Magallanes,12103,Río Verde,true,CUT-2018,2018-09-06T00:00:00.000Z
+12,Región de Magallanes y de la Antártica Chilena,121,Magallanes,12104,San Gregorio,true,CUT-2018,2018-09-06T00:00:00.000Z
+12,Región de Magallanes y de la Antártica Chilena,122,Antártica Chilena,12201,Cabo de Hornos,true,CUT-2018,2018-09-06T00:00:00.000Z
+12,Región de Magallanes y de la Antártica Chilena,122,Antártica Chilena,12202,Antártica,true,CUT-2018,2018-09-06T00:00:00.000Z
+12,Región de Magallanes y de la Antártica Chilena,123,Tierra del Fuego,12301,Porvenir,true,CUT-2018,2018-09-06T00:00:00.000Z
+12,Región de Magallanes y de la Antártica Chilena,123,Tierra del Fuego,12302,Primavera,true,CUT-2018,2018-09-06T00:00:00.000Z
+12,Región de Magallanes y de la Antártica Chilena,123,Tierra del Fuego,12303,Timaukel,true,CUT-2018,2018-09-06T00:00:00.000Z
+12,Región de Magallanes y de la Antártica Chilena,124,Última Esperanza,12401,Natales,true,CUT-2018,2018-09-06T00:00:00.000Z
+12,Región de Magallanes y de la Antártica Chilena,124,Última Esperanza,12402,Torres del Paine,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,131,Santiago,13101,Santiago,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,131,Santiago,13102,Cerrillos,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,131,Santiago,13103,Cerro Navia,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,131,Santiago,13104,Conchalí,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,131,Santiago,13105,El Bosque,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,131,Santiago,13106,Estación Central,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,131,Santiago,13107,Huechuraba,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,131,Santiago,13108,Independencia,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,131,Santiago,13109,La Cisterna,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,131,Santiago,13110,La Florida,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,131,Santiago,13111,La Granja,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,131,Santiago,13112,La Pintana,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,131,Santiago,13113,La Reina,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,131,Santiago,13114,Las Condes,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,131,Santiago,13115,Lo Barnechea,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,131,Santiago,13116,Lo Espejo,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,131,Santiago,13117,Lo Prado,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,131,Santiago,13118,Macul,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,131,Santiago,13119,Maipú,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,131,Santiago,13120,Ñuñoa,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,131,Santiago,13121,Pedro Aguirre Cerda,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,131,Santiago,13122,Peñalolén,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,131,Santiago,13123,Providencia,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,131,Santiago,13124,Pudahuel,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,131,Santiago,13125,Quilicura,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,131,Santiago,13126,Quinta Normal,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,131,Santiago,13127,Recoleta,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,131,Santiago,13128,Renca,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,131,Santiago,13129,San Joaquín,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,131,Santiago,13130,San Miguel,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,131,Santiago,13131,San Ramón,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,131,Santiago,13132,Vitacura,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,132,Cordillera,13201,Puente Alto,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,132,Cordillera,13202,Pirque,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,132,Cordillera,13203,San José de Maipo,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,133,Chacabuco,13301,Colina,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,133,Chacabuco,13302,Lampa,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,133,Chacabuco,13303,Tiltil,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,134,Maipo,13401,San Bernardo,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,134,Maipo,13402,Buin,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,134,Maipo,13403,Calera de Tango,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,134,Maipo,13404,Paine,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,135,Melipilla,13501,Melipilla,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,135,Melipilla,13502,Alhué,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,135,Melipilla,13503,Curacaví,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,135,Melipilla,13504,María Pinto,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,135,Melipilla,13505,San Pedro,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,136,Talagante,13601,Talagante,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,136,Talagante,13602,El Monte,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,136,Talagante,13603,Isla de Maipo,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,136,Talagante,13604,Padre Hurtado,true,CUT-2018,2018-09-06T00:00:00.000Z
+13,Región Metropolitana de Santiago,136,Talagante,13605,Peñaflor,true,CUT-2018,2018-09-06T00:00:00.000Z
+14,Región de Los Ríos,141,Valdivia,14101,Valdivia,true,CUT-2018,2018-09-06T00:00:00.000Z
+14,Región de Los Ríos,141,Valdivia,14102,Corral,true,CUT-2018,2018-09-06T00:00:00.000Z
+14,Región de Los Ríos,141,Valdivia,14103,Lanco,true,CUT-2018,2018-09-06T00:00:00.000Z
+14,Región de Los Ríos,141,Valdivia,14104,Los Lagos,true,CUT-2018,2018-09-06T00:00:00.000Z
+14,Región de Los Ríos,141,Valdivia,14105,Máfil,true,CUT-2018,2018-09-06T00:00:00.000Z
+14,Región de Los Ríos,141,Valdivia,14106,Mariquina,true,CUT-2018,2018-09-06T00:00:00.000Z
+14,Región de Los Ríos,141,Valdivia,14107,Paillaco,true,CUT-2018,2018-09-06T00:00:00.000Z
+14,Región de Los Ríos,141,Valdivia,14108,Panguipulli,true,CUT-2018,2018-09-06T00:00:00.000Z
+14,Región de Los Ríos,142,Ranco,14201,La Unión,true,CUT-2018,2018-09-06T00:00:00.000Z
+14,Región de Los Ríos,142,Ranco,14202,Futrono,true,CUT-2018,2018-09-06T00:00:00.000Z
+14,Región de Los Ríos,142,Ranco,14203,Lago Ranco,true,CUT-2018,2018-09-06T00:00:00.000Z
+14,Región de Los Ríos,142,Ranco,14204,Río Bueno,true,CUT-2018,2018-09-06T00:00:00.000Z
+15,Arica y Parinacota,151,Arica,15101,Arica,true,CUT-2018,2018-09-06T00:00:00.000Z
+15,Arica y Parinacota,151,Arica,15102,Camarones,true,CUT-2018,2018-09-06T00:00:00.000Z
+15,Arica y Parinacota,152,Parinacota,15201,Putre,true,CUT-2018,2018-09-06T00:00:00.000Z
+15,Arica y Parinacota,152,Parinacota,15202,General Lagos,true,CUT-2018,2018-09-06T00:00:00.000Z

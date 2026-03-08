@@ -7,9 +7,10 @@ import { PrismaModule } from "./prisma.module";
 import { ContextsController } from "./contexts.controller";
 import { CasesModule } from "./cases/cases.module";
 import { AdminModule } from "./admin/admin.module";
+import { TerritoryModule } from "./territory/territory.module";
 
 @Module({
-  imports: [PrismaModule, AuthModule, CasesModule, AdminModule],
+  imports: [PrismaModule, AuthModule, CasesModule, AdminModule, TerritoryModule],
   controllers: [AppController, HealthController, ContextsController],
   providers: [AppService],
 })
