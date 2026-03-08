@@ -4,6 +4,7 @@
 import type React from "react";
 import { useState } from "react";
 import type { CaseItem, CaseStatus } from "../../domain/types";
+import { getCommuneDisplayName } from "../../domain/territoryCatalog";
 import type { DashboardGate } from "./types";
 
 export interface DashboardViewProps {
@@ -41,7 +42,7 @@ function CaseCard({ gate, c, onClick }: { gate: DashboardGate; c: CaseItem; onCl
   const div = gate.checkLocalDivergence(c, gate.localCatalog);
   const ns = gate.normalizeStatus(c.status);
   const comp = c.completeness ?? 0;
-  const commName = gate.regionsMap[c.region]?.communes?.[c.commune]?.name || c.commune;
+  const commName = getCommuneDisplayName(gate.regionsMap, c.region ?? "", c.commune ?? "");
   const summaryTrim = c.summary?.trim();
   const hasLocal = !!c.local?.trim();
   const hasComm = !!(commName && commName !== "—");

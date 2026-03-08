@@ -15,6 +15,8 @@ import { GovernanceSection } from "./GovernanceSection";
 import { Badge } from "../../ui/Badge";
 import { Tooltip } from "../../ui/Tooltip";
 import type { CaseDetailGate } from "./types";
+import { SIMULATED_ROLE_HELP } from "../../config/simulatedRoleHelp";
+import { getCommuneDisplayName } from "../../domain/territoryCatalog";
 
 export interface CaseDetailViewProps {
   gate: CaseDetailGate;
@@ -143,6 +145,18 @@ function CaseDetailContent({ gate, c, currentUser }: CaseDetailContentProps) {
   return (
     <div style={{ position: "relative" }}>
       {isClosed && <ClosedOverlay />}
+      {gate.contextType === "SIMULACION" && gate.simulatedRoleLabel && (
+        <>
+          <div style={{ color: gate.themeColor("mutedAlt"), fontSize: "11px", marginBottom: 4 }}>
+            Ejercicio actual: actuando como {gate.simulatedRoleLabel}
+          </div>
+          {gate.simulatedRoleId && SIMULATED_ROLE_HELP[gate.simulatedRoleId] && (
+            <div style={{ color: gate.themeColor("muted"), fontSize: "11px", marginBottom: 6, fontStyle: "italic" }}>
+              {SIMULATED_ROLE_HELP[gate.simulatedRoleId]}
+            </div>
+          )}
+        </>
+      )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 6 }}>
         <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
           <button type="button" style={S.btn?.("dark") as React.CSSProperties} onClick={() => setView("dashboard")}>← Volver</button>
@@ -259,7 +273,7 @@ function CaseDetailContent({ gate, c, currentUser }: CaseDetailContentProps) {
             </div>
             <div style={S.g2 as React.CSSProperties}>
               <div><span style={{ color: themeColor("muted") }}>Región:</span> {regionsMap[c.region]?.name}</div>
-              <div><span style={{ color: themeColor("muted") }}>Comuna:</span> {regionsMap[c.region]?.communes?.[c.commune]?.name || c.commune}</div>
+              <div><span style={{ color: themeColor("muted") }}>Comuna:</span> {getCommuneDisplayName(regionsMap, c.region ?? "", c.commune ?? "")}</div>
               <div><span style={{ color: themeColor("muted") }}>Canal:</span> {c.origin?.channel}</div>
               <div><span style={{ color: themeColor("muted") }}>Asignado:</span> {assignee?.name || "—"}</div>
               {!isOpView && (
@@ -406,11 +420,13 @@ function CaseDetailContent({ gate, c, currentUser }: CaseDetailContentProps) {
                   </select>
                   <input style={S.inp as React.CSSProperties} placeholder="Resultado..." value={aForm.result} onChange={(e) => setAForm((p) => ({ ...p, result: e.target.value }))} />
                 </div>
-                <button type="button" style={S.btn?.("primary") as React.CSSProperties} onClick={() => {
+                <button type="button" style={S.btn?.("primary") as React.CSSProperties} onClick={async () => {
                   if (aForm.action.trim().length === 0) return;
-                  addAction(c.id, aForm.action, aForm.responsible, aForm.result);
-                  setAForm({ action: "", responsible: currentUser.id, result: "" });
-                  notify(UI_TEXT_GOVERNANCE.successMessages.actionSaved);
+                  const ok = await addAction(c.id, aForm.action, aForm.responsible, aForm.result);
+                  if (ok) {
+                    setAForm({ action: "", responsible: currentUser.id, result: "" });
+                    notify(UI_TEXT_GOVERNANCE.successMessages.actionSaved);
+                  }
                 }}>{UI_TEXT_GOVERNANCE.buttons.addActionShort}</button>
               </div>
             )}
@@ -439,7 +455,7 @@ function CaseDetailContent({ gate, c, currentUser }: CaseDetailContentProps) {
             )}
             {canDo("close", currentUser, c) && normalizeStatus(c.status) !== "Cerrado" && (
               <div style={{ marginTop: 8, padding: 6, background: themeColor("legacyGrayBg"), borderRadius: 4, fontSize: "10px" }}>
-                <div style={{ color: themeColor("muted"), fontWeight: 600, marginBottom: 3 }}>PRE-REQUISITOS DE CIERRE:</div>
+                <div style={{ color: themeColor("muted"), fontWeight: 600, marginBottom: 3 }}>VERIFICACIONES INDIVIDUALES DE CIERRE:</div>
                 {[[c.actions?.length, UI_TEXT_GOVERNANCE.checklist.atLeastOneAction], [c.decisions?.length, UI_TEXT_GOVERNANCE.checklist.atLeastOneDecision], [normalizeStatus(c.status) === "Resuelto", UI_TEXT_GOVERNANCE.checklist.statusResolved], [hasOperationalValidation, UI_TEXT_GOVERNANCE.checklist.operationalValidation], [!!c.closingMotivo, UI_TEXT_GOVERNANCE.checklist.closeReasonSaved], [!c.bypassFlagged || !!c.bypassValidated, UI_TEXT_GOVERNANCE.checklist.bypassResolved]].map(([ok, lbl], idx) => (
                   <div key={`req-${idx}-${String(lbl)}`} style={{ color: ok ? themeColor("success") : themeColor("danger") }}>{ok ? "✓" : "✕"} {lbl}</div>
                 ))}

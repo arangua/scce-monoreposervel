@@ -3,6 +3,7 @@ import type { CaseItem, InstructionItem, ImpactLevel, ScopeFunctional, LocalCata
 import { calcCompleteness } from "./domain/caseMetrics";
 import { findActiveLocal } from "./domain/catalog";
 import { validateCaseSchema } from "./domain/caseValidation";
+import { getInternalCommuneForCatalog, getCommuneDisplayName } from "./domain/territoryCatalog";
 import { fmtDate, timeDiff, nowISO, uuidSimple, tsISO, isDetectedAtInFuture, nowLocalDatetimeInput } from "./domain/date";
 import { CaseDetailView, type CaseDetailGate } from "./views/case";
 import { DashboardView, type DashboardGate } from "./views/dashboard";
@@ -23,11 +24,14 @@ import { appendEvent, verifyChain } from "./domain/audit";
 import { migrateLegacyInstructionsInCases } from "./domain/migrations/migrateLegacyInstructions";
 import { HelpDrawer } from "./components/HelpDrawer";
 import { IconButton } from "./components/IconButton";
+import { loadRegionRegionsMap } from "./lib/loadRegionRegionsMap";
+import type { RegionsMapCompatible } from "./lib/territoryToRegionsMap";
 import { Badge } from "./ui/Badge";
 import { Tooltip } from "./ui/Tooltip";
 import { helpByView, type ViewKey } from "./helpContent";
 import { UI_TEXT } from "./config/uiTextStandard";
 import { UI_TEXT_GOVERNANCE } from "./config/uiTextGovernance";
+import { SIMULATED_ROLES, type SimulatedRoleId, getSimulatedRole } from "./config/simulatedRoles";
 import { isTerrainMode } from "./domain/auth/visibility";
 import { isClosedStatus } from "./domain/cases/terrainSort";
 import { newEventId } from "./domain/eventId";
@@ -416,6 +420,25 @@ const CONFIG = {
 
 const DEFAULT_REGION = "TRP";
 
+/** Mapeo CUT (API territorial) ↔ códigos internos (CONFIG/membership). Mismo orden que seed territorial. */
+const CUT_TO_INTERNAL: Record<string, string> = {
+  "01": "TRP", "02": "ANT", "03": "ATA", "04": "COQ", "05": "VAL", "06": "MET",
+  "07": "OHI", "08": "MAU", "09": "NUB", "10": "BIO", "11": "ARA", "12": "LRI",
+  "13": "LLA", "14": "AIS", "15": "MAG", "16": "AYP",
+};
+const INTERNAL_TO_CUT: Record<string, string> = Object.fromEntries(
+  Object.entries(CUT_TO_INTERNAL).map(([k, v]) => [v, k])
+);
+
+function territoryMapToInternalKeys(map: RegionsMapCompatible): Record<string, { name: string; communes: Record<string, { name: string }> }> {
+  const out: Record<string, { name: string; communes: Record<string, { name: string }> }> = {};
+  for (const [cut, entry] of Object.entries(map)) {
+    const internal = CUT_TO_INTERNAL[cut] ?? cut;
+    out[internal] = { name: entry.name, communes: entry.communes };
+  }
+  return out;
+}
+
 /** Contraseña de usuarios demo/piloto; no hardcodear. Definir VITE_DEMO_PASSWORD en .env para desarrollo. */
 const DEMO_PASSWORD = (import.meta.env.VITE_DEMO_PASSWORD as string | undefined) ?? "";
 
@@ -430,6 +453,7 @@ const USERS = [
   {id:"u8",name:"Usuario Nivel Central",        username:"nivel_central", password:DEMO_PASSWORD,role:"NIVEL_CENTRAL",      region:null},
 ];
 const ROLE_LABELS = {PESE:"PESE",DELEGADO_JE:"Delegado JE",DR_EVENTUAL:"DR Eventual",REGISTRO_SCCE:"Registro SCCE",JEFE_OPS:"Jefe Ops",ENCARGADO_GASTO:"Encargado Gasto",DIRECTOR_REGIONAL:"Director Regional",NIVEL_CENTRAL:"Nivel Central",ADMIN_PILOTO:"Admin Piloto",DR:"DR",EQUIPO_REGIONAL:"Equipo Regional",NIVEL_CENTRAL_SIM:"Nivel Central Sim"} as const;
+
 const POLICIES = {
   PESE:              {create:true, update:false,assign:false,close:false,bypass:false,viewAll:false,comment:true, instruct:false,recepcionar:false,export:false,validateBypass:false,manageCatalog:false},
   DELEGADO_JE:       {create:true, update:false,assign:false,close:false,bypass:false,viewAll:false,comment:true, instruct:false,recepcionar:false,export:false,validateBypass:false,manageCatalog:false},
@@ -1624,9 +1648,10 @@ function validateNewCaseForSubmit(
 ): { error: string } | ValidateNewCaseSuccess {
   const regionSel = (newCase.region ?? "").trim();
   const communeSel = (newCase.commune ?? "").trim();
+  const communeForCatalog = getInternalCommuneForCatalog(regionSel, communeSel) || communeSel;
   const localName = (newCase.local ?? "").trim();
 
-  const errCommune = validateNewCaseCommuneAndRegion(regionSel, communeSel, localCatalog);
+  const errCommune = validateNewCaseCommuneAndRegion(regionSel, communeForCatalog, localCatalog);
   if (errCommune) return { error: errCommune };
 
   const errLocal = validateNewCaseLocalName(localName);
@@ -1635,10 +1660,10 @@ function validateNewCaseForSubmit(
   const errDetected = validateNewCaseDetectedAt(newCase);
   if (errDetected) return { error: errDetected };
 
-  const localResult = validateNewCaseLocalEntry(localCatalog, regionSel, communeSel, localName);
+  const localResult = validateNewCaseLocalEntry(localCatalog, regionSel, communeForCatalog, localName);
   if ("error" in localResult) return localResult;
 
-  const errScope = validateNewCaseUserScope(regionSel, communeSel, localResult.localEntry, currentUser, assignedCommuneEffective, assignedLocalIdEffective);
+  const errScope = validateNewCaseUserScope(regionSel, communeForCatalog, localResult.localEntry, currentUser, assignedCommuneEffective, assignedLocalIdEffective);
   if (errScope) return { error: errScope };
 
   return { ok: true, regionSel, communeSel, localName, localEntry: localResult.localEntry, now_: nowISO() };
@@ -1647,7 +1672,11 @@ function validateNewCaseForSubmit(
 /** Devuelve el mensaje de error si el caso no cumple precondiciones para cerrar; null si puede cerrarse. */
 function getCloseCaseValidationError(c: CaseItem): string | null {
   if (c.bypassFlagged && !c.bypassValidated) return UI_TEXT.errors.excepcionRequiereValidacion;
-  if (!c.actions?.length) return UI_TEXT_GOVERNANCE.validationMessages.missingAction;
+  const hasFormalAction =
+    (c.actions?.length ?? 0) > 0 ||
+    (c.timeline ?? []).some((ev) => ev.type === "ACTION_ADDED" || ev.type === "FIRST_ACTION");
+
+  if (!hasFormalAction) return UI_TEXT_GOVERNANCE.validationMessages.missingAction;
   if (!c.decisions?.length) return UI_TEXT.errors.alMenosUnaDecision;
   if (normalizeStatus(c.status) !== "Resuelto") return UI_TEXT_GOVERNANCE.validationMessages.cannotCloseYet;
   const hasOpVal = (c.timeline ?? []).some((ev) => ev.type === "OPERATIONAL_VALIDATION");
@@ -2191,6 +2220,8 @@ type NewCaseFormGate = {
   step: number;
   setStep: React.Dispatch<React.SetStateAction<number>>;
   regionsMap: Record<string, { name?: string; communes?: Record<string, { name?: string }> }>;
+  activeMembership: Membership | null;
+  activeRegion: string;
   assignedCommuneEffective: string;
   assignedLocalIdEffective: string | null;
   assignedLocal: LocalCatalogEntry | null;
@@ -2217,6 +2248,8 @@ function NewCaseForm(props: Readonly<{ gate: NewCaseFormGate; hideBack?: boolean
     step,
     setStep,
     regionsMap,
+    activeMembership,
+    activeRegion,
     assignedCommuneEffective,
     assignedLocalIdEffective,
     assignedLocal,
@@ -2237,10 +2270,21 @@ function NewCaseForm(props: Readonly<{ gate: NewCaseFormGate; hideBack?: boolean
   const [lb, setLb] = useState(bypassForm);
   const er = calcCriticality(le);
   const maxVar = Math.max(...Object.values(le));
-  const rData = regionsMap[lnc.region || "TRP"];
+
+  const lockedRegion =
+    activeMembership?.contextType === "SIMULACION" &&
+    activeMembership?.regionScopeMode === "LIST" &&
+    Array.isArray(activeMembership?.regionScope) &&
+    activeMembership.regionScope.length === 1
+      ? activeMembership.regionScope[0]
+      : null;
+  const effectiveRegion = lockedRegion ?? lnc.region ?? activeRegion ?? "TRP";
+
+  const rData = regionsMap[effectiveRegion];
+  const communeForCatalog = getInternalCommuneForCatalog(effectiveRegion, lnc.commune || "") || lnc.commune || "";
   const availableLocals = useMemo(
-    () => getActiveLocals(localCatalog, lnc.region || "TRP", lnc.commune || ""),
-    [localCatalog, lnc.region, lnc.commune]
+    () => getActiveLocals(localCatalog, effectiveRegion, communeForCatalog),
+    [localCatalog, effectiveRegion, communeForCatalog]
   );
 
   const isFixedLocal = Boolean(assignedLocalIdEffective);
@@ -2384,10 +2428,14 @@ function NewCaseForm(props: Readonly<{ gate: NewCaseFormGate; hideBack?: boolean
               <select
                 id="newcase-region"
                 style={S.inp}
-                value={lnc.region || "TRP"}
+                value={effectiveRegion}
+                disabled={!!lockedRegion}
                 onChange={(e) => setLnc((p) => ({ ...p, region: e.target.value, commune: "", local: "" }))}
               >
-                {Object.entries(regionsMap).map(([k, v]) => (
+                {(lockedRegion
+                  ? Object.entries(regionsMap).filter(([k]) => k === lockedRegion)
+                  : Object.entries(regionsMap)
+                ).map(([k, v]) => (
                   <option key={k} value={k}>
                     {v?.name}
                   </option>
@@ -2868,7 +2916,7 @@ function ContextSelectorScreen({ app }: Readonly<{ app: SCCEAppGate }>) {
                   key={m.id}
                   style={{ ...S.btn("dark"), justifyContent: "space-between", display: "flex", alignItems: "center" }}
                   onClick={() => {
-                    app.setActiveMembership(m);
+                    setActiveMembership(m);
                     app.setActiveMembership(m);
                     app.setAuditLog(prev => appendEvent(prev, "CONTEXT_SET", "api", "API", null, `Contexto ${m.contextType}/${m.contextId} (${m.role})`));
                   }}
@@ -2924,8 +2972,11 @@ export default function App(){
   const [apiUser, setApiUser] = useState<ApiUser | null>(null);
   const [memberships, setMemberships] = useState<Membership[]>([]);
   const [activeMembership, setActiveMembership] = useState<Membership | null>(() => getActiveMembership());
+  /** Rol simulado de sesión: solo aplica en SIMULACION, no cambia permisos reales. */
+  const [simulatedRoleId, setSimulatedRoleId] = useState<SimulatedRoleId>("DIRECTOR_REGIONAL");
 
   const [activeRegion,setActiveRegion]=useState(DEFAULT_REGION);
+  const [territoryRegionsMap, setTerritoryRegionsMap] = useState<Record<string, { name: string; communes: Record<string, { name: string }> }> | null>(null);
   const [membershipScopes, setMembershipScopes] = useState<MembershipScopesMap>({});
   const justBecameCentralRef = useRef(false);
   const effectiveMembership = getActiveMembership();
@@ -2934,6 +2985,15 @@ export default function App(){
     () => getRegionOptions(isCentral, effectiveMembership, membershipScopes, CONFIG.regions as Record<string, { name?: string }>),
     [isCentral, effectiveMembership, membershipScopes]
   );
+
+  useEffect(() => {
+    if (!activeRegion) return;
+    const cutCode = INTERNAL_TO_CUT[activeRegion] ?? activeRegion;
+    loadRegionRegionsMap(cutCode)
+      .then((map) => setTerritoryRegionsMap(territoryMapToInternalKeys(map)))
+      .catch(() => { /* fallback: keep CONFIG.regions */ });
+  }, [activeRegion]);
+
   const localSeqRef = useRef(0);
   const getNextLocalId = useCallback(() => {
     localSeqRef.current += 1;
@@ -3270,11 +3330,57 @@ export default function App(){
   );
 
   const changeStatus = useCallback(
-    (caseId: string, newStatus: CaseStatus) => {
+    async (caseId: string, newStatus: CaseStatus) => {
       if (!currentUser) return;
+      if (newStatus === "Cerrado") {
+        const c = cases.find((x) => x.id === caseId);
+        if (!c) return;
+        const closeError = getCloseCaseValidationError(c);
+        if (closeError) {
+          notify("❌ " + closeError, "error");
+          return;
+        }
+        const reason = c.closingMotivo ?? "";
+        if (authToken && effectiveMembership) {
+          const headers: Record<string, string> = {};
+          if (effectiveMembership.id) headers["x-scce-membership-id"] = effectiveMembership.id;
+          if (effectiveMembership.contextType && effectiveMembership.contextId) {
+            headers["x-scce-context-type"] = effectiveMembership.contextType;
+            headers["x-scce-context-id"] = effectiveMembership.contextId;
+          }
+          const res = await apiRequest<unknown>(`/cases/${caseId}/events`, {
+            method: "POST",
+            token: authToken,
+            headers: Object.keys(headers).length ? headers : undefined,
+            body: { eventType: "CASE_CLOSED", reason, payloadJson: {} },
+          });
+          if (!res.ok) {
+            notify(res.error ?? UI_TEXT_GOVERNANCE.validationMessages.missingCloseReason, "error");
+            return;
+          }
+        }
+      }
+      if (newStatus === "Resuelto" && authToken && effectiveMembership) {
+        const headers: Record<string, string> = {};
+        if (effectiveMembership.id) headers["x-scce-membership-id"] = effectiveMembership.id;
+        if (effectiveMembership.contextType && effectiveMembership.contextId) {
+          headers["x-scce-context-type"] = effectiveMembership.contextType;
+          headers["x-scce-context-id"] = effectiveMembership.contextId;
+        }
+        const res = await apiRequest<unknown>(`/cases/${caseId}/events`, {
+          method: "POST",
+          token: authToken,
+          headers: Object.keys(headers).length ? headers : undefined,
+          body: { eventType: "RESOLVE", payloadJson: { who: currentUser.id, at: nowISO() } },
+        });
+        if (!res.ok) {
+          notify(res.error ?? "Error al marcar caso como resuelto", "error");
+          return;
+        }
+      }
       changeCaseStatusImpl(caseId, newStatus, { currentUser, cases, notify, setCases, setAuditLog });
     },
-    [currentUser, cases, notify, setCases, setAuditLog]
+    [currentUser, cases, notify, setCases, setAuditLog, authToken, effectiveMembership]
   );
 
   const validateBypass = useCallback(
@@ -3295,15 +3401,6 @@ export default function App(){
       result,
       ...(note ? { note } : {}),
     };
-    setCases((prev) =>
-      prev.map((x) => {
-        if (x.id === caseId) {
-          return { ...x, timeline: pushTimelineEvent(x.timeline ?? [], ev), updatedAt: nowISO() } as CaseItem;
-        }
-        return x;
-      })
-    );
-    setAuditLog((prev) => appendEvent(prev, "OPERATIONAL_VALIDATION", currentUser.id, currentUser.role, caseId, `${result}${note ? ": " + note.slice(0, 40) : ""}`));
     if (authToken && effectiveMembership) {
       const headers: Record<string, string> = {};
       if (effectiveMembership.id) headers["x-scce-membership-id"] = effectiveMembership.id;
@@ -3317,8 +3414,20 @@ export default function App(){
         headers: Object.keys(headers).length ? headers : undefined,
         body: { eventType: "OPERATIONAL_VALIDATION", payloadJson: { result, ...(note ? { note } : {}) } },
       });
-      if (!res.ok) console.warn("[SCCE] Operational validation API sync failed:", res.error);
+      if (!res.ok) {
+        notify(res.error ?? "Error al guardar validación operacional", "error");
+        return;
+      }
     }
+    setCases((prev) =>
+      prev.map((x) => {
+        if (x.id === caseId) {
+          return { ...x, timeline: pushTimelineEvent(x.timeline ?? [], ev), updatedAt: nowISO() } as CaseItem;
+        }
+        return x;
+      })
+    );
+    setAuditLog((prev) => appendEvent(prev, "OPERATIONAL_VALIDATION", currentUser.id, currentUser.role, caseId, `${result}${note ? ": " + note.slice(0, 40) : ""}`));
     notify(UI_TEXT_GOVERNANCE.successMessages.operationalValidationSaved, "success");
   }
 
@@ -3732,7 +3841,7 @@ export default function App(){
     const div=checkLocalDivergence(c,localCatalog);
     const regionsMap = CONFIG.regions as Record<string, { name?: string; communes?: Record<string, { name?: string }> }>;
     const regionName = regionsMap[c.region]?.name ?? "";
-    const communeName = regionsMap[c.region]?.communes?.[c.commune]?.name || c.commune;
+    const communeName = getCommuneDisplayName(regionsMap, c.region ?? "", c.commune ?? "");
     const snapshotLine = c.localSnapshot
       ? `${c.localSnapshot.nombre} [${c.localSnapshot.idLocal}] @ ${fmtDate(c.localSnapshot.snapshotAt)}`
       : "sin snapshot";
@@ -3905,6 +4014,7 @@ export default function App(){
   };
 
   // ─── NEW CASE FORM (componente a nivel de módulo; datos vía gate) ─────────
+  const newCaseFormRegionsMap = territoryRegionsMap ?? regionsMap;
   const newCaseFormGate: NewCaseFormGate = {
     newCase,
     setNewCase,
@@ -3914,7 +4024,9 @@ export default function App(){
     setBypassForm,
     step,
     setStep,
-    regionsMap,
+    regionsMap: newCaseFormRegionsMap,
+    activeMembership: activeMembership ?? null,
+    activeRegion,
     assignedCommuneEffective,
     assignedLocalIdEffective: assignedLocalIdEffective ?? null,
     assignedLocal,
@@ -3928,6 +4040,9 @@ export default function App(){
     busyAction,
     nowLocalInput,
   };
+
+  // ─── Rol simulado activo (solo cuando contexto es SIMULACION); una sola resolución para barra y gates ───
+  const activeSimulatedRole = activeMembership?.contextType === "SIMULACION" ? getSimulatedRole(simulatedRoleId) : undefined;
 
   // ─── CASE DETAIL (gate inyectado en views/case/CaseDetailView) ───────────
   const caseDetailGate = {
@@ -3970,6 +4085,9 @@ export default function App(){
     RecBadge,
     isInstructionAckedByUser,
     lastAck,
+    contextType: activeMembership?.contextType,
+    simulatedRoleId: activeSimulatedRole?.id,
+    simulatedRoleLabel: activeSimulatedRole?.label,
   };
 
   // ─── CATALOG VIEW (gate inyectado en views/catalog) ────────────────────────
@@ -4044,6 +4162,9 @@ export default function App(){
     themeColor: themeColor as (key: string) => string,
     critColor: critColor as (criticality: string) => string,
     Badge: Badge as unknown as SimulationGate["Badge"],
+    contextType: activeMembership?.contextType,
+    simulatedRoleId: activeSimulatedRole?.id,
+    simulatedRoleLabel: activeSimulatedRole?.label,
   };
 
   // ─── CHECKLIST ────────────────────────────────────────────────────────────
@@ -4267,6 +4388,25 @@ export default function App(){
               <Badge style={{ ...S.badge(themeColor("legacyGreenDark")) }} size="xs" title={`Contexto actual: ${activeMembership.contextType}/${activeMembership.contextId}. Click para cambiar.`}>
                 {activeMembership.contextType}/{activeMembership.contextId}
               </Badge>
+              {activeSimulatedRole && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <span style={{ color: themeColor("mutedAlt"), fontSize: "11px", fontWeight: 600 }}>
+                    Modo simulación · Actuando como: {activeSimulatedRole.label}
+                  </span>
+                  <span style={{ color: themeColor("mutedAlt"), fontSize: "11px", fontWeight: 600 }}>Actuar como:</span>
+                  <select
+                    value={simulatedRoleId}
+                    onChange={(e) => setSimulatedRoleId(e.target.value as SimulatedRoleId)}
+                    title="Rol simulado en el ejercicio (solo perspectiva, no cambia permisos reales)"
+                    style={{ fontSize: "11px", padding: "4px 8px", borderRadius: 6, border: `1px solid ${themeColor("mutedDarker")}`, background: themeColor("white"), color: themeColor("textPrimary"), fontWeight: 600 }}
+                    aria-label="Rol simulado en simulación"
+                  >
+                    {SIMULATED_ROLES.map((r) => (
+                      <option key={r.id} value={r.id}>{r.label}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
               {memberships.length > 1 && (
                 <button
                   type="button"
@@ -4287,7 +4427,7 @@ export default function App(){
             {user.name}
           </Badge>
           <Badge style={{ ...S.badge(themeColor("blueDark")) }} size="xs">
-            {ROLE_LABELS[user.role]}
+            {activeSimulatedRole?.label ?? ROLE_LABELS[user.role]}
           </Badge>
           <button
             style={{ ...S.btn("dark"), fontSize: "11px" }}
