@@ -2954,7 +2954,7 @@ export default function App(){
   const onImportStateFile = (file: File) => handleImportStateFile({ setCases, setAuditLog, currentUser, notify }, file);
 
   const [view,setView]=useState<ViewKey>("dashboard");
-  const PERSISTABLE_VIEWS: ViewKey[] = [
+  const PERSISTABLE_VIEWS = new Set<ViewKey>([
     "dashboard",
     "catalog",
     "audit",
@@ -2964,7 +2964,7 @@ export default function App(){
     "config",
     "trust",
     "detail",
-  ];
+  ]);
   function viewStorageKey(userId: string) {
     return `SCCE_VIEW:${userId}`;
   }
@@ -2972,7 +2972,7 @@ export default function App(){
     return `SCCE_SELECTED_CASE:${userId}`;
   }
   function isPersistableView(view: ViewKey): boolean {
-    return PERSISTABLE_VIEWS.includes(view);
+    return PERSISTABLE_VIEWS.has(view);
   }
   const detailRestoreAttemptedRef = useRef(false);
   const hydrationDoneRef = useRef(false);
