@@ -91,6 +91,23 @@ async function main() {
         }
       });
     }
+    // Regla: toda prueba nace en SIMULACION. Membership de prueba para E2E/manual.
+    const simExisting = await prisma.membership.findFirst({
+      where: { userId: user.id, contextType: "SIMULACION", contextId: "e2e", regionCode: code }
+    });
+    if (!simExisting) {
+      await prisma.membership.create({
+        data: {
+          userId: user.id,
+          contextType: "SIMULACION",
+          contextId: "e2e",
+          regionCode: code,
+          role: "DR",
+          regionScopeMode: "LIST",
+          regionScope: [code]
+        }
+      });
+    }
   }
 
   // 3) Admin piloto: si existe, actualiza passwordHash; si no existe, lo crea.
@@ -108,7 +125,7 @@ async function main() {
     },
   });
 
-  // Quitar memberships viejos de admin para que solo queden los 2 del piloto
+  // Quitar memberships viejos de admin para recrear los actuales (2 OPERACION + 16 SIMULACION)
   await prisma.membership.deleteMany({
     where: { userId: admin.id }
   });
@@ -146,12 +163,72 @@ async function main() {
       });
     }
   }
+  // Admin piloto: SIMULACION/e2e en las 16 regiones (role ADMIN_PILOTO), una por región.
+  for (const code of REGION_CODES) {
+    const existing = await prisma.membership.findFirst({
+      where: {
+        userId: admin.id,
+        contextType: "SIMULACION",
+        contextId: "e2e",
+        regionCode: code,
+      },
+    });
+    if (existing) {
+      await prisma.membership.update({
+        where: { id: existing.id },
+        data: { role: "ADMIN_PILOTO", regionScopeMode: "LIST", regionScope: [code] },
+      });
+    } else {
+      await prisma.membership.create({
+        data: {
+          userId: admin.id,
+          contextType: "SIMULACION",
+          contextId: "e2e",
+          regionCode: code,
+          role: "ADMIN_PILOTO",
+          regionScopeMode: "LIST",
+          regionScope: [code],
+        },
+      });
+    }
+  }
 
-  console.log("✅ Seed OK — Piloto 16 DR + admin");
-  console.log("--- 16 Directores Regionales (1 membership cada uno, scope = su región) ---");
+  // 4) Equipo regional por región: solo SIMULACION/e2e, sin OPERACION (política Fase 1).
+  const EQUIPO_PER_REGION = 2;
+  for (const code of REGION_CODES) {
+    for (let i = 1; i <= EQUIPO_PER_REGION; i++) {
+      const email = `equipo.${code.toLowerCase()}.${i}@scce.local`;
+      const user = await prisma.user.upsert({
+        where: { email },
+        update: { isActive: true },
+        create: { email, passwordHash, isActive: true },
+      });
+      const existing = await prisma.membership.findFirst({
+        where: { userId: user.id, contextType: "SIMULACION", contextId: "e2e", regionCode: code }
+      });
+      if (!existing) {
+        await prisma.membership.create({
+          data: {
+            userId: user.id,
+            contextType: "SIMULACION",
+            contextId: "e2e",
+            regionCode: code,
+            role: "EQUIPO_REGIONAL",
+            regionScopeMode: "LIST",
+            regionScope: [code],
+          },
+        });
+      }
+    }
+  }
+
+  console.log("✅ Seed OK — Piloto 16 DR + admin + equipo regional");
+  console.log("--- 16 Directores Regionales (OPERACION/GLOBAL + SIMULACION/e2e por región) ---");
   REGION_CODES.forEach(code => console.log("  ", `dr.${code.toLowerCase()}@scce.local`));
-  console.log("--- Admin piloto (2 memberships: DR TRP + ADMIN_PILOTO) ---");
+  console.log("--- Admin piloto (OPERACION: 2; SIMULACION/e2e: 16 regiones) ---");
   console.log("  ", adminEmail);
+  console.log("--- Equipo regional (solo SIMULACION/e2e, 2 por región) ---");
+  REGION_CODES.forEach(code => console.log("  ", `equipo.${code.toLowerCase()}.1@scce.local`, `equipo.${code.toLowerCase()}.2@scce.local`));
 }
 
 main()

@@ -25,6 +25,35 @@ enum RegionScopeMode {
   LIST
 }
 
+enum CaseStatus {
+  NEW
+  ACKED
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum CriticalityLevel {
+  LEVEL_1
+  LEVEL_2
+  LEVEL_3
+  LEVEL_4
+}
+
+enum EventType {
+  CASE_CREATED
+  COMMENT_ADDED
+  INSTRUCTION_CREATED
+  CASE_CLOSED
+  OPERATIONAL_VALIDATION
+  ASSIGNMENT_CHANGED
+  ACTION_ADDED
+  DECISION_ADDED
+  ACK
+  RESOLVE
+  CHANGE_CRITICALITY
+}
+
 model Region {
   id          String       @id
   name        String
@@ -103,18 +132,22 @@ model Simulation {
 }
 
 model Case {
-  id            String      @id @default(cuid())
-  contextType   ContextType
-  contextId     String
-  summary       String
-  status        String
-  criticality   String
-  regionCode    String
-  communeCode   String
-  localCode     String
-  localSnapshot Json?
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+  id                 String           @id @default(cuid())
+  contextType        ContextType
+  contextId          String
+  title              String
+  summary            String
+  status             CaseStatus
+  criticality        String
+  criticalityLevel   CriticalityLevel
+  createdByUserId    String
+  regionCode         String
+  communeCode        String
+  localCode          String
+  localSnapshot      Json?
+  assignedTo         String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
 
   @@index([contextType, contextId])
   @@index([regionCode, communeCode])
@@ -126,7 +159,7 @@ model Event {
   contextType ContextType
   contextId   String
   actorId     String
-  eventType   String
+  eventType   EventType
   payloadJson Json
   prevHash    String?
   hash        String

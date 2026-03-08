@@ -4,6 +4,7 @@ import {
   IsOptional,
   IsString,
   MinLength,
+  ValidateBy,
   ValidateIf,
 } from "class-validator";
 
@@ -44,14 +45,36 @@ export const ALLOWED_EVENT_TYPES = [
   "INSTRUCTION_CREATED",
   "OPERATIONAL_VALIDATION",
   "CASE_CLOSED",
+  "ASSIGNMENT_CHANGED",
+  "ACTION_ADDED",
+  "DECISION_ADDED",
+  "RESOLVE",
 ] as const;
 
 export type AllowedEventType = (typeof ALLOWED_EVENT_TYPES)[number];
+
+function assignedToNonEmpty(value: unknown): boolean {
+  if (value == null || typeof value !== "object") return false;
+  const assignedTo = (value as Record<string, unknown>).assignedTo;
+  return typeof assignedTo === "string" && assignedTo.trim().length > 0;
+}
 
 export class CreateCaseEventDto {
   @IsIn(ALLOWED_EVENT_TYPES)
   eventType!: AllowedEventType;
 
+  @ValidateIf((o) => o.eventType === "ASSIGNMENT_CHANGED")
+  @ValidateBy({
+    name: "assignmentPayload",
+    validator: {
+      validate(value: unknown) {
+        return value != null && typeof value === "object" && assignedToNonEmpty(value);
+      },
+      defaultMessage() {
+        return "Para ASSIGNMENT_CHANGED, payloadJson debe existir y contener assignedTo (string no vacío)";
+      },
+    },
+  })
   @IsObject()
   @IsOptional()
   payloadJson?: Record<string, any>;
