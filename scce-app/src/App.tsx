@@ -2954,6 +2954,28 @@ export default function App(){
   const onImportStateFile = (file: File) => handleImportStateFile({ setCases, setAuditLog, currentUser, notify }, file);
 
   const [view,setView]=useState<ViewKey>("dashboard");
+  const PERSISTABLE_VIEWS: ViewKey[] = [
+    "dashboard",
+    "catalog",
+    "audit",
+    "reports",
+    "simulation",
+    "checklist",
+    "config",
+    "trust",
+    "detail",
+  ];
+  function viewStorageKey(userId: string) {
+    return `SCCE_VIEW:${userId}`;
+  }
+  function selectedCaseStorageKey(userId: string) {
+    return `SCCE_SELECTED_CASE:${userId}`;
+  }
+  function isPersistableView(view: ViewKey): boolean {
+    return PERSISTABLE_VIEWS.includes(view);
+  }
+  const detailRestoreAttemptedRef = useRef(false);
+  const hydrationDoneRef = useRef(false);
   const OP_HOME_VIEW = "op_home" as const;
   const [selectedCase, setSelectedCase] = useState<CaseItem | null>(null);
   const defaultUiModeForUser = useCallback((u: User | null): UiMode => {
@@ -3002,6 +3024,70 @@ export default function App(){
   };
   useActionsMenuCloseOutside(actionsOpen, setActionsOpen);
   useUiModeFromStorage(currentUser, defaultUiModeForUser, setUiMode);
+
+  useEffect(() => {
+    if (!currentUser?.id) {
+      hydrationDoneRef.current = false;
+      return;
+    }
+
+    const savedView = localStorage.getItem(viewStorageKey(currentUser.id)) as ViewKey | null;
+    const savedCaseId = localStorage.getItem(selectedCaseStorageKey(currentUser.id));
+
+    if (savedView === "detail" && savedCaseId && cases.length === 0) {
+      return;
+    }
+
+    if (savedView === "detail" && savedCaseId) {
+      const foundCase = cases.find((c) => c.id === savedCaseId) ?? null;
+
+      if (foundCase) {
+        detailRestoreAttemptedRef.current = false;
+        setSelectedCase(foundCase);
+        setView("detail");
+        hydrationDoneRef.current = true;
+        return;
+      }
+
+      if (!detailRestoreAttemptedRef.current) {
+        detailRestoreAttemptedRef.current = true;
+        return;
+      }
+
+      detailRestoreAttemptedRef.current = false;
+      setSelectedCase(null);
+      setView("dashboard");
+      hydrationDoneRef.current = true;
+      return;
+    }
+
+    if (savedView && isPersistableView(savedView)) {
+      setSelectedCase(null);
+      setView(savedView);
+      hydrationDoneRef.current = true;
+    } else {
+      setSelectedCase(null);
+      setView("dashboard");
+      hydrationDoneRef.current = true;
+    }
+  }, [currentUser?.id, cases]);
+
+  useEffect(() => {
+    if (!hydrationDoneRef.current) return;
+    if (!currentUser?.id) return;
+
+    if (isPersistableView(view)) {
+      localStorage.setItem(viewStorageKey(currentUser.id), view);
+    } else {
+      localStorage.removeItem(viewStorageKey(currentUser.id));
+    }
+
+    if (view === "detail" && selectedCase?.id) {
+      localStorage.setItem(selectedCaseStorageKey(currentUser.id), selectedCase.id);
+    } else {
+      localStorage.removeItem(selectedCaseStorageKey(currentUser.id));
+    }
+  }, [currentUser?.id, view, selectedCase?.id]);
 
   const setUiModeAndPersist = useCallback(
     (next: UiMode) => setUiModeAndPersistImpl(next, currentUser?.id, setUiMode),
@@ -4057,6 +4143,9 @@ export default function App(){
   if (!authToken) return <LoginScreen app={app} />;
   if (!activeMembership) return <ContextSelectorScreen app={app} />;
   if (!currentUser) return <LoadingScreen />;
+  if (!currentUser?.id || !hydrationDoneRef.current) {
+    return <div style={{ padding: 24 }}>Cargando...</div>;
+  }
 
   const user = currentUser;
 
@@ -4174,9 +4263,25 @@ export default function App(){
           </div>
           <span style={{fontSize:"10px",color:themeColor("mutedDark")}}>{electionConfig.name}</span>
           {activeMembership && (
-            <Badge style={{ ...S.badge(themeColor("legacyGreenDark")) }} size="xs">
-              {activeMembership.contextType}/{activeMembership.contextId}
-            </Badge>
+            <>
+              <Badge style={{ ...S.badge(themeColor("legacyGreenDark")) }} size="xs" title={`Contexto actual: ${activeMembership.contextType}/${activeMembership.contextId}. Click para cambiar.`}>
+                {activeMembership.contextType}/{activeMembership.contextId}
+              </Badge>
+              {memberships.length > 1 && (
+                <button
+                  type="button"
+                  style={{ ...S.btn("dark"), fontSize: "11px", padding: "4px 8px" }}
+                  onClick={() => {
+                    clearActiveMembership();
+                    setActiveMembership(null);
+                    setAuditLog((prev) => appendEvent(prev, "CONTEXT_SWITCH", "ui", "Usuario", null, "Cambio de contexto solicitado"));
+                  }}
+                  title="Elegir otro rol/contexto sin cerrar sesión"
+                >
+                  Cambiar contexto
+                </button>
+              )}
+            </>
           )}
           <Badge style={S.badge(themeColor("mutedDarker"))} size="sm">
             {user.name}
