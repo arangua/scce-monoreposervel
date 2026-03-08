@@ -29,7 +29,7 @@ describe("E2E Smoke", () => {
       .useValue({
         canActivate: (ctx: any) => {
           const req = ctx.switchToHttp().getRequest();
-          req.scceContext = { contextType: "OPERACION", contextId: "e2e-context" };
+          req.scceContext = { contextType: "SIMULACION", contextId: "e2e-context" };
           return true;
         },
       })

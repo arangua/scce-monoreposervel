@@ -33,7 +33,7 @@ describe("POST /cases validation (regionCode, communeCode, localCode required)",
       .useValue({
         canActivate: (ctx: any) => {
           const req = ctx.switchToHttp().getRequest();
-          req.scceContext = { contextType: "OPERACION", contextId: "e2e-validation" };
+          req.scceContext = { contextType: "SIMULACION", contextId: "e2e-validation" };
           return true;
         },
       })

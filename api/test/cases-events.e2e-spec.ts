@@ -29,7 +29,7 @@ describe("Cases + Events (append-only, chained hash, close)", () => {
       .useValue({
         canActivate: (ctx: any) => {
           const req = ctx.switchToHttp().getRequest();
-          req.scceContext = { contextType: "OPERACION", contextId: "e2e-context" };
+          req.scceContext = { contextType: "SIMULACION", contextId: "e2e-context" };
           return true;
         },
       })
@@ -61,19 +61,31 @@ describe("Cases + Events (append-only, chained hash, close)", () => {
     expect(typeof caseId).toBe("string");
     expect(caseId.length).toBeGreaterThan(0);
 
-    // 2) COMMENT_ADDED
+    // 2) Forzar estado RESOLVED (prerrequisito para OPERATIONAL_VALIDATION)
+    await prisma.case.update({
+      where: { id: caseId },
+      data: { status: "RESOLVED" },
+    });
+
+    // 3) COMMENT_ADDED (acción mínima)
     await request(app.getHttpServer())
       .post(`/cases/${caseId}/events`)
       .send({ eventType: "COMMENT_ADDED", payloadJson: { text: "hola" } })
       .expect(201);
 
-    // 3) CASE_CLOSED
+    // 4) OPERATIONAL_VALIDATION (Paso 7)
+    await request(app.getHttpServer())
+      .post(`/cases/${caseId}/events`)
+      .send({ eventType: "OPERATIONAL_VALIDATION", payloadJson: { result: "OK" } })
+      .expect(201);
+
+    // 5) CASE_CLOSED
     await request(app.getHttpServer())
       .post(`/cases/${caseId}/events`)
       .send({ eventType: "CASE_CLOSED", reason: "RESUELTO", note: "ok" })
       .expect(201);
 
-    // 4) COMMENT post-close => 409
+    // 6) COMMENT post-close => 409
     const postClose = await request(app.getHttpServer())
       .post(`/cases/${caseId}/events`)
       .send({ eventType: "COMMENT_ADDED", payloadJson: { text: "no debe entrar" } })
@@ -81,35 +93,37 @@ describe("Cases + Events (append-only, chained hash, close)", () => {
 
     expect(postClose.body?.message).toContain("Caso cerrado");
 
-    // 5) GET /cases/:id => status CLOSED
+    // 7) GET /cases/:id => status CLOSED
     const getCase = await request(app.getHttpServer())
       .get(`/cases/${caseId}`)
       .expect(200);
 
     expect(getCase.body?.status).toBe("CLOSED");
 
-    // 6) GET /cases/:id/events => 200 and chained prevHash
+    // 8) GET /cases/:id/events => 200 and chained prevHash
     const evRes = await request(app.getHttpServer())
       .get(`/cases/${caseId}/events`)
       .expect(200);
 
     const events = evRes.body;
     expect(Array.isArray(events)).toBe(true);
-    expect(events.length).toBe(3);
+    expect(events.length).toBe(4);
 
-    const [e0, e1, e2] = events;
+    const [e0, e1, e2, e3] = events;
 
     expect(e0.eventType).toBe("CASE_CREATED");
     expect(e1.eventType).toBe("COMMENT_ADDED");
-    expect(e2.eventType).toBe("CASE_CLOSED");
+    expect(e2.eventType).toBe("OPERATIONAL_VALIDATION");
+    expect(e3.eventType).toBe("CASE_CLOSED");
 
     // cadena prevHash (primero null/""; luego hash anterior)
     expect(e0.prevHash === null || e0.prevHash === "").toBe(true);
     expect(e1.prevHash).toBe(e0.hash);
     expect(e2.prevHash).toBe(e1.hash);
+    expect(e3.prevHash).toBe(e2.hash);
 
     // payload mínimo de cierre
-    expect(e2.payloadJson?.reason).toBe("RESUELTO");
-    expect(e2.payloadJson?.note).toBe("ok");
+    expect(e3.payloadJson?.reason).toBe("RESUELTO");
+    expect(e3.payloadJson?.note).toBe("ok");
   });
 });

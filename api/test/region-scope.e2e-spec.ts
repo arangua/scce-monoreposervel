@@ -22,11 +22,11 @@ function guardOverride(regionScopeMode: "ALL" | "LIST", regionScope: string[]) {
     canActivate: (ctx: any) => {
       const req = ctx.switchToHttp().getRequest();
       req.user = { userId: "e2e-region-user" };
-      req.scceContext = { contextType: "OPERACION" as const, contextId: E2E_CONTEXT_ID };
+      req.scceContext = { contextType: "SIMULACION" as const, contextId: E2E_CONTEXT_ID };
       req.scceMembershipId = "e2e-membership-id";
       req.scceMembership = {
         id: "e2e-membership-id",
-        contextType: "OPERACION",
+        contextType: "SIMULACION",
         contextId: E2E_CONTEXT_ID,
         regionScopeMode,
         regionScope,
