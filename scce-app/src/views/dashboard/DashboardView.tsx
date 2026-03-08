@@ -140,28 +140,28 @@ export function DashboardView({ gate }: DashboardViewProps) {
   const isQuickFilterActive = (label: string) =>
     (label === "Total" && quickFilter === "all") ||
     (label === "Abiertos" && quickFilter === "open") ||
-    (label === "Críticos+Altos" && quickFilter === "criticalHigh") ||
+    (label === "Críticos+Altos (todos)" && quickFilter === "criticalHigh") ||
     (label === "Casos atrasados" && quickFilter === "overdue");
 
   const handleQuickFilterCardClick = (label: string) => {
     if (label === "Total") return setQuickFilter("all");
     if (label === "Abiertos") return setQuickFilter(quickFilter === "open" ? "all" : "open");
-    if (label === "Críticos+Altos") return setQuickFilter(quickFilter === "criticalHigh" ? "all" : "criticalHigh");
+    if (label === "Críticos+Altos (todos)") return setQuickFilter(quickFilter === "criticalHigh" ? "all" : "criticalHigh");
     if (label === "Casos atrasados") return setQuickFilter(quickFilter === "overdue" ? "all" : "overdue");
   };
 
-  const QUICK_FILTER_LABELS = ["Total", "Abiertos", "Críticos+Altos", "Casos atrasados"] as const;
+  const QUICK_FILTER_LABELS = ["Total", "Abiertos", "Críticos+Altos (todos)", "Casos atrasados"] as const;
   const getQuickFilterCardTitle = (label: string): string | undefined => {
     if (label === "Total") return "Mostrar todos los casos";
     if (label === "Abiertos") return "Mostrar solo casos abiertos";
-    if (label === "Críticos+Altos") return "Mostrar solo casos críticos y altos";
+    if (label === "Críticos+Altos (todos)") return "Mostrar solo casos críticos y altos";
     if (label === "Casos atrasados") return "Mostrar solo casos atrasados";
     return undefined;
   };
   const getQuickFilterHighlightStyle = (label: string): React.CSSProperties => {
     if (label === "Total") return { border: "2px solid #2563eb", boxShadow: "0 0 0 2px rgba(37,99,235,0.15)" };
     if (label === "Abiertos") return { border: "2px solid #f97316", boxShadow: "0 0 0 2px rgba(249,115,22,0.15)" };
-    if (label === "Críticos+Altos") return { border: "2px solid #dc2626", boxShadow: "0 0 0 2px rgba(220,38,38,0.15)" };
+    if (label === "Críticos+Altos (todos)") return { border: "2px solid #dc2626", boxShadow: "0 0 0 2px rgba(220,38,38,0.15)" };
     if (label === "Casos atrasados") return { border: "2px solid #b91c1c", boxShadow: "0 0 0 2px rgba(185,28,28,0.15)" };
     return {};
   };
@@ -209,7 +209,7 @@ export function DashboardView({ gate }: DashboardViewProps) {
       )}
 
       <div style={{ ...(Sx.g4 as React.CSSProperties), marginBottom: 10 }}>
-        {[{ l: "Total", v: metrics.total, c: themeColor("primary") }, { l: "Abiertos", v: metrics.open, c: themeColor("warning") }, { l: "Críticos+Altos", v: metrics.critica + metrics.alta, c: themeColor("danger") }, { l: "Casos atrasados", v: metrics.slaVencido, c: themeColor("danger") }].map((k) => {
+        {[{ l: "Total", v: metrics.total, c: themeColor("primary") }, { l: "Abiertos", v: metrics.open, c: themeColor("warning") }, { l: "Críticos+Altos (todos)", v: metrics.critica + metrics.alta, c: themeColor("danger") }, { l: "Casos atrasados", v: metrics.slaVencido, c: themeColor("danger") }].map((k) => {
           const isQuickFilterCard = QUICK_FILTER_LABELS.includes(k.l as (typeof QUICK_FILTER_LABELS)[number]);
           return (
           <div
