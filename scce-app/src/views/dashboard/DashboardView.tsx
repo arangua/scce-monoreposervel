@@ -278,20 +278,33 @@ export function DashboardView({ gate }: DashboardViewProps) {
       {crisisMode ? (
         <div>
           <div style={{ color: themeColor("danger"), fontWeight: 700, marginBottom: 8 }}>⚡ MODO CRISIS — Críticos y altos activos</div>
-          {visibleCases.filter((c) => ["CRITICA", "ALTA"].includes(c.criticality) && !["Resuelto", "Cerrado"].includes(normalizeStatus(c.status))).map((c) => (
-            <div key={c.id} style={{ ...(Sx.card as React.CSSProperties), borderLeft: `4px solid ${critColor(c.criticality)}`, marginBottom: 6, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
-              <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
-                <span style={{ fontFamily: "monospace", color: themeColor("muted"), fontSize: "11px" }}>{c.id}</span>
-                <span style={{ fontWeight: 600 }}>{c.summary}</span>
-                <gate.Badge style={Sx.badge?.(critColor(c.criticality)) as React.CSSProperties} size="sm">{c.criticality}</gate.Badge>
-                <RecBadge c={c} /><DivBadge gate={gate} c={c} />
-              </div>
-              <div style={{ display: "flex", gap: 4 }}>
-                <button type="button" style={Sx.btn?.("primary") as React.CSSProperties} onClick={() => { const found = cases.find((x) => x.id === c.id) ?? null; setSelectedCase(found); setView("detail"); }}>Ver</button>
-                {canDo("assign", currentUser, c) && <button type="button" style={Sx.btn?.("warning") as React.CSSProperties} onClick={() => changeStatus(c.id, "Escalado")}>{(gate.UI_TEXT_GOVERNANCE.buttons as { escalate?: string })?.escalate}</button>}
-              </div>
-            </div>
-          ))}
+          <div style={{ fontSize: 11, color: themeColor("muted"), marginBottom: 6, lineHeight: 1.35 }}>
+            Muestra solo contingencias críticas y altas que siguen activas para priorizar atención y escalamiento.
+          </div>
+          {(() => {
+            const crisisCases = visibleCases.filter((c) => ["CRITICA", "ALTA"].includes(c.criticality) && !["Resuelto", "Cerrado"].includes(normalizeStatus(c.status)));
+            return (
+              <>
+                <div style={{ fontSize: 12, color: themeColor("muted"), marginTop: 2, marginBottom: 6 }}>
+                  {crisisCases.length} {crisisCases.length === 1 ? "caso activo" : "casos activos"}
+                </div>
+                {crisisCases.map((c) => (
+                  <div key={c.id} style={{ ...(Sx.card as React.CSSProperties), borderLeft: `4px solid ${critColor(c.criticality)}`, marginBottom: 6, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+                    <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
+                      <span style={{ fontFamily: "monospace", color: themeColor("muted"), fontSize: "11px" }}>{c.id}</span>
+                      <span style={{ fontWeight: 600 }}>{c.summary}</span>
+                      <gate.Badge style={Sx.badge?.(critColor(c.criticality)) as React.CSSProperties} size="sm">{c.criticality}</gate.Badge>
+                      <RecBadge c={c} /><DivBadge gate={gate} c={c} />
+                    </div>
+                    <div style={{ display: "flex", gap: 4 }}>
+                      <button type="button" style={Sx.btn?.("primary") as React.CSSProperties} onClick={() => { const found = cases.find((x) => x.id === c.id) ?? null; setSelectedCase(found); setView("detail"); }}>Ver</button>
+                      {canDo("assign", currentUser, c) && <button type="button" style={Sx.btn?.("warning") as React.CSSProperties} onClick={() => changeStatus(c.id, "Escalado")}>{(gate.UI_TEXT_GOVERNANCE.buttons as { escalate?: string })?.escalate}</button>}
+                    </div>
+                  </div>
+                ))}
+              </>
+            );
+          })()}
         </div>
       ) : (
         <div>
