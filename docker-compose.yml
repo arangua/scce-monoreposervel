@@ -1,0 +1,16 @@
+services:
+  db:
+    image: postgres:16
+    container_name: scce_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: scce
+      POSTGRES_PASSWORD: scce_dev_password
+      POSTGRES_DB: scce
+    ports:
+      - "5432:5432"
+    volumes:
+      - scce_pgdata:/var/lib/postgresql/data
+
+volumes:
+  scce_pgdata:
