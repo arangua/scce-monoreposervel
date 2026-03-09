@@ -1,0 +1,16 @@
+version: "3.9"
+services:
+  pg_e2e:
+    image: postgres:16
+    container_name: scce_pg_e2e
+    environment:
+      POSTGRES_USER: scce
+      POSTGRES_PASSWORD: scce
+      POSTGRES_DB: scce_test
+    ports:
+      - "54329:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scce -d scce_test"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
