@@ -15,6 +15,7 @@ Thumbs.db
 _backup_mono_20260224/
 
 # Env de test local (no versionar secretos)
+api/.env
 api/.env.test
 
 # Logs / temporales
