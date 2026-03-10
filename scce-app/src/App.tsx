@@ -985,6 +985,31 @@ export default function App(){
     setCurrentUser(u);
   }, [apiUser, activeMembership]);
 
+  useEffect(() => {
+    async function reloadCasesForActiveMembership() {
+      if (!authToken || !activeMembership) {
+        setCases([]);
+        return;
+      }
+      const headers: Record<string, string> = {};
+      if (activeMembership.id) headers["x-scce-membership-id"] = activeMembership.id;
+      if (activeMembership.contextType && activeMembership.contextId) {
+        headers["x-scce-context-type"] = activeMembership.contextType;
+        headers["x-scce-context-id"] = activeMembership.contextId;
+      }
+      const res = await apiRequest<unknown>("/cases", {
+        token: authToken,
+        method: "GET",
+        headers: Object.keys(headers).length ? headers : undefined,
+      });
+      // Si falla, no pisamos el estado actual
+      if (res.ok && Array.isArray(res.data)) {
+        setCases(res.data as CaseItem[]);
+      }
+    }
+    reloadCasesForActiveMembership();
+  }, [authToken, activeMembership]);
+
   // Por defecto, usuario central ve "Todas las regiones" (solo al volverse central)
   useEffect(() => {
     if (isCentral && !justBecameCentralRef.current) {
@@ -2106,7 +2131,17 @@ export default function App(){
                     onClick={() => {
                       setActiveMembership(m);
                       setActiveMembershipState(m);
-                      setAuditLog(prev => appendEvent(prev, "CONTEXT_SET", "api", "API", null, `Contexto ${m.contextType}/${m.contextId} (${m.role})`));
+                      setNewCase(null);
+                      setAuditLog(prev =>
+                        appendEvent(
+                          prev,
+                          "CONTEXT_SET",
+                          "api",
+                          "API",
+                          null,
+                          `Contexto ${m.contextType}/${m.contextId} (${m.role})`,
+                        ),
+                      );
                     }}
                   >
                     <span style={{ fontSize: 12, fontWeight: 700 }}>
@@ -3814,6 +3849,20 @@ export default function App(){
               {activeMembership.contextType}/{activeMembership.contextId}
             </Badge>
           )}
+          <button
+            type="button"
+            style={S.nBtn(false)}
+            onClick={() => {
+              clearActiveMembership();
+              setActiveMembershipState(null);
+              setNewCase(null);
+              setSelectedCase(null);
+              setView("dashboard");
+            }}
+            title="Cambiar contexto"
+          >
+            Cambiar contexto
+          </button>
           <Badge style={S.badge(themeColor("mutedDarker"))} size="sm">
             {currentUser.name}
           </Badge>

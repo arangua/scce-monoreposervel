@@ -88,6 +88,11 @@ export class CasesService {
   }
 
   async create(dto: CreateCaseDto, ctx: ScceCtx, actorId: string) {
+    if (ctx.contextType === "OPERACION" && ctx.contextId === "GLOBAL") {
+      throw new ForbiddenException(
+        "Creación de casos bloqueada en OPERACION/GLOBAL durante el piloto.",
+      );
+    }
     assertRegionAllowed(ctx, dto.regionCode);
 
     const contextType = ctx.contextType;
