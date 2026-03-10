@@ -88,7 +88,10 @@ async function main() {
   }
 
   // 3) Admin piloto: 1 usuario, solo 2 memberships (DR TRP + ADMIN_PILOTO global)
-  const adminEmail = "admin.piloto@scce.local";
+  const adminEmail = process.env.SEED_ADMIN_EMAIL?.trim() || "admin.piloto@scce.local";
+  if (!adminEmail) {
+    throw new Error("SEED_ADMIN_EMAIL está vacío.");
+  }
   const admin = await prisma.user.upsert({
     where: { email: adminEmail },
     update: {
