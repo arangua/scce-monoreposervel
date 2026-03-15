@@ -3735,7 +3735,6 @@ export default function App(){
           setView("detail");
         }}
         onGoToDashboard={() => {
-          setUiModeAndPersist("FULL");
           setView("dashboard");
           setSelectedCase(null);
         }}
