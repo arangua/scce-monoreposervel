@@ -39,7 +39,6 @@ import {
   setToken,
   clearSession,
   clearActiveMembership,
-  getActiveMembership,
   setActiveMembership,
   isCentralFromContext,
   type ApiUser,
@@ -513,7 +512,7 @@ export default function App(){
   const [authToken, setAuthToken] = useState<string | null>(() => getToken());
   const [apiUser, setApiUser] = useState<ApiUser | null>(null);
   const [memberships, setMemberships] = useState<Membership[]>([]);
-  const [activeMembership, setActiveMembershipState] = useState<Membership | null>(() => getActiveMembership());
+  const [activeMembership, setActiveMembershipState] = useState<Membership | null>(null);
 
   const [activeRegion,setActiveRegion]=useState(DEFAULT_REGION);
   const [membershipScopes, setMembershipScopes] = useState<Record<
@@ -521,8 +520,8 @@ export default function App(){
     { regionScopeMode: "ALL" | "LIST"; regionScope: string[]; regionCode?: string | null }
   >>({});
   const justBecameCentralRef = useRef(false);
-  const effectiveMembership = getActiveMembership();
-  const isCentral = isCentralFromContext(effectiveMembership, currentUser?.role);
+  const effectiveMembership = activeMembership;
+  const isCentral = isCentralFromContext(effectiveMembership);
   const regionOptions = useMemo(() => {
     const entriesAll = Object.entries(CONFIG.regions).map(([code, d]) => ({
       code,
@@ -928,23 +927,21 @@ export default function App(){
       return;
     }
     setCtxErr("");
-    setMemberships(ctxRes.data.memberships || []);
+    const list = ctxRes.data.memberships || [];
+    setMemberships(list);
 
-    if (!getActiveMembership()) {
-      const list = ctxRes.data.memberships || [];
+    let effectiveMembership = activeMembership;
 
-      // 1) Si existe ADM, preferirlo como activo por defecto (modo admin)
-      const adm = list.find((m) => m.regionCode === "ADM");
-      const pick = adm ?? (list.length === 1 ? list[0] : list[0] ?? null);
-
+    if (!effectiveMembership) {
+      const pick = list.length === 1 ? list[0] : null;
       if (pick) {
         setActiveMembership(pick);
         setActiveMembershipState(pick);
+        effectiveMembership = pick;
       }
     }
 
     // DR hardening: cargar casos reales desde API (fallback seed si falla)
-    const effectiveMembership = getActiveMembership();
     if (token && effectiveMembership) {
       const headers: Record<string, string> = {};
       if (effectiveMembership.id) headers["x-scce-membership-id"] = effectiveMembership.id;
@@ -1242,7 +1239,7 @@ export default function App(){
     };
 
     const token = authToken;
-    const ctx = getActiveMembership();
+    const ctx = activeMembership;
     if (token && ctx) {
       const headers: Record<string, string> = {};
       if (ctx.id) headers["x-scce-membership-id"] = ctx.id;
@@ -3717,6 +3714,14 @@ export default function App(){
     );
   };
 
+  function clearActiveContextUi() {
+    clearActiveMembership();
+    setActiveMembershipState(null);
+    setNewCase(null);
+    setSelectedCase(null);
+    setView("dashboard");
+  }
+
   // ─── LAYOUT PRINCIPAL ─────────────────────────────────────────────────────
   return (
     showTerrainShell ? (
@@ -3745,10 +3750,7 @@ export default function App(){
           setCtxErr("");
         }}
         membershipsCount={memberships.length}
-        onSwitchContext={() => {
-          clearActiveMembership();
-          setActiveMembershipState(null);
-        }}
+        onSwitchContext={clearActiveContextUi}
         isCrisisMode={crisisMode}
       >
         <div>
