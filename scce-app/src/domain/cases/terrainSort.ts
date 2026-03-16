@@ -64,4 +64,24 @@ export function sortCasesForTerrain<T extends CaseSortable>(cases: T[], currentU
   });
 }
 
+export function totalPendingInstructionsForUser(
+  cases: { instructions?: { ackRequired?: boolean; acks?: { userId?: string }[] }[] }[],
+  currentUser: AnyUser
+): number {
+  return cases.reduce((sum, c) => sum + pendingInstructionsCountForUser(c, currentUser), 0);
+}
+
+type InstructionLike = { status?: string | null; assigneeId?: string; userId?: string; [k: string]: unknown };
+
+export function isInstructionForUser(ins: InstructionLike | null | undefined, currentUser: AnyUser): boolean {
+  if (!ins || !currentUser?.id) return false;
+  const assignee = (ins as { assigneeId?: string }).assigneeId ?? (ins as { userId?: string }).userId;
+  if (assignee) return assignee === currentUser.id;
+  return true;
+}
+
+export function isClosedStatus(status: string | null | undefined): boolean {
+  return String(status ?? "").trim().toLowerCase() === "cerrado";
+}
+
 export { pendingInstructionsCountForUser };
