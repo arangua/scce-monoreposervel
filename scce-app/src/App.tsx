@@ -3734,6 +3734,7 @@ export default function App(){
           setView("detail");
         }}
         onGoToDashboard={() => {
+          setUiModeAndPersist("FULL");
           setView("dashboard");
           setSelectedCase(null);
         }}
@@ -3831,6 +3832,16 @@ export default function App(){
             <button type="button" style={S.nBtn(uiMode === "OP")} onClick={() => setUiModeAndPersist("OP")} title="Vista operativa (terreno)">Operativa</button>
             <button type="button" style={S.nBtn(uiMode === "FULL")} onClick={() => setUiModeAndPersist("FULL")} title="Vista completa (central)">Completa</button>
           </div>
+          {memberships.length > 1 && (
+            <button
+              type="button"
+              style={S.nBtn(false)}
+              onClick={clearActiveContextUi}
+              title="Volver a seleccionar contexto"
+            >
+              Cambiar contexto
+            </button>
+          )}
           <span style={{fontSize:"10px",color:themeColor("mutedDark")}}>{electionConfig.name}</span>
           {activeMembership && (
             <Badge style={{ ...S.badge(themeColor("legacyGreenDark")) }} size="xs">
