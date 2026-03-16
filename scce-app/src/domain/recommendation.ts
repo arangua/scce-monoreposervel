@@ -4,11 +4,14 @@ import { SLA_MINUTES, type SlaLevel } from "./caseSla";
 
 export type RecLevel = "low" | "medium" | "high";
 
-export function getRecommendation(c: {
-  status?: string;
-  criticality?: string;
-  createdAt?: string;
-}) {
+export function getRecommendation(
+  c: {
+    status?: string;
+    criticality?: string;
+    createdAt?: string;
+  },
+  _variant?: "FULL" | "OP"
+) {
   const el = getElapsed({ createdAt: c.createdAt });
   const slaKey: SlaLevel = (c?.criticality as SlaLevel) ?? "MEDIA";
   const sla = (SLA_MINUTES as Record<SlaLevel, number>)[slaKey] ?? 120;
