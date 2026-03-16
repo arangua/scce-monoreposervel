@@ -18,7 +18,6 @@ import { Badge } from "./ui/Badge";
 import { Tooltip } from "./ui/Tooltip";
 import { helpByView, type ViewKey } from "./helpContent";
 import { UI_TEXT } from "./config/uiTextStandard";
-import { isTerrainMode } from "./domain/auth/visibility";
 import { isInstructionForUser, isClosedStatus } from "./domain/cases/terrainSort";
 import { newEventId } from "./domain/eventId";
 import { isDuplicateEvent } from "./domain/dedupe";
@@ -760,7 +759,7 @@ export default function App(){
   function uiModeStorageKey(userId: string) {
     return `SCCE_UI_MODE:${userId}`;
   }
-  const defaultUiModeForUser = useCallback((u: User | null): UiMode => {
+  const defaultUiModeForUser = useCallback((): UiMode => {
     return "FULL";
   }, []);
   const [uiMode, setUiMode] = useState<UiMode>("FULL");
@@ -826,7 +825,7 @@ export default function App(){
     if (saved === "OP" || saved === "FULL") {
       setUiMode(saved);
     } else {
-      setUiMode(defaultUiModeForUser(currentUser));
+      setUiMode(defaultUiModeForUser());
     }
   }, [currentUser, defaultUiModeForUser]);
 
