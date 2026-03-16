@@ -33,3 +33,28 @@ export function getElapsed(
   const mins = Math.round(diffMs / 60000);
   return mins < 0 ? 0 : mins;
 }
+
+export function fmtTime(iso: string | null | undefined): string {
+  if (iso == null || typeof iso !== "string" || !iso.trim()) return "—";
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return "—";
+  return d.toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" });
+}
+
+export function nowLocalDatetimeInput(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  const h = String(d.getHours()).padStart(2, "0");
+  const min = String(d.getMinutes()).padStart(2, "0");
+  return `${y}-${m}-${day}T${h}:${min}`;
+}
+
+export function isDetectedAtInFuture(iso: string | null | undefined): boolean {
+  if (iso == null || typeof iso !== "string" || !iso.trim()) return false;
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return false;
+  const marginMs = 5 * 60 * 1000;
+  return t > Date.now() + marginMs;
+}
