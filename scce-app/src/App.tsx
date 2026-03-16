@@ -761,7 +761,7 @@ export default function App(){
     return `SCCE_UI_MODE:${userId}`;
   }
   const defaultUiModeForUser = useCallback((u: User | null): UiMode => {
-    return isTerrainMode(u) ? "OP" : "FULL";
+    return "FULL";
   }, []);
   const [uiMode, setUiMode] = useState<UiMode>("FULL");
   const [crisisMode,setCrisisMode]=useState(false);
