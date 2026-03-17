@@ -53,16 +53,44 @@ export function clearSession() {
  * Centralidad depende del MEMBERSHIP activo, no del user global.
  */
 export function isCentralFromContext(
-  m?: { regionCode?: string | null; regionScopeMode?: "ALL" | "LIST"; role?: string | null } | null,
+  m?: {
+    contextType?: "OPERACION" | "SIMULACION" | null;
+    contextId?: string | null;
+    regionCode?: string | null;
+    regionScopeMode?: "ALL" | "LIST";
+    role?: string | null;
+  } | null,
   _userRole?: string | null
 ): boolean {
   void _userRole;
   if (!m) return false;
 
-  if (m.regionScopeMode === "LIST") return false;
+  if (m.contextType === "OPERACION") {
+    if (m.regionScopeMode === "LIST") return false;
+    if (m.regionCode === "ADM") return true;
+    if (m.role === "ADM" || m.role === "ADMIN" || m.role === "ADMIN_PILOTO") return true;
+    return false;
+  }
 
+  if (m.contextType === "SIMULACION") {
+    if (m.regionScopeMode === "LIST") return false;
+    if (m.regionScopeMode === "ALL") return true;
+    if (m.regionCode === "ADM") return true;
+    if (
+      m.role === "ADM" ||
+      m.role === "ADMIN" ||
+      m.role === "ADMIN_PILOTO" ||
+      m.role === "NIVEL_CENTRAL_SIM"
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  if (m.regionScopeMode === "LIST") return false;
   if (m.regionCode === "ADM") return true;
   if (m.role === "ADM" || m.role === "ADMIN" || m.role === "ADMIN_PILOTO") return true;
 
   return false;
 }
+
