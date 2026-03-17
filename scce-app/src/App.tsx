@@ -2630,8 +2630,8 @@ export default function App(){
           <div style={S.card}>
             <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:10}}>PASO 4 — CONFIRMAR Y REGISTRAR</div>
             <div style={{...S.g2,marginBottom:8}}>
-              <div><span style={{color:themeColor("muted")}}>Región:</span> {regionsMap[newCase?.region ?? ""]?.name}</div>
-              <div><span style={{color:themeColor("muted")}}>Comuna:</span> {regionsMap[newCase?.region ?? ""]?.communes?.[newCase?.commune ?? ""]?.name||newCase?.commune}</div>
+              <div><span style={{color:themeColor("muted")}}>Región:</span> {getRegionName(newCase?.region ?? "")}</div>
+              <div><span style={{color:themeColor("muted")}}>Comuna:</span> {getCommuneName(newCase?.region ?? "", newCase?.commune ?? "")}</div>
               <div><span style={{color:themeColor("muted")}}>Canal:</span> {newCase?.origin?.channel}</div>
               <div>
               <span style={{color:themeColor("muted")}}>Criticidad:</span>{" "}
