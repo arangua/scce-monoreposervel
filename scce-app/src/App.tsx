@@ -2087,9 +2087,6 @@ export default function App(){
         <div style={{display:"flex",gap:10,color:themeColor("muted"),fontSize:"11px",flexWrap:"wrap",alignItems:"center"}}>
           <span>🕐 {fmtDate(c.createdAt)}</span>
           {(()=>{const comp=c.completeness??0;return <span style={{color:comp>=80?themeColor("success"):comp>=50?themeColor("warningAlt"):themeColor("danger")}}>✓ {comp}%</span>;})()}
-          {canDo("recepcionar",currentUser,c)&&c.status==="Nuevo"&&!c.bypass&&(
-            <button style={{...S.btn("primary"),fontSize:"10px",padding:"1px 8px"}} onClick={e=>{e.stopPropagation();recepcionar(c.id);}}>Recepcionar</button>
-          )}
         </div>
       </div>
     );
