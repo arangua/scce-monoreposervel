@@ -1047,7 +1047,10 @@ export default function App(){
   }, [authToken]);
 
   useEffect(() => {
-    if (!apiUser || !activeMembership) return;
+    if (!apiUser || !activeMembership) {
+      setCurrentUser(null);
+      return;
+    }
     const u: User = {
       id: apiUser.id,
       username: apiUser.email,
