@@ -39,7 +39,6 @@ import {
   setToken,
   clearSession,
   clearActiveMembership,
-  getActiveMembership,
   setActiveMembership,
   isCentralFromContext,
   type ApiUser,
