@@ -430,13 +430,18 @@ function makeSeedAudit(){
 }
 
 // ─── ESTILOS (tema claro profesional) ─────────────────────────────────────────
+const baseBtn = { color: themeColor("white"), border: "none", padding: "6px 12px", borderRadius: "4px", cursor: "pointer", fontSize: "12px", fontWeight: 500 } as const;
+const baseBadge = { borderRadius: "3px", padding: "2px 6px", fontSize: "11px", fontWeight: 600 } as const;
+const btnBackgroundByVariant: Record<string, string> = { primary: themeColor("primary"), success: themeColor("success"), danger: themeColor("danger"), warning: themeColor("warning"), dark: themeColor("textSecondary") };
+const badgeBgOpacity = "22";
+const badgeBorderOpacity = "44";
 const S={
   app:{fontFamily:"'Segoe UI',system-ui,sans-serif",background:themeColor("bgApp"),color:themeColor("textPrimary"),minHeight:"100vh",fontSize:"13px",width:"100%",boxSizing:"border-box" as const},
   nav:{background:themeColor("bgSurface"),borderBottom:"1px solid #e5e7eb",padding:"8px 16px",display:"flex",alignItems:"center",gap:"6px",flexWrap:"wrap" as const,minHeight:42},
   nBtn:(a: boolean)=>({background:a?themeColor("primary"):"transparent",color:a?themeColor("white"):themeColor("textSecondary"),border:"none",padding:"5px 10px",borderRadius:"4px",cursor:"pointer",fontSize:"12px"}),
   card:{background:themeColor("bgSurface"),border:"1px solid #e5e7eb",borderRadius:"6px",padding:"12px"},
-  badge:(color: string)=>({background:color+"22",color,border:"1px solid "+color+"44",borderRadius:"3px",padding:"2px 6px",fontSize:"11px",fontWeight:600}),
-  btn:(v="primary")=>({background:{primary:themeColor("primary"),success:themeColor("success"),danger:themeColor("danger"),warning:themeColor("warning"),dark:themeColor("textSecondary")}[v]||themeColor("primary"),color:themeColor("white"),border:"none",padding:"6px 12px",borderRadius:"4px",cursor:"pointer",fontSize:"12px",fontWeight:500}),
+  badge:(color: string)=>({...baseBadge,background:color+badgeBgOpacity,color,border:"1px solid "+color+badgeBorderOpacity}),
+  btn:(v="primary")=>({...baseBtn,background:btnBackgroundByVariant[v]||themeColor("primary")}),
   inp:{background:themeColor("bgSurface"),border:"1px solid #e5e7eb",borderRadius:"4px",padding:"6px 8px",color:themeColor("textPrimary"),fontSize:"13px",width:"100%",boxSizing:"border-box"} as React.CSSProperties,
   lbl:{display:"block",marginBottom:"3px",color:themeColor("textSecondary"),fontSize:"11px",fontWeight:600,textTransform:"uppercase"} as React.CSSProperties,
   g2:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px"},
