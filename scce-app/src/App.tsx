@@ -2816,8 +2816,8 @@ export default function App(){
                 )}
               </div>
               <div style={S.g2}>
-                <div><span style={{color:themeColor("muted")}}>Región:</span> {regionsMap[c.region]?.name}</div>
-                <div><span style={{color:themeColor("muted")}}>Comuna:</span> {regionsMap[c.region]?.communes?.[c.commune]?.name||c.commune}</div>
+                <div><span style={{color:themeColor("muted")}}>Región:</span> {getRegionName(c.region)}</div>
+                <div><span style={{color:themeColor("muted")}}>Comuna:</span> {getCommuneName(c.region, c.commune)}</div>
                 <div><span style={{color:themeColor("muted")}}>Canal:</span> {c.origin?.channel}</div>
                 <div><span style={{color:themeColor("muted")}}>Asignado:</span> {assignee?.name||"—"}</div>
                 {!isOpView&&(
