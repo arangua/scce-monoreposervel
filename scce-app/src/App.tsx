@@ -3271,7 +3271,7 @@ export default function App(){
                         <Badge style={{ ...S.badge(themeColor("warning")), fontSize: "8px" }} size="xs">⚡ caso activo</Badge>
                       )}
                     </div>
-                    <div style={{fontSize:"10px",color:themeColor("mutedDark")}}>{regionsMap[l.region]?.communes?.[l.commune]?.name||l.commune}</div>
+                    <div style={{fontSize:"10px",color:themeColor("mutedDark")}}>{getCommuneName(l.region, l.commune)}</div>
                     {l.fechaDesactivacion&&<div style={{fontSize:"9px",color:themeColor("danger")}}>SD: {fmtDate(l.fechaDesactivacion)}</div>}
                   </div>
                   <span style={{fontFamily:"monospace",fontSize:"10px",color:themeColor("mutedDark")}}>{l.idLocal}</span>
