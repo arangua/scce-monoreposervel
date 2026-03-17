@@ -371,6 +371,76 @@ const STATUS_MAP: Record<string, UiStatus> = {
   "Cerrado": "Cerrado",
 };
 
+const KNOWN_STATUSES: CaseStatus[] = ["Nuevo","Recepcionado por DR","En gestión","Escalado","Mitigado","Resuelto","Cerrado"];
+const REGION_UI_ALIAS: Record<string, string> = {
+  "1": "TRP",
+  "01": "TRP",
+  "2": "ANT",
+  "02": "ANT",
+  "3": "ATA",
+  "03": "ATA",
+  "15": "AYP",
+};
+
+const COMMUNE_UI_ALIAS_BY_REGION: Record<string, Record<string, string>> = {
+  TRP: {
+    "1101": "IQQ",
+    "01101": "IQQ",
+    "1107": "ALH",
+    "01107": "ALH",
+    "1401": "PCA",
+    "01401": "PCA",
+    "1402": "CAM",
+    "01402": "CAM",
+    "1403": "COL",
+    "01403": "COL",
+    "1404": "HUA",
+    "01404": "HUA",
+    "1405": "PIC",
+    "01405": "PIC",
+  },
+};
+
+function normalizeRegionCodeForUi(value: unknown): string {
+  const raw = String(value ?? "").trim().toUpperCase();
+  return REGION_UI_ALIAS[raw] ?? raw;
+}
+
+function normalizeCommuneCodeForUi(region: unknown, commune: unknown): string {
+  const regionUi = normalizeRegionCodeForUi(region);
+  const communeRaw = String(commune ?? "").trim().toUpperCase();
+  return COMMUNE_UI_ALIAS_BY_REGION[regionUi]?.[communeRaw] ?? communeRaw;
+}
+
+function getRegionName(regionCode: string | undefined | null): string {
+  if (regionCode == null || String(regionCode).trim() === "") return "";
+  const regionUi = normalizeRegionCodeForUi(regionCode);
+  const regionsMap = CONFIG.regions as Record<string, { name?: string }>;
+  return regionsMap[regionUi]?.name ?? String(regionCode).trim();
+}
+
+function getCommuneName(regionCode: string | undefined | null, communeCode: string | undefined | null): string {
+  if (communeCode == null || String(communeCode).trim() === "") return "";
+  const regionUi = normalizeRegionCodeForUi(regionCode);
+  const communeUi = normalizeCommuneCodeForUi(regionCode, communeCode);
+  const regionsMap = CONFIG.regions as Record<string, { name?: string; communes?: Record<string, { name?: string }> }>;
+  return regionsMap[regionUi]?.communes?.[communeUi]?.name ?? String(communeCode).trim();
+}
+
+function normalizeApiCase(raw: any): CaseItem {
+  const normalizedStatus = normalizeStatus(raw?.status);
+  const regionUi = normalizeRegionCodeForUi(raw?.region ?? raw?.regionCode ?? "");
+  const communeUi = normalizeCommuneCodeForUi(regionUi, raw?.commune ?? raw?.communeCode ?? "");
+
+  return {
+    ...raw,
+    region: regionUi,
+    commune: communeUi,
+    local: raw?.local ?? raw?.localCode ?? "",
+    createdBy: raw?.createdBy ?? raw?.createdByUserId ?? undefined,
+    status: normalizedStatus === "Otros / Desconocido" ? "Nuevo" : normalizedStatus,
+  } as CaseItem;
+}
 function normalizeStatus(s: unknown): UiStatus | "Otros / Desconocido" {
   const key = String(s ?? "").trim();
   return STATUS_MAP[key] ?? "Otros / Desconocido";
@@ -2290,7 +2360,6 @@ export default function App(){
       ):(
         <div>
           {(()=>{
-            const KNOWN_STATUSES = ["Nuevo","Recepcionado por DR","En gestión","Escalado","Mitigado","Resuelto","Cerrado"];
             const unknownCases = visibleCases.filter(c => normalizeStatus(c.status) === "Otros / Desconocido");
 
             return (
