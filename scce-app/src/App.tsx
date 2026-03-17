@@ -2082,7 +2082,7 @@ export default function App(){
         <div style={{fontWeight:600,marginBottom:4}}>{c.summary}</div>
         <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
           <span style={{fontSize:"10px",background:themeColor("infoBg"),color:themeColor("infoText"),border:"1px solid #93c5fd",borderRadius:"3px",padding:"1px 7px",fontWeight:600}}>🏫 {c.local||"—"}</span>
-          <span style={{fontSize:"10px",color:themeColor("mutedDark")}}>{(CONFIG.regions as Record<string,{communes?:Record<string,{name?:string}>}>)[c.region]?.communes?.[c.commune]?.name||c.commune}</span>
+            <span style={{fontSize:"10px",color:themeColor("mutedDark")}}>{getCommuneName(c.region, c.commune)}</span>
         </div>
         <div style={{display:"flex",gap:10,color:themeColor("muted"),fontSize:"11px",flexWrap:"wrap",alignItems:"center"}}>
           <span>🕐 {fmtDate(c.createdAt)}</span>
