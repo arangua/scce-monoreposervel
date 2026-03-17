@@ -16,11 +16,23 @@ export type CaseStatus =
 
 export type Criticality = "CRITICA" | "ALTA" | "MEDIA" | "BAJA";
 
+export type CaseEventKind =
+  | "INSTRUCTION_CREATED"
+  | "INSTRUCTION_ACK"
+  | "INSTRUCTION_CLOSED"
+  | "INSTRUCTION_REPLY";
+
 export type CaseEvent = {
   type: string;
   at: string;
   actor: string;
   note?: string;
+  /** Fase 3.9 — id estable por evento */
+  eventId?: string;
+  /** Fase 3.5/3.8 — kind formal para instrucción */
+  kind?: CaseEventKind;
+  /** Fase 3.5 — referencia a instrucción en respuestas */
+  refInstructionId?: string;
 };
 
 export type InstructionAck = {
@@ -69,6 +81,8 @@ export type InstructionItem = {
   to?: { role?: string; userId?: string; label: string };
   /** Fase 3.4 — bypass con motivo obligatorio si enabled */
   bypass?: InstructionBypass;
+  /** Fase 3.5 — con copia (label para mostrar) */
+  cc?: { label: string; userId?: string }[];
 };
 
 export type CaseItem = {
