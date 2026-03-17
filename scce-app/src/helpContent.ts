@@ -7,7 +7,9 @@ export type ViewKey =
   | "checklist"
   | "config"
   | "new_case"
-  | "detail";
+  | "detail"
+  | "op_home"
+  | "trust";
 
 export type HelpBlock = {
   title: string;
@@ -122,6 +124,28 @@ export const helpByView: Record<ViewKey, HelpBlock> = {
       "Revisa el historial y decisiones.",
       "Verifica evidencia y responsables.",
       "Actualiza estado si corresponde."
+    ]
+  },
+
+  op_home: {
+    title: "Operaciones - Inicio",
+    purpose:
+      "Vista de operaciones: casos y prioridades para el terreno.",
+    quickSteps: [
+      "Revisa los casos ordenados por prioridad.",
+      "Abre un caso para ver detalle o instrucciones.",
+      "Usa los filtros si necesitas acotar la lista."
+    ]
+  },
+
+  trust: {
+    title: "Claves de confianza",
+    purpose:
+      "Gestionar claves de firma y lista de claves confiables para import/export.",
+    quickSteps: [
+      "Revisa el estado de tu clave local.",
+      "Agrega o quita claves de la lista confiable.",
+      "Export e import usan estas claves para verificación."
     ]
   }
 };
