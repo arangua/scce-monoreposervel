@@ -1368,17 +1368,17 @@ export default function App(){
       if (res.ok) {
         const ls = isLocalSnapshot(res.data.localSnapshot) ? res.data.localSnapshot : localSnapshot;
 
-        const apiCase = {
+        const apiCase = normalizeApiCase({
           ...c,
           id: res.data.id,
-          region: res.data.regionCode,
-          commune: res.data.communeCode,
-          local: res.data.localCode,
+          regionCode: res.data.regionCode,
+          communeCode: res.data.communeCode,
+          localCode: res.data.localCode,
           localSnapshot: ls,
           status: res.data.status,
           createdAt: res.data.createdAt,
           updatedAt: res.data.updatedAt,
-        } as CaseItem;
+        });
         apiCase.completeness = calcCompleteness(apiCase);
         setCases((prev) => [apiCase, ...prev]);
         setAuditLog((prev) => {
