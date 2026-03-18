@@ -997,18 +997,19 @@ export default function App(){
       return;
     }
     setCtxErr("");
-    setMemberships(ctxRes.data.memberships || []);
+    const list = ctxRes.data.memberships || [];
+    setMemberships(list);
 
-    if (!getActiveMembership()) {
-      const list = ctxRes.data.memberships || [];
+    let effectiveMembership = activeMembership;
 
-      // 1) Si existe ADM, preferirlo como activo por defecto (modo admin)
-      const adm = list.find((m) => m.regionCode === "ADM");
-      const pick = adm ?? (list.length === 1 ? list[0] : list[0] ?? null);
+    if (!effectiveMembership) {
+      // Solo autoasignar si hay un único contexto; si hay varios, dejar null -> "Seleccionar contexto"
+      const pick = list.length === 1 ? list[0] : null;
 
       if (pick) {
         setActiveMembership(pick);
         setActiveMembershipState(pick);
+        effectiveMembership = pick;
       }
     }
 
