@@ -1129,6 +1129,41 @@ export default function App(){
       });
     }
   }, [isCentral, activeRegion]);
+  async function openCaseDetail(caseId: string) {
+    const token = authToken;
+    const ctx = activeMembership;
+    if (token && ctx) {
+      const headers: Record<string, string> = {};
+      if (ctx.id) headers["x-scce-membership-id"] = ctx.id;
+      if (ctx.contextType && ctx.contextId) {
+        headers["x-scce-context-type"] = ctx.contextType;
+        headers["x-scce-context-id"] = ctx.contextId;
+      }
+      const res = await apiRequest<unknown>(`/cases/${caseId}`, {
+        method: "GET",
+        token,
+        headers: Object.keys(headers).length ? headers : undefined,
+      });
+      if (res.ok && res.data && typeof res.data === "object") {
+        const rehydrated = normalizeApiCase(res.data as any);
+        setCases((prev) => {
+          const idx = prev.findIndex((x) => x.id === caseId);
+          if (idx >= 0) {
+            const next = [...prev];
+            next[idx] = rehydrated;
+            return next;
+          }
+          return [...prev, rehydrated];
+        });
+        setSelectedCase(rehydrated);
+        setView("detail");
+        return;
+      }
+    }
+    const fallback = cases.find((x) => x.id === caseId) ?? null;
+    setSelectedCase(fallback);
+    setView("detail");
+  }
 
   function doReset(){
     _localSeq=0;
@@ -2434,7 +2469,7 @@ export default function App(){
                       <div style={{width:8,height:8,borderRadius:"50%",background:themeColor("muted")}}/>
                       <span style={{fontWeight:600,fontSize:"12px",color:themeColor("mutedAlt")}}>Otros / Desconocido ({unknownCases.length})</span>
                     </div>
-                    {unknownCases.map(c=><CaseCard key={c.id} c={c} onClick={()=>{const found=cases.find(x=>x.id===c.id)??null;setSelectedCase(found);setView("detail");}}/>)}
+                    {unknownCases.map(c=><CaseCard key={c.id} c={c} onClick={()=>openCaseDetail(c.id)}/>)}
                   </div>
                 )}
               </>
@@ -3825,11 +3860,7 @@ export default function App(){
         currentUser={currentUser}
         cases={visibleCases}
         selectedCaseId={selectedCase?.id ?? null}
-        setSelectedCaseId={(id) => {
-          const found = cases.find((x) => x.id === id) ?? null;
-          setSelectedCase(found);
-          setView("detail");
-        }}
+        setSelectedCaseId={(id) => openCaseDetail(id)}
         onGoToDashboard={() => {
           setUiModeAndPersist("FULL");
           setView("dashboard");
