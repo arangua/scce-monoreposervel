@@ -1610,7 +1610,7 @@ export default function App(){
     const acks = ins.acks ?? [];
     return acks.length > 0 ? acks[acks.length - 1] : null;
   }
-  function createInstruction(
+  async function createInstruction(
     caseId: string,
     scope: string,
     audience: string,
@@ -1632,6 +1632,7 @@ export default function App(){
     if (bypass?.enabled && (!bypass?.reason?.trim() || bypass.reason.trim().length < 30)) {
       return notify(UI_TEXT.errors.bypassReasonMin, "error");
     }
+
     const newIns: InstructionItem = {
       id: uuidSimple(),
       caseId,
@@ -1656,6 +1657,44 @@ export default function App(){
         ? { bypass: { enabled: true, reason: bypass.reason.trim() } }
         : {}),
     };
+
+    const token = authToken;
+    const ctx = activeMembership;
+    if (token && ctx) {
+      const headers: Record<string, string> = {};
+      if (ctx.id) headers["x-scce-membership-id"] = ctx.id;
+      if (ctx.contextType && ctx.contextId) {
+        headers["x-scce-context-type"] = ctx.contextType;
+        headers["x-scce-context-id"] = ctx.contextId;
+      }
+      const res = await apiRequest(`/cases/${caseId}/events`, {
+        method: "POST",
+        token,
+        body: {
+          eventType: "INSTRUCTION_CREATED",
+          payloadJson: {
+            instructionId: newIns.id,
+            scope: newIns.scope,
+            audience: newIns.audience,
+            summary: newIns.summary,
+            details: newIns.details,
+            impactLevel: newIns.impactLevel,
+            scopeFunctional: newIns.scopeFunctional,
+            createdAt: newIns.createdAt,
+            createdBy: newIns.createdBy,
+            to: newIns.to,
+            cc: newIns.cc ?? [],
+            bypass: newIns.bypass ?? null,
+          },
+        },
+        headers: Object.keys(headers).length ? headers : undefined,
+      });
+      if (!res.ok) {
+        notify(res.error || "Error al crear instrucción en el servidor.", "error");
+        return;
+      }
+    }
+
     const traceEv = makeInstructionTraceEvent("INSTRUCTION_CREATED", newIns.id, `Instrucción creada: ${newIns.summary.slice(0, 80)}`);
     setCases((prev) =>
       prev.map((x) =>
