@@ -825,7 +825,7 @@ export default function App(){
       UI_TEXT.misc.importConfirm ?? "Esto reemplazará los casos actuales. ¿Continuar?"
     );
     if (!ok) return;
-    setCases(v.cases);
+    setCases(v.cases as CaseItem[]);
     notify(UI_TEXT.misc.importOk ?? "Import realizado.", "success");
   }
   const [view,setView]=useState<ViewKey>("dashboard");
