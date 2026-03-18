@@ -589,6 +589,7 @@ export default function App(){
   const [memberships, setMemberships] = useState<Membership[]>([]);
   const [activeMembership, setActiveMembershipState] = useState<Membership | null>(null);
 
+  const [isBootstrapping, setIsBootstrapping] = useState(false);
   const [activeRegion,setActiveRegion]=useState(DEFAULT_REGION);
   const [membershipScopes, setMembershipScopes] = useState<Record<
     string,
@@ -2269,6 +2270,10 @@ export default function App(){
         </div>
       </div>
     );
+  }
+
+  if (isBootstrapping) {
+    return <div style={{ padding: 24 }}>Cargando sesión...</div>;
   }
 
   // ─── GATE B: SELECTOR DE CONTEXTO ────────────────────────────────────────
