@@ -2317,7 +2317,7 @@ export default function App(){
               <span style={{fontFamily:"monospace",color:themeColor("muted")}}>{x.caseId}</span>
               <span style={{color:themeColor("mutedAlt")}}>{x.caseSummary.slice(0,40)}</span>
               <span style={{color:themeColor("warning")}}>→ {x.div?.msg}</span>
-              <button style={{...S.btn("dark"),fontSize:"9px",padding:"1px 6px"}} onClick={()=>{const found=cases.find((c:CaseItem)=>c.id===x.caseId)??null;setSelectedCase(found);setView("detail");}}>Ver</button>
+              <button style={{...S.btn("dark"),fontSize:"9px",padding:"1px 6px"}} onClick={()=>openCaseDetail(x.caseId)}>Ver</button>
             </div>
           ))}
           <div style={{fontSize:"10px",color:themeColor("muted"),marginTop:4}}>Los casos son válidos. Verificar estado operacional del local.</div>
