@@ -587,7 +587,7 @@ export default function App(){
   const [authToken, setAuthToken] = useState<string | null>(() => getToken());
   const [apiUser, setApiUser] = useState<ApiUser | null>(null);
   const [memberships, setMemberships] = useState<Membership[]>([]);
-  const [activeMembership, setActiveMembershipState] = useState<Membership | null>(() => getActiveMembership());
+  const [activeMembership, setActiveMembershipState] = useState<Membership | null>(null);
 
   const [activeRegion,setActiveRegion]=useState(DEFAULT_REGION);
   const [membershipScopes, setMembershipScopes] = useState<Record<
@@ -595,8 +595,8 @@ export default function App(){
     { regionScopeMode: "ALL" | "LIST"; regionScope: string[]; regionCode?: string | null }
   >>({});
   const justBecameCentralRef = useRef(false);
-  const effectiveMembership = getActiveMembership();
-  const isCentral = isCentralFromContext(effectiveMembership, currentUser?.role);
+  const effectiveMembership = activeMembership;
+  const isCentral = isCentralFromContext(effectiveMembership);
   const regionOptions = useMemo(() => {
     const entriesAll = Object.entries(CONFIG.regions).map(([code, d]) => ({
       code,
