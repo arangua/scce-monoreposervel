@@ -1468,15 +1468,6 @@ export default function App(){
     setView("dashboard");
   }
 
-  function recepcionar(caseId: string){
-    if (!currentUser) return;
-    const c=cases.find(x=>x.id===caseId);
-    if(!c||!canDo("recepcionar",currentUser,c))return notify(UI_TEXT.errors.unauthorized,"error");
-    setCases(prev=>prev.map(x=>x.id!==caseId?x:{...x,status:"Recepcionado por DR",updatedAt:nowISO(),timeline:[...(x.timeline ?? []),{eventId:newEventId("ev"),type:"RECEPCIONADO",at:nowISO(),actor:currentUser.id,note:`Recepcionado por ${currentUser.name}`}]} as CaseItem));
-    setAuditLog(prev=>appendEvent(prev,"STATUS_CHANGED",currentUser.id,currentUser.role,caseId,"Estado → Recepcionado por DR"));
-    notify("Caso recepcionado","success");
-  }
-
   async function changeStatus(caseId: string, newStatus: CaseStatus){
   let closedSuccess = false;
     if (!currentUser) return;
