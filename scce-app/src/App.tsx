@@ -973,12 +973,7 @@ export default function App(){
     );
 
     if (!meRes.ok) {
-      clearSession();
-      setAuthToken(null);
-      setApiUser(null);
-      setMemberships([]);
-      setActiveMembershipState(null);
-      setCurrentUser(null);
+      clearAuthState();
       setLoginErr("Sesión inválida o expirada. Inicia sesión nuevamente.");
       return;
     }
@@ -997,8 +992,8 @@ export default function App(){
 
     const ctxRes = await apiRequest<{ memberships: Membership[] }>("/contexts", { token });
     if (!ctxRes.ok) {
+      clearAuthState();
       setCtxErr(ctxRes.error || "No se pudo cargar contextos.");
-      setMemberships([]);
       return;
     }
     setCtxErr("");
