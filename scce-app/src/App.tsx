@@ -628,7 +628,7 @@ export default function App(){
 
     if (rc) return entriesAll.filter((e) => e.code === rc);
 
-    return entriesAll;
+    return [];
   }, [isCentral, effectiveMembership, membershipScopes]);
   const [localCatalog, setLocalCatalog] = useState<LocalCatalog>(() => buildCatalogSeed());
 
