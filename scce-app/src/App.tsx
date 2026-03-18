@@ -1460,7 +1460,8 @@ export default function App(){
     notify("Caso recepcionado","success");
   }
 
-  function changeStatus(caseId: string, newStatus: CaseStatus){
+  async function changeStatus(caseId: string, newStatus: CaseStatus){
+  let closedSuccess = false;
     if (!currentUser) return;
     const c=cases.find(x=>x.id===caseId);
     if(!c)return;
@@ -1472,6 +1473,32 @@ export default function App(){
       if(!c.decisions?.length)return notify("❌ "+UI_TEXT.errors.alMenosUnaDecision,"error");
       if(c.status!=="Resuelto")return notify("❌ "+UI_TEXT.errors.casoDebeEstarResuelto,"error");
       if(!c.closingMotivo)return notify("❌ "+UI_TEXT.errors.ingresaMotivoCierre,"error");
+      const token = authToken;
+      const ctx = activeMembership;
+      if (token && ctx) {
+        const headers: Record<string, string> = {};
+        if (ctx.id) headers["x-scce-membership-id"] = ctx.id;
+        if (ctx.contextType && ctx.contextId) {
+          headers["x-scce-context-type"] = ctx.contextType;
+          headers["x-scce-context-id"] = ctx.contextId;
+        }
+        const res = await apiRequest(`/cases/${caseId}/events`, {
+          method: "POST",
+          token,
+          body: {
+            eventType: "CASE_CLOSED",
+            reason: c.closingMotivo,
+            note: `Estado → ${newStatus}`,
+          },
+          headers: Object.keys(headers).length ? headers : undefined,
+        });
+        if (!res.ok) {
+          notify(res.error || "Error al cerrar caso en el servidor.", "error");
+          return;
+        }
+        closedSuccess = true;
+      }
+
     }
     const tlMap: Record<CaseStatus, string> = {Escalado:"ESCALATED",Mitigado:"MITIGATED",Resuelto:"RESOLVED",Cerrado:"CLOSED","En gestión":"IN_MANAGEMENT","Recepcionado por DR":"RECEPCIONADO",Nuevo:"DETECTED"};
     const tsMap: Partial<Record<CaseStatus, string>> = {Escalado:"escalatedAt",Mitigado:"mitigatedAt",Resuelto:"resolvedAt",Cerrado:"closedAt"};
@@ -1481,6 +1508,7 @@ export default function App(){
       return{...x,status:newStatus,...(tsMap[newStatus]?{[tsMap[newStatus]!]:nowISO()}:{}),timeline:tl,updatedAt:nowISO()} as CaseItem;
     }));
     setAuditLog(prev=>appendEvent(prev,"STATUS_CHANGED",currentUser.id,currentUser.role,caseId,`Estado → ${newStatus}`));
+    if (closedSuccess) await openCaseDetail(caseId);
   }
 
   function validateBypass(caseId: string, decision: string, fundament: string){
