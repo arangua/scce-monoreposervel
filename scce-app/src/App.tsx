@@ -1469,12 +1469,12 @@ export default function App(){
   }
 
   async function changeStatus(caseId: string, newStatus: CaseStatus){
-  let closedSuccess = false;
     if (!currentUser) return;
     const c=cases.find(x=>x.id===caseId);
     if(!c)return;
     if(!canDo("update",currentUser,c)&&!canDo("close",currentUser,c))return notify(UI_TEXT.errors.unauthorized,"error");
     if(newStatus==="En gestión"&&c.status==="Nuevo"&&!c.bypass)return notify("❌ "+UI_TEXT.errors.recepcionarPrimero,"error");
+    let closedSuccess = false;
     if(newStatus==="Cerrado"){
       if(c.bypassFlagged&&!c.bypassValidated)return notify("❌ "+UI_TEXT.errors.excepcionRequiereValidacion,"error");
       if(!c.actions?.length)return notify("❌ "+UI_TEXT.errors.alMenosUnaAccion,"error");
