@@ -2424,7 +2424,7 @@ export default function App(){
                         <div style={{width:8,height:8,borderRadius:"50%",background:statusColor(st as CaseStatus)}}/>
                         <span style={{fontWeight:600,fontSize:"12px",color:themeColor("mutedAlt")}}>{st} ({bucket.length})</span>
                       </div>
-                      {bucket.map(c=><CaseCard key={c.id} c={c} onClick={()=>{const found=cases.find(x=>x.id===c.id)??null;setSelectedCase(found);setView("detail");}}/>)}
+                      {bucket.map(c=><CaseCard key={c.id} c={c} onClick={()=>openCaseDetail(c.id)}/>)}
                     </div>
                   );
                 })}
