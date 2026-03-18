@@ -1129,6 +1129,31 @@ export default function App(){
       });
     }
   }, [isCentral, activeRegion]);
+
+  function clearAuthState() {
+    clearSession();
+    setAuthToken(null);
+    setApiUser(null);
+    setMembershipScopes({});
+    setMemberships([]);
+    setActiveMembershipState(null);
+    setCurrentUser(null);
+  }
+
+  function doLogoutCleanup() {
+    clearAuthState();
+    setLoginErr("");
+    setCtxErr("");
+  }
+
+  function clearActiveContextUi() {
+    clearActiveMembership();
+    setActiveMembershipState(null);
+    setNewCase(null);
+    setSelectedCase(null);
+    setView("dashboard");
+  }
+
   async function openCaseDetail(caseId: string) {
     const token = authToken;
     const ctx = activeMembership;
@@ -1169,15 +1194,11 @@ export default function App(){
     _localSeq=0;
     const cat=buildCatalogSeed();
     const y=Math.max(new Date().getFullYear(),MIN_ELECTION_YEAR);
-    clearSession();
-    setAuthToken(null);
-    setApiUser(null);
-    setMemberships([]);
-    setActiveMembershipState(null);
+    clearAuthState();
     setLocalCatalog(cat);
     setCases(makeSeedCases(cat));
     setAuditLog(makeSeedAudit());
-    setCurrentUser(null);setView("dashboard");setSelectedCase(null);
+    setView("dashboard");setSelectedCase(null);
     setCrisisMode(false);setSimCases([]);setSimReport(null);
     setSimSurvey({claridad:0,respaldo:0,submitted:false});
     setLoginForm({ email: "", password: "" });
