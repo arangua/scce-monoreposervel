@@ -2402,7 +2402,7 @@ export default function App(){
                 <RecBadge c={c}/><DivBadge c={c}/>
               </div>
               <div style={{display:"flex",gap:4}}>
-                <button style={S.btn("primary")} onClick={()=>{const found=cases.find(x=>x.id===c.id)??null;setSelectedCase(found);setView("detail");}}>Ver</button>
+                <button style={S.btn("primary")} onClick={()=>openCaseDetail(c.id)}>Ver</button>
                 {canDo("assign",currentUser,c)&&<button style={S.btn("warning")} onClick={()=>changeStatus(c.id,"Escalado")}>Escalar</button>}
               </div>
             </div>
