@@ -1063,6 +1063,31 @@ export default function App(){
     setCurrentUser(u);
   }, [apiUser, activeMembership]);
 
+  useEffect(() => {
+    async function reloadCasesForActiveMembership() {
+      if (!authToken || !activeMembership) {
+        setCases([]);
+        return;
+      }
+      const headers: Record<string, string> = {};
+      if (activeMembership.id) headers["x-scce-membership-id"] = activeMembership.id;
+      if (activeMembership.contextType && activeMembership.contextId) {
+        headers["x-scce-context-type"] = activeMembership.contextType;
+        headers["x-scce-context-id"] = activeMembership.contextId;
+      }
+      const res = await apiRequest<unknown>("/cases", {
+        token: authToken,
+        method: "GET",
+        headers: Object.keys(headers).length ? headers : undefined,
+      });
+      // Si falla, no pisamos el estado actual
+      if (res.ok && Array.isArray(res.data)) {
+        setCases((res.data as any[]).map(normalizeApiCase));
+      }
+    }
+    reloadCasesForActiveMembership();
+  }, [authToken, activeMembership]);
+
   // Por defecto, usuario central ve "Todas las regiones" (solo al volverse central)
   useEffect(() => {
     if (isCentral && !justBecameCentralRef.current) {
