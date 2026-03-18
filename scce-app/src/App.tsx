@@ -1351,7 +1351,7 @@ export default function App(){
     };
 
     const token = authToken;
-    const ctx = getActiveMembership();
+    const ctx = activeMembership;
     if (token && ctx) {
       const headers: Record<string, string> = {};
       if (ctx.id) headers["x-scce-membership-id"] = ctx.id;
