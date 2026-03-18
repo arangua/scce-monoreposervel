@@ -2761,7 +2761,7 @@ export default function App(){
     const [replyDraft, setReplyDraft] = useState("");
     const [draftCc, setDraftCc] = useState<{ role?: string; userId?: string; label: string }[]>([]);
 
-    const isClosed = c.status === "Cerrado";
+    const isClosed = normalizeStatus(c.status) === "Cerrado";
     const canAssign =
       !isClosed &&
       canDo("assign", currentUser, c) &&
@@ -2813,11 +2813,19 @@ export default function App(){
                 {USERS.filter(u=>u.region===c.region||!u.region).map(u=><option key={u.id} value={u.id}>{u.name}</option>)}
               </select>
             )}
-            {(canDo("update",currentUser,c)||canDo("close",currentUser,c))&&(
-              <select style={{...S.inp,width:"auto"}} value={c.status} onChange={e=>changeStatus(c.id,e.target.value as CaseStatus)}>
-                {["Nuevo","Recepcionado por DR","En gestión","Escalado","Mitigado","Resuelto","Cerrado"].map(st=><option key={st}>{st}</option>)}
-              </select>
-            )}
+{(canDo("update", currentUser, c) || canDo("close", currentUser, c)) && (
+  <select
+    style={{ ...S.inp, width: "auto" }}
+    value={c.status}
+    onChange={(e) => changeStatus(c.id, e.target.value as CaseStatus)}
+  >
+    {KNOWN_STATUSES
+      .filter((st) => st !== "Cerrado" || c.status === "Resuelto")
+      .map((st) => (
+        <option key={st}>{st}</option>
+      ))}
+  </select>
+)}
           </div>
           )}
         </div>
@@ -3053,7 +3061,7 @@ export default function App(){
                   <button style={{...S.btn("dark"),marginTop:4}} onClick={()=>{if(!decForm)return;addDecision(c.id,decForm);setDecForm("");notify("Decisión registrada");}}>+ Decisión</button>
                 </div>
               )}
-              {canDo("close",currentUser,c)&&c.status!=="Cerrado"&&(
+              {canDo("close", currentUser, c) && !isClosed && (
                 <div style={{marginTop:8,padding:6,background:themeColor("legacyGrayBg"),borderRadius:4,fontSize:"10px"}}>
                   <div style={{color:themeColor("muted"),fontWeight:600,marginBottom:3}}>PRE-REQUISITOS DE CIERRE:</div>
                   {[[c.actions?.length,"Al menos 1 acción"],[c.decisions?.length,"Al menos 1 decisión"],[c.status==="Resuelto","Estado = Resuelto"],[!!c.closingMotivo,"Motivo guardado"],[!c.bypassFlagged||!!c.bypassValidated,"Bypass resuelto"]].map(([ok,lbl],idx)=>(
@@ -3138,7 +3146,7 @@ export default function App(){
             </div>
 
             {/* CREAR INSTRUCCIÓN — solo si instruct */}
-            {canDo("instruct", currentUser) && (
+            {!isClosed && canDo("instruct", currentUser) && (
               <div style={{...S.card,marginBottom:8}}>
                 <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:8}}>{UI_TEXT.labels.instructionCreateTitle}</div>
                 <div style={S.g2}>
@@ -3203,11 +3211,13 @@ export default function App(){
             )}
 
             {/* COMENTARIO */}
+            {!isClosed && (
             <div style={S.card}>
               <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:6}}>{UI_TEXT.labels.commentTitle}</div>
               <textarea style={{...S.inp,height:50,resize:"vertical"}} value={cmtTxt} onChange={e=>setCmtTxt(e.target.value)} placeholder={UI_TEXT.misc.commentPlaceholder}/>
               <button style={{...S.btn("dark"),marginTop:4}} onClick={()=>{if(!cmtTxt)return;addComment(c.id, cmtTxt);setCmtTxt("");notify("Registrado");}}>+ {UI_TEXT.buttons.addComment}</button>
             </div>
+            )}
           </div>
         </div>
 
