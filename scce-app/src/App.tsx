@@ -3754,7 +3754,7 @@ export default function App(){
   // ─── FIRMA Y CONFIANZA (4.3.b) ─────────────────────────────────────────────
   const TrustView = () => {
     const [status, setStatus] = useState<{ cryptoAvailable: boolean; hasKey: boolean; trustedCount: number } | null>(null);
-    const [entriesWithFp, setEntriesWithFp] = useState<{ alias: string; addedAt: string; reason: string; publicKeyB64: string; fingerprint: string }[]>([]);
+    const [entriesWithFp, setEntriesWithFp] = useState<{ alias?: string; reason?: string; publicKeyB64: string; fingerprint: string }[]>([]);
     const [loading, setLoading] = useState(true);
     const [addForm, setAddForm] = useState({ alias: "", publicKeyB64: "", reason: "" });
 
@@ -3888,9 +3888,9 @@ export default function App(){
                   <tr key={e.publicKeyB64} style={{ borderBottom: "1px solid #1e293b" }}>
                     <td style={{ padding: "6px 8px" }}>{e.alias}</td>
                     <td style={{ padding: "6px 8px", fontFamily: "monospace", fontSize: "11px" }}>{e.fingerprint}</td>
-                    <td style={{ padding: "6px 8px", color: themeColor("muted") }}>{e.addedAt.slice(0, 10)}</td>
+                    <td style={{ padding: "6px 8px", color: themeColor("muted") }}>{"—"}</td>
                     <td style={{ padding: "6px 8px" }}>
-                      <button type="button" style={{ ...S.btn("danger"), fontSize: "10px", padding: "2px 8px" }} onClick={() => handleRemove(e.publicKeyB64, e.alias, e.fingerprint)}>🗑 Quitar</button>
+                      <button type="button" style={{ ...S.btn("danger"), fontSize: "10px", padding: "2px 8px" }} onClick={() => handleRemove(e.publicKeyB64, e.alias ?? "", e.fingerprint)}>🗑 Quitar</button>
                     </td>
                   </tr>
                 ))}
