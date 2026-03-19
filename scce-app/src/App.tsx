@@ -959,80 +959,83 @@ export default function App(){
   const notify=(msg: string, type="info")=>{setNotification({msg,type});setTimeout(()=>setNotification(null),4000);};
 
   async function bootstrapSession(token: string) {
-    const meRes = await apiRequest<{ user: ApiUser; memberships?: Array<{ id: string; regionCode?: string | null; regionScopeMode?: string; regionScope?: string[] }> }>("/me", { token });
-    console.log("ME (crudo):", meRes);
+    setIsBootstrapping(true);
+    try {
+      const meRes = await apiRequest<{ user: ApiUser; memberships?: Array<{ id: string; regionCode?: string | null; regionScopeMode?: string; regionScope?: string[] }> }>("/me", { token });
+      console.log("ME (crudo):", meRes);
 
-    const meMembershipsForLog = meRes.ok ? (meRes.data.memberships ?? []) : [];
-    console.log(
-      "ME memberships resumido:",
-      meMembershipsForLog.map((m: { id: string; regionCode?: string | null; regionScopeMode?: string; regionScope?: string[] }) => ({
-        id: m.id,
-        regionCode: m.regionCode,
-        regionScopeMode: m.regionScopeMode,
-        regionScope: m.regionScope,
-      }))
-    );
+      const meMembershipsForLog = meRes.ok ? (meRes.data.memberships ?? []) : [];
+      console.log(
+        "ME memberships resumido:",
+        meMembershipsForLog.map((m: { id: string; regionCode?: string | null; regionScopeMode?: string; regionScope?: string[] }) => ({
+          id: m.id,
+          regionCode: m.regionCode,
+          regionScopeMode: m.regionScopeMode,
+          regionScope: m.regionScope,
+        }))
+      );
 
-    if (!meRes.ok) {
-      clearAuthState();
-      setLoginErr("Sesión inválida o expirada. Inicia sesión nuevamente.");
-      return;
-    }
-    setApiUser(meRes.data.user);
-    if (meRes.data.memberships?.length) {
-      const map: Record<string, { regionScopeMode: "ALL" | "LIST"; regionScope: string[]; regionCode?: string | null }> = {};
-      for (const m of meRes.data.memberships) {
-        map[m.id] = {
-          regionScopeMode: (m.regionScopeMode === "ALL" ? "ALL" : "LIST") as "ALL" | "LIST",
-          regionScope: Array.isArray(m.regionScope) ? m.regionScope : [],
-          regionCode: m.regionCode ?? null,
-        };
+      if (!meRes.ok) {
+        clearAuthState();
+        setLoginErr("Sesión inválida o expirada. Inicia sesión nuevamente.");
+        return;
       }
-      setMembershipScopes(map);
-    }
-
-    const ctxRes = await apiRequest<{ memberships: Membership[] }>("/contexts", { token });
-    if (!ctxRes.ok) {
-      clearAuthState();
-      setCtxErr(ctxRes.error || "No se pudo cargar contextos.");
-      return;
-    }
-    setCtxErr("");
-    const list = ctxRes.data.memberships || [];
-    setMemberships(list);
-
-    let effectiveMembership = activeMembership;
-
-    if (!effectiveMembership) {
-      // Solo autoasignar si hay un único contexto; si hay varios, dejar null -> "Seleccionar contexto"
-      const pick = list.length === 1 ? list[0] : null;
-
-      if (pick) {
-        setActiveMembership(pick);
-        setActiveMembershipState(pick);
-        effectiveMembership = pick;
+      setApiUser(meRes.data.user);
+      if (meRes.data.memberships?.length) {
+        const map: Record<string, { regionScopeMode: "ALL" | "LIST"; regionScope: string[]; regionCode?: string | null }> = {};
+        for (const m of meRes.data.memberships) {
+          map[m.id] = {
+            regionScopeMode: (m.regionScopeMode === "ALL" ? "ALL" : "LIST") as "ALL" | "LIST",
+            regionScope: Array.isArray(m.regionScope) ? m.regionScope : [],
+            regionCode: m.regionCode ?? null,
+          };
+        }
+        setMembershipScopes(map);
       }
-    }
 
-    // DR hardening: cargar casos reales desde API (fallback seed si falla)
-    const effectiveMembership = getActiveMembership();
-    if (token && effectiveMembership) {
-      const headers: Record<string, string> = {};
-      if (effectiveMembership.id) headers["x-scce-membership-id"] = effectiveMembership.id;
-      if (effectiveMembership.contextType && effectiveMembership.contextId) {
-        headers["x-scce-context-type"] = effectiveMembership.contextType;
-        headers["x-scce-context-id"] = effectiveMembership.contextId;
+      const ctxRes = await apiRequest<{ memberships: Membership[] }>("/contexts", { token });
+      if (!ctxRes.ok) {
+        clearAuthState();
+        setCtxErr(ctxRes.error || "No se pudo cargar contextos.");
+        return;
       }
-      const res = await apiRequest<unknown>("/cases", {
-        token,
-        method: "GET",
-        headers: Object.keys(headers).length ? headers : undefined,
-      });
+      setCtxErr("");
+      const list = ctxRes.data.memberships || [];
+      setMemberships(list);
 
-      // Fallback seed: si falla, NO reemplazamos cases
-      if (res.ok && Array.isArray(res.data)) {
-        setCases(res.data as CaseItem[]);
+      let effectiveMembership = activeMembership;
+
+      if (!effectiveMembership) {
+        // Solo autoasignar si hay un único contexto; si hay varios, dejar null → "Seleccionar contexto"
+        const pick = list.length === 1 ? list[0] : null;
+        if (pick) {
+          setActiveMembership(pick);
+          setActiveMembershipState(pick);
+          effectiveMembership = pick;
+        }
       }
+
+      // DR hardening: cargar casos reales desde API (fallback seed si falla)
+      if (token && effectiveMembership) {
+        const headers: Record<string, string> = {};
+        if (effectiveMembership.id) headers["x-scce-membership-id"] = effectiveMembership.id;
+        if (effectiveMembership.contextType && effectiveMembership.contextId) {
+          headers["x-scce-context-type"] = effectiveMembership.contextType;
+          headers["x-scce-context-id"] = effectiveMembership.contextId;
+        }
+        const res = await apiRequest<unknown>("/cases", {
+          token,
+          method: "GET",
+          headers: Object.keys(headers).length ? headers : undefined,
+        });
+
+        // Fallback seed: si falla, NO reemplazamos cases
+        if (res.ok && Array.isArray(res.data)) {
+          setCases((res.data as any[]).map(normalizeApiCase));
+        }
+      }
+    } finally {
+      setIsBootstrapping(false);
     }
   }
 
