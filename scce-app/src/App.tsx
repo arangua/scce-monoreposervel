@@ -2326,29 +2326,77 @@ export default function App(){
             </div>
           ) : (
             <div style={{ display: "grid", gap: 8 }}>
-              {memberships.map(m => {
-                const scopeList = m.regionScopeMode === "LIST" && Array.isArray(m.regionScope) && m.regionScope.length
-                  ? m.regionScope
-                  : [];
-                const regionLabels = scopeList.map(code => (CONFIG.regions as Record<string, { name?: string }>)[code]?.name ?? code).join(", ") || (m.regionScopeMode === "ALL" ? "Todas las regiones" : null);
-                const regionText = regionLabels ? ` · ${regionLabels}` : "";
+              {(["SIMULACION", "OPERACION"] as const).map(section => {
+                const sectionItems = memberships.filter(m => m.contextType === section);
+                if (!sectionItems.length) return null;
+
+                const sectionTitle =
+                  section === "SIMULACION" ? "SIMULACIÓN / piloto" : "OPERACIÓN / real";
+
                 return (
-                  <button
-                    key={m.id}
-                    style={{ ...S.btn("dark"), justifyContent: "space-between", display: "flex", alignItems: "center" }}
-                    onClick={() => {
-                      setActiveMembership(m);
-                      setActiveMembershipState(m);
-                      setAuditLog(prev => appendEvent(prev, "CONTEXT_SET", "api", "API", null, `Contexto ${m.contextType}/${m.contextId} (${m.role})`));
-                    }}
-                  >
-                    <span style={{ fontSize: 12, fontWeight: 700 }}>
-                      {m.contextType} / {m.contextId}{regionText}
-                    </span>
-                    <Badge style={{ ...S.badge(themeColor("blueDark")) }} size="xs">
-                    {m.role}
-                  </Badge>
-                  </button>
+                  <div key={section} style={{ display: "grid", gap: 8 }}>
+                    <div
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 800,
+                        opacity: 0.85,
+                        marginTop: 4,
+                      }}
+                    >
+                      {sectionTitle}
+                    </div>
+
+                    {sectionItems.map(m => {
+                      const scopeList =
+                        m.regionScopeMode === "LIST" &&
+                        Array.isArray(m.regionScope) &&
+                        m.regionScope.length
+                          ? m.regionScope
+                          : [];
+
+                      const regionLabels =
+                        scopeList
+                          .map((code) => getRegionName(code))
+                          .join(", ") ||
+                        (m.regionScopeMode === "ALL" ? "Todas las regiones" : null);
+
+                      const regionText = regionLabels ? ` · ${regionLabels}` : "";
+
+                      return (
+                        <button
+                          key={m.id}
+                          style={{
+                            ...S.btn("dark"),
+                            justifyContent: "space-between",
+                            display: "flex",
+                            alignItems: "center",
+                          }}
+                          onClick={() => {
+                            setActiveMembership(m);
+                            setActiveMembershipState(m);
+                            setAuditLog(prev =>
+                              appendEvent(
+                                prev,
+                                "CONTEXT_SET",
+                                "api",
+                                "API",
+                                null,
+                                `Contexto ${m.contextType}/${m.contextId} (${m.role})`,
+                              ),
+                            );
+                          }}
+                        >
+                          <span style={{ fontSize: 12, fontWeight: 700 }}>
+                            {m.contextType} / {m.contextId}
+                            {regionText}
+                          </span>
+                          <Badge style={{ ...S.badge(themeColor("blueDark")) }} size="xs">
+                            {m.role}
+                          </Badge>
+                        </button>
+                      );
+                    })}
+                  </div>
                 );
               })}
             </div>
