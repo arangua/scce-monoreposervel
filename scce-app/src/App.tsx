@@ -2369,14 +2369,7 @@ export default function App(){
             <button
               style={{ ...S.btn("dark"), fontSize: "11px" }}
               onClick={() => {
-                clearSession();
-                setAuthToken(null);
-                setApiUser(null);
-                setMemberships([]);
-                setActiveMembershipState(null);
-                setCurrentUser(null);
-                setLoginErr("");
-                setCtxErr("");
+                doLogoutCleanup();
               }}
             >
               Cerrar sesión
@@ -3960,19 +3953,11 @@ export default function App(){
           setSelectedCase(null);
         }}
         onLogout={() => {
-          clearSession();
-          setAuthToken(null);
-          setApiUser(null);
-          setMemberships([]);
-          setActiveMembershipState(null);
-          setCurrentUser(null);
-          setLoginErr("");
-          setCtxErr("");
+          doLogoutCleanup();
         }}
         membershipsCount={memberships.length}
         onSwitchContext={() => {
-          clearActiveMembership();
-          setActiveMembershipState(null);
+          clearActiveContextUi();
         }}
         isCrisisMode={crisisMode}
       >
@@ -4062,6 +4047,16 @@ export default function App(){
               {activeMembership.contextType}/{activeMembership.contextId}
             </Badge>
           )}
+          <button
+            type="button"
+            style={S.nBtn(false)}
+            onClick={() => {
+              clearActiveContextUi();
+            }}
+            title="Cambiar contexto"
+          >
+            Cambiar contexto
+          </button>
           <Badge style={S.badge(themeColor("mutedDarker"))} size="sm">
             {currentUser.name}
           </Badge>
@@ -4071,14 +4066,7 @@ export default function App(){
           <button
             style={{ ...S.btn("dark"), fontSize: "11px" }}
             onClick={() => {
-              clearSession();
-              setAuthToken(null);
-              setApiUser(null);
-              setMemberships([]);
-              setActiveMembershipState(null);
-              setCurrentUser(null);
-              setLoginErr("");
-              setCtxErr("");
+              doLogoutCleanup();
             }}
           >
             Salir
