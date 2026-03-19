@@ -962,18 +962,8 @@ export default function App(){
     setIsBootstrapping(true);
     try {
       const meRes = await apiRequest<{ user: ApiUser; memberships?: Array<{ id: string; regionCode?: string | null; regionScopeMode?: string; regionScope?: string[] }> }>("/me", { token });
-      console.log("ME (crudo):", meRes);
 
       const meMembershipsForLog = meRes.ok ? (meRes.data.memberships ?? []) : [];
-      console.log(
-        "ME memberships resumido:",
-        meMembershipsForLog.map((m: { id: string; regionCode?: string | null; regionScopeMode?: string; regionScope?: string[] }) => ({
-          id: m.id,
-          regionCode: m.regionCode,
-          regionScopeMode: m.regionScopeMode,
-          regionScope: m.regionScope,
-        }))
-      );
 
       if (!meRes.ok) {
         clearAuthState();
