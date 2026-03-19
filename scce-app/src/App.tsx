@@ -963,7 +963,6 @@ export default function App(){
     try {
       const meRes = await apiRequest<{ user: ApiUser; memberships?: Array<{ id: string; regionCode?: string | null; regionScopeMode?: string; regionScope?: string[] }> }>("/me", { token });
 
-      const meMembershipsForLog = meRes.ok ? (meRes.data.memberships ?? []) : [];
 
       if (!meRes.ok) {
         clearAuthState();
