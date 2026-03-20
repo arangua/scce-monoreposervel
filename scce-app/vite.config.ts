@@ -15,11 +15,6 @@ export default defineConfig({
         changeOrigin: true,
         secure: true,
       },
-      '/contexts': {
-        target: 'https://scce-api-piloto-neon.onrender.com',
-        changeOrigin: true,
-        secure: true,
-      },
     },
   },
 })
