@@ -961,7 +961,7 @@ export default function App(){
   async function bootstrapSession(token: string) {
     setIsBootstrapping(true);
     try {
-      const meRes = await apiRequest<{ user: ApiUser; memberships?: Array<{ id: string; regionCode?: string | null; regionScopeMode?: string; regionScope?: string[] }> }>("/me", { token });
+      const meRes = await apiRequest<{ user: ApiUser; memberships?: Membership[] }>("/me", { token });
 
 
       if (!meRes.ok) {
@@ -982,14 +982,8 @@ export default function App(){
         setMembershipScopes(map);
       }
 
-      const ctxRes = await apiRequest<{ memberships: Membership[] }>("/contexts", { token });
-      if (!ctxRes.ok) {
-        clearAuthState();
-        setCtxErr(ctxRes.error || "No se pudo cargar contextos.");
-        return;
-      }
       setCtxErr("");
-      const list = ctxRes.data.memberships || [];
+      const list = meRes.data.memberships || [];
       setMemberships(list);
 
       let effectiveMembership = activeMembership;
