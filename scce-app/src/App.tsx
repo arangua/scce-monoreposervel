@@ -1386,13 +1386,6 @@ export default function App(){
       communeCode: newCase.commune,
       localCode: newCase.local,
       localSnapshot: localSnapshot ?? undefined,
-      detail: c.detail ?? "",
-      assignedTo: c.assignedTo ?? null,
-      evaluation: c.evaluation ?? {},
-      completeness: c.completeness ?? 0,
-      actions: c.actions ?? [],
-      decisions: c.decisions ?? [],
-      instructions: c.instructions ?? [],
     };
 
     const token = authToken;
