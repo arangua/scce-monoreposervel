@@ -31,11 +31,6 @@ export function clearToken() {
   sessionStorage.removeItem(K_TOKEN);
 }
 
-export function getActiveMembership(): Membership | null {
-  const raw = sessionStorage.getItem(K_ACTIVE_MEMBERSHIP);
-  if (!raw) return null;
-  try { return JSON.parse(raw) as Membership; } catch { return null; }
-}
 export function setActiveMembership(m: Membership) {
   sessionStorage.setItem(K_ACTIVE_MEMBERSHIP, JSON.stringify(m));
 }
