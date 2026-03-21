@@ -1552,7 +1552,7 @@ export default function App(){
     setCases(prev=>prev.map(x=>{
       if(x.id!==caseId)return x;
       const tl=[...(x.timeline ?? []),{eventId:newEventId("ev"),type:"REASSESSMENT",at:nowISO(),actor:currentUser.id,note:`Reevaluación: ${justification}`}];
-      const upd={...x,evaluation:newEval,criticality:nr.criticality as Criticality,criticalityScore:nr.score,evaluationHistory:[...(x.evaluationHistory||[]),snap],timeline:tl,updatedAt:nowISO()} as CaseItem;
+      const upd={...x,evaluation:newEval,criticality:nr.criticality as Criticality,criticalityScore:nr.score,evaluationHistory:[...(x.evaluationHistory||[]),snap],timeline:tl,updatedAt:nowISO()};
       upd.completeness=calcCompleteness(upd);return upd;
     }));
     setAuditLog(prev=>appendEvent(prev,"REASSESSMENT",currentUser.id,currentUser.role,caseId,`Reevaluación: ${justification.slice(0,60)}`));
