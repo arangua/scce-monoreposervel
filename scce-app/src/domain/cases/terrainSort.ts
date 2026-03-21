@@ -75,7 +75,7 @@ type InstructionLike = { status?: string | null; assigneeId?: string; userId?: s
 
 export function isInstructionForUser(ins: InstructionLike | null | undefined, currentUser: AnyUser): boolean {
   if (!ins || !currentUser?.id) return false;
-  const assignee = (ins as { assigneeId?: string }).assigneeId ?? (ins as { userId?: string }).userId;
+  const assignee = ins.assigneeId ?? ins.userId;
   if (assignee) return assignee === currentUser.id;
   return true;
 }
