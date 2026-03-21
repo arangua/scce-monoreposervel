@@ -17,7 +17,7 @@ export function appendEvent(
   actor = s(actor);
   role = s(role);
   summary = s(summary);
-  caseId = nCaseId(caseId) as string | null;
+  caseId = nCaseId(caseId);
 
   const prevHash: string = log.length ? log[log.length - 1].hash : "00000000";
   const ev: AuditLogEntry = {
