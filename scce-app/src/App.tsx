@@ -1066,7 +1066,7 @@ export default function App(){
       });
       // Si falla, no pisamos el estado actual
       if (res.ok && Array.isArray(res.data)) {
-        setCases((res.data as any[]).map(normalizeApiCase));
+        setCases((res.data as unknown[]).map(normalizeApiCase));
       }
     }
     reloadCasesForActiveMembership();
