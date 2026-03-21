@@ -7,15 +7,17 @@ import { uuidSimple } from "../date";
 
 const INSTRUCTION_PREFIX = "[INSTRUCCIÓN] ";
 
-function isLegacyInstructionEvent(ev: CaseEvent): boolean {
+type LegacyInstructionEvent = CaseEvent & { type: "COMMENT"; note: string };
+
+function isLegacyInstructionEvent(ev: CaseEvent): ev is LegacyInstructionEvent {
   return ev.type === "COMMENT" && typeof ev.note === "string" && ev.note.startsWith(INSTRUCTION_PREFIX);
 }
 
 /**
  * Convierte un COMMENT con prefijo [INSTRUCCIÓN] en un InstructionItem.
  */
-function eventToInstruction(caseId: string, ev: CaseEvent): InstructionItem {
-  const text = ev.note!.slice(INSTRUCTION_PREFIX.length).trim();
+function eventToInstruction(caseId: string, ev: LegacyInstructionEvent): InstructionItem {
+  const text = ev.note.slice(INSTRUCTION_PREFIX.length).trim();
   const summary = text.length > 200 ? text.slice(0, 197) + "..." : text;
   return {
     id: uuidSimple(),
@@ -45,7 +47,7 @@ export function migrateLegacyInstructionsInCases(cases: CaseItem[]): CaseItem[] 
       return c;
     }
     const timeline = c.timeline ?? [];
-    const legacy: CaseEvent[] = [];
+    const legacy: LegacyInstructionEvent[] = [];
     const rest: CaseEvent[] = [];
     for (const ev of timeline) {
       if (isLegacyInstructionEvent(ev)) legacy.push(ev);
