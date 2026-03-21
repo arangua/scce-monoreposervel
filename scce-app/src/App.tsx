@@ -1707,7 +1707,7 @@ export default function App(){
       prev.map((x) =>
         x.id !== caseId
           ? x
-          : { ...x, instructions: [...(x.instructions ?? []), newIns], timeline: pushTimelineEvent(x.timeline ?? [], traceEv), updatedAt: nowISO() } as CaseItem
+          : { ...x, instructions: [...(x.instructions ?? []), newIns], timeline: pushTimelineEvent(x.timeline ?? [], traceEv), updatedAt: nowISO() }
       )
     );
     setAuditLog((prev) =>
