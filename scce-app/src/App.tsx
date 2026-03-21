@@ -1809,7 +1809,7 @@ export default function App(){
     notify("Simulación: 10 incidentes generados","warning");
   }
   function loadSimCases(){
-    setCases(prev=>([...simCases,...prev.filter(x=>!x.isSim)] as CaseItem[]));
+    setCases(prev=>([...simCases,...prev.filter(x=>!x.isSim)]));
     setAuditLog(prev=>{let log=prev;for(const c of simCases)log=appendEvent(log,"CASE_CREATED","SIM","SIMULACION",c.id,`[SIM] ${c.summary}`);return log;});
     notify("Incidentes de simulación cargados","warning");
   }
