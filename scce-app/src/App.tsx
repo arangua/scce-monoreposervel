@@ -1588,7 +1588,7 @@ export default function App(){
 
   function addComment(caseId: string, comment: string){
     if(!currentUser) return;
-    setCases(prev=>prev.map(x=>x.id!==caseId?x:{...x,timeline:[...(x.timeline ?? []),{eventId:newEventId("ev"),type:"COMMENT",at:nowISO(),actor:currentUser.id,note:comment}],updatedAt:nowISO()} as CaseItem));
+    setCases(prev=>prev.map(x=>x.id!==caseId?x:{...x,timeline:[...(x.timeline ?? []),{eventId:newEventId("ev"),type:"COMMENT",at:nowISO(),actor:currentUser.id,note:comment}],updatedAt:nowISO()}));
     setAuditLog(prev=>appendEvent(prev,"COMMENT_ADDED",currentUser.id,currentUser.role,caseId,comment.slice(0,80)));
   }
 
