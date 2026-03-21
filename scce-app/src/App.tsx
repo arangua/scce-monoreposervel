@@ -1267,7 +1267,7 @@ export default function App(){
       id: "",
       status: "Nuevo",
       criticality: "MEDIA"
-    } as CaseItem);
+    });
     setEvalForm({continuidad:0,integridad:0,seguridad:0,exposicion:0,capacidadLocal:0});
     setBypassForm({active:false,motivo:"",cause:"",confirmed:false});
     setStep(1);setView("new_case");
