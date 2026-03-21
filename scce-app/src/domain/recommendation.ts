@@ -13,7 +13,7 @@ export function getRecommendation(
 ) {
   const el = getElapsed({ createdAt: c.createdAt });
   const slaKey: SlaLevel = (c?.criticality as SlaLevel) ?? "MEDIA";
-  const sla = (SLA_MINUTES as Record<SlaLevel, number>)[slaKey] ?? 120;
+  const sla = SLA_MINUTES[slaKey] ?? 120;
   const br = el > sla;
 
   if (c.status === "Cerrado")
