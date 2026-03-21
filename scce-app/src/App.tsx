@@ -1568,7 +1568,7 @@ export default function App(){
       const na={id:"a"+Date.now(),action,responsible,at:nowISO(),result:result_};
       const tl=[...(x.timeline ?? [])];
       if(!x.firstActionAt)tl.push({eventId:newEventId("ev"),type:"FIRST_ACTION",at:nowISO(),actor:currentUser.id,note:action});
-      const upd={...x,actions:[...(x.actions ?? []),na],firstActionAt:x.firstActionAt||nowISO(),timeline:tl,updatedAt:nowISO()} as CaseItem;
+      const upd={...x,actions:[...(x.actions ?? []),na],firstActionAt:x.firstActionAt||nowISO(),timeline:tl,updatedAt:nowISO()};
       upd.completeness=calcCompleteness(upd);return upd;
     }));
     setAuditLog(prev=>appendEvent(prev,"ACTION_ADDED",currentUser.id,currentUser.role,caseId,action.slice(0,80)));
