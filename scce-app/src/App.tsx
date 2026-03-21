@@ -910,8 +910,8 @@ export default function App(){
   useEffect(()=>{
     if (!actionsOpen) return;
     const onDown=(e: MouseEvent)=>{
-      const t=e.target as HTMLElement|null;
-      if (!t) return;
+      const t=e.target;
+      if (!(t instanceof HTMLElement)) return;
       if (t.closest?.("[data-actions-menu]")) return;
       setActionsOpen(false);
     };
@@ -944,7 +944,7 @@ export default function App(){
     const onKey=(e: KeyboardEvent)=>{
       const isCtrl=e.ctrlKey||e.metaKey;
       if (!isCtrl) return;
-      const tag=(e.target as HTMLElement|null)?.tagName?.toLowerCase();
+      const tag=e.target instanceof HTMLElement ? e.target.tagName.toLowerCase() : undefined;
       if (tag==="input"||tag==="textarea") return;
       if (e.key.toLowerCase()==="e"){e.preventDefault();goToSection("reports","reports-export");}
       if (e.key.toLowerCase()==="i"){e.preventDefault();goToSection("reports","reports-export");}
