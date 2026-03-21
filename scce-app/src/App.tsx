@@ -538,8 +538,8 @@ const S={
   card:{background:themeColor("bgSurface"),border:"1px solid #e5e7eb",borderRadius:"6px",padding:"12px"},
   badge:(color: string)=>({...baseBadge,background:color+badgeBgOpacity,color,border:"1px solid "+color+badgeBorderOpacity}),
   btn:(v="primary")=>({...baseBtn,background:btnBackgroundByVariant[v]||themeColor("primary")}),
-  inp:{background:themeColor("bgSurface"),border:"1px solid #e5e7eb",borderRadius:"4px",padding:"6px 8px",color:themeColor("textPrimary"),fontSize:"13px",width:"100%",boxSizing:"border-box"} as React.CSSProperties,
-  lbl:{display:"block",marginBottom:"3px",color:themeColor("textSecondary"),fontSize:"11px",fontWeight:600,textTransform:"uppercase"} as React.CSSProperties,
+  inp:{background:themeColor("bgSurface"),border:"1px solid #e5e7eb",borderRadius:"4px",padding:"6px 8px",color:themeColor("textPrimary"),fontSize:"13px",width:"100%",boxSizing:"border-box"} satisfies React.CSSProperties,
+  lbl:{display:"block",marginBottom:"3px",color:themeColor("textSecondary"),fontSize:"11px",fontWeight:600,textTransform:"uppercase"} satisfies React.CSSProperties,
   g2:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px"},
   g4:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"8px"},
 };
