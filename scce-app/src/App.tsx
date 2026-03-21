@@ -1595,7 +1595,7 @@ export default function App(){
   /** Fase 3.5 — Respuesta de terreno a una instrucción: COMMENT en timeline con refInstructionId. */
   function addInstructionReply(caseId: string, instructionId: string, replyText: string){
     if(!currentUser?.id || !replyText?.trim()) return;
-    setCases(prev=>prev.map(x=>x.id!==caseId?x:{...x,timeline:[...(x.timeline ?? []),{eventId:newEventId("ev"),type:"COMMENT",kind:"INSTRUCTION_REPLY",refInstructionId:instructionId,at:nowISO(),actor:currentUser.id,note:replyText.trim()}],updatedAt:nowISO()} as CaseItem));
+    setCases(prev=>prev.map(x=>x.id!==caseId?x:{...x,timeline:[...(x.timeline ?? []),{eventId:newEventId("ev"),type:"COMMENT",kind:"INSTRUCTION_REPLY",refInstructionId:instructionId,at:nowISO(),actor:currentUser.id,note:replyText.trim()}],updatedAt:nowISO()}));
     setAuditLog(prev=>appendEvent(prev,"COMMENT_ADDED",currentUser.id,currentUser.role,caseId,`Respuesta instrucción ${instructionId}: ${replyText.trim().slice(0,60)}`));
   }
 
