@@ -53,7 +53,7 @@ export class CreateCaseEventDto {
 
   @IsObject()
   @IsOptional()
-  payloadJson?: Record<string, any>;
+  payloadJson?: Record<string, unknown>;
 
   // Reglas mínimas para cierre (enterprise)
   @ValidateIf((o) => o.eventType === "CASE_CLOSED")
