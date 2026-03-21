@@ -1520,7 +1520,8 @@ export default function App(){
     setCases(prev=>prev.map(x=>{
       if(x.id!==caseId)return x;
       const tl=[...(x.timeline ?? []),{eventId:newEventId("ev"),type:tlMap[newStatus]||"STATUS_CHANGED",at:nowISO(),actor:currentUser.id,note:`Estado → ${newStatus}`}];
-      return{...x,status:newStatus,...(tsMap[newStatus]?{[tsMap[newStatus]!]:nowISO()}:{}),timeline:tl,updatedAt:nowISO()} as CaseItem;
+      const tsField = tsMap[newStatus];
+      return{...x,status:newStatus,...(tsField ? {[tsField]:nowISO()} : {}),timeline:tl,updatedAt:nowISO()} as CaseItem;
     }));
     setAuditLog(prev=>appendEvent(prev,"STATUS_CHANGED",currentUser.id,currentUser.role,caseId,`Estado → ${newStatus}`));
     if (closedSuccess) await openCaseDetail(caseId);
