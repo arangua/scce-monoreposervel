@@ -2947,7 +2947,7 @@ export default function App(){
   <select
     style={{ ...S.inp, width: "auto" }}
     value={c.status}
-    onChange={(e) => changeStatus(c.id, e.target.value as CaseStatus)}
+    onChange={(e) => changeStatus(c.id, e.target.value as typeof KNOWN_STATUSES[number])}
   >
     {KNOWN_STATUSES
       .filter((st) => st !== "Cerrado" || c.status === "Resuelto")
