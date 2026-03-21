@@ -1580,7 +1580,7 @@ export default function App(){
     if(!c||(!canDo("update",currentUser,c)&&!canDo("close",currentUser,c)))return notify(UI_TEXT.errors.unauthorized,"error");
     setCases(prev=>prev.map(x=>{
       if(x.id!==caseId)return x;
-      const upd={...x,decisions:[...(x.decisions ?? []),{who:currentUser.id,at:nowISO(),fundament}],updatedAt:nowISO()} as CaseItem;
+      const upd={...x,decisions:[...(x.decisions ?? []),{who:currentUser.id,at:nowISO(),fundament}],updatedAt:nowISO()};
       upd.completeness=calcCompleteness(upd);return upd;
     }));
     setAuditLog(prev=>appendEvent(prev,"DECISION_ADDED",currentUser.id,currentUser.role,caseId,fundament.slice(0,60)));
