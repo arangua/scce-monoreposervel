@@ -937,10 +937,11 @@ export default function App(){
       .filter(x=>x.div!==null)
   ,[cases,localCatalog]);
 
+  const isDev = import.meta.env.DEV;
   useEffect(()=>{
     const v=catalogSelfCheck(localCatalog);
-    if(v.length)console.warn("[SCCE][CATALOG-SELFCHECK]",v);
-  },[localCatalog]);
+    if(isDev && v.length)console.warn("[SCCE][CATALOG-SELFCHECK]",v);
+  },[isDev, localCatalog]);
 
   const showTerrainShell = currentUser != null && uiMode === "OP";
   useEffect(() => {
