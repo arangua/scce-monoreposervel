@@ -10,6 +10,10 @@ export const SLA_MINUTES: Record<SlaLevel, number> = {
   BAJA: 120,
 };
 
+export function normalizeSlaLevel(v?: string): SlaLevel {
+  return v === "CRITICA" || v === "ALTA" || v === "MEDIA" || v === "BAJA" ? v : "MEDIA";
+}
+
 export function isSlaVencido(c: {
   createdAt?: string;
   status?: string;
@@ -17,7 +21,7 @@ export function isSlaVencido(c: {
 }): boolean {
   if (!c.createdAt || ["Resuelto", "Cerrado"].includes(c.status || "")) return false;
 
-  const slaKey: SlaLevel = (c?.criticality as SlaLevel) ?? "MEDIA";
+  const slaKey = normalizeSlaLevel(c.criticality);
   const slaMin = SLA_MINUTES[slaKey] ?? 120;
 
   // getElapsed en dominio acepta { createdAt?: string } (y opcional nowMs),

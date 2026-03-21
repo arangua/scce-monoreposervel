@@ -1,6 +1,6 @@
 // src/domain/recommendation.ts
 import { getElapsed } from "./date";
-import { SLA_MINUTES, type SlaLevel } from "./caseSla";
+import { normalizeSlaLevel, SLA_MINUTES } from "./caseSla";
 
 export type RecLevel = "low" | "medium" | "high";
 
@@ -12,7 +12,7 @@ export function getRecommendation(
   },
 ) {
   const el = getElapsed({ createdAt: c.createdAt });
-  const slaKey: SlaLevel = (c?.criticality as SlaLevel) ?? "MEDIA";
+  const slaKey = normalizeSlaLevel(c.criticality);
   const sla = SLA_MINUTES[slaKey] ?? 120;
   const br = el > sla;
 
