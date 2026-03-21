@@ -27,7 +27,7 @@ export function getToken(): string | null {
 export function setToken(token: string) {
   sessionStorage.setItem(K_TOKEN, token);
 }
-export function clearToken() {
+function clearToken() {
   sessionStorage.removeItem(K_TOKEN);
 }
 
