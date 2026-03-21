@@ -1600,8 +1600,8 @@ export default function App(){
   }
 
   /** Fase 3.8 — evento formal de ciclo de instrucción (append-only en timeline). Fase 3.9: eventId estable. */
-  function makeInstructionTraceEvent(kind: CaseEventKind, instructionId: string, note: string): CaseEvent {
-    return { eventId: newEventId("ev"), type: "COMMENT", kind, refInstructionId: instructionId, at: nowISO(), actor: currentUser!.id, note };
+  function makeInstructionTraceEvent(kind: CaseEventKind, instructionId: string, note: string, actorId: string): CaseEvent {
+    return { eventId: newEventId("ev"), type: "COMMENT", kind, refInstructionId: instructionId, at: nowISO(), actor: actorId, note };
   }
 
   /** Fase 4.0 — push a timeline con dedupe (evita doble evento en ventana de ~4s). */
@@ -1702,7 +1702,7 @@ export default function App(){
       }
     }
 
-    const traceEv = makeInstructionTraceEvent("INSTRUCTION_CREATED", newIns.id, `Instrucción creada: ${newIns.summary.slice(0, 80)}`);
+    const traceEv = makeInstructionTraceEvent("INSTRUCTION_CREATED", newIns.id, `Instrucción creada: ${newIns.summary.slice(0, 80)}`, currentUser.id);
     setCases((prev) =>
       prev.map((x) =>
         x.id !== caseId
@@ -1721,7 +1721,7 @@ export default function App(){
     const ins = c?.instructions?.find((i) => i.id === instructionId);
     if (ins && (ins.acks ?? []).some((a) => a.userId === currentUser.id)) return;
     const role = currentUser?.role ?? "unknown";
-    const traceEv = makeInstructionTraceEvent("INSTRUCTION_ACK", instructionId, "Acuse registrado");
+    const traceEv = makeInstructionTraceEvent("INSTRUCTION_ACK", instructionId, "Acuse registrado", currentUser.id);
     setCases((prev) =>
       prev.map((x) => {
         if (x.id !== caseId) return x;
@@ -1748,7 +1748,7 @@ export default function App(){
     const c = cases.find((x) => x.id === caseId);
     const ins = c?.instructions?.find((i) => i.id === instructionId);
     if (ins && isClosedStatus(ins.status)) return;
-    const traceEv = makeInstructionTraceEvent("INSTRUCTION_CLOSED", instructionId, "Instrucción cerrada");
+    const traceEv = makeInstructionTraceEvent("INSTRUCTION_CLOSED", instructionId, "Instrucción cerrada", currentUser.id);
     setCases((prev) =>
       prev.map((x) => {
         if (x.id !== caseId) return x;
