@@ -330,7 +330,8 @@ function critColor(c: Criticality): string {
   const map = { CRITICA:themeColor("danger"), ALTA:themeColor("warning"), MEDIA:themeColor("warningAlt"), BAJA:themeColor("success") } as const;
   return map[c] ?? themeColor("gray");
 }
-function statusColor(s: CaseStatus): string {
+function statusColor(s: UiStatus | "Otros / Desconocido"): string {
+  if (s === "Otros / Desconocido") return themeColor("gray");
   const map = {
     "Nuevo":themeColor("purple"),
     "Recepcionado por DR":themeColor("purpleLight"),
@@ -2227,7 +2228,7 @@ export default function App(){
             )}
             <SlaBadge c={c}/><RecBadge c={c}/><DivBadge c={c}/>
             <Badge style={S.badge(critColor(c.criticality))} size="sm">{c.criticality}</Badge>
-            <Badge style={S.badge(statusColor(normalizeStatus(c.status) as CaseStatus))} size="sm">
+            <Badge style={S.badge(statusColor(normalizeStatus(c.status)))} size="sm">
               {normalizeStatus(c.status) === "Otros / Desconocido" ? String(c.status) : normalizeStatus(c.status)}
             </Badge>
           </div>
@@ -2922,7 +2923,7 @@ export default function App(){
             <button style={S.btn("dark")} onClick={()=>setView("dashboard")}>← Volver</button>
             {!isOpView&&<span style={{fontFamily:"monospace",color:themeColor("muted"),fontSize:"12px"}}>{c.id}</span>}
             <Badge style={S.badge(critColor(c.criticality))} size="sm">{c.criticality}</Badge>
-            <Badge style={S.badge(statusColor(normalizeStatus(c.status) as CaseStatus))} size="sm">
+            <Badge style={S.badge(statusColor(normalizeStatus(c.status)))} size="sm">
               {normalizeStatus(c.status) === "Otros / Desconocido" ? String(c.status) : normalizeStatus(c.status)}
             </Badge>
             {c.bypass && (
