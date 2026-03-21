@@ -1755,7 +1755,7 @@ export default function App(){
         const instructions = (x.instructions ?? []).map((ins) =>
           ins.id !== instructionId ? ins : { ...ins, status: "CERRADA" }
         );
-        return { ...x, instructions, timeline: pushTimelineEvent(x.timeline ?? [], traceEv), updatedAt: nowISO() } as CaseItem;
+        return { ...x, instructions, timeline: pushTimelineEvent(x.timeline ?? [], traceEv), updatedAt: nowISO() };
       })
     );
     setAuditLog((prev) => appendEvent(prev, "COMMENT_ADDED", currentUser.id, currentUser.role, caseId, `Instrucción cerrada ${instructionId}`));
