@@ -427,17 +427,43 @@ function getCommuneName(regionCode: string | undefined | null, communeCode: stri
   return regionsMap[regionUi]?.communes?.[communeUi]?.name ?? String(communeCode).trim();
 }
 
-function normalizeApiCase(raw: any): CaseItem {
-  const normalizedStatus = normalizeStatus(raw?.status);
-  const regionUi = normalizeRegionCodeForUi(raw?.region ?? raw?.regionCode ?? "");
-  const communeUi = normalizeCommuneCodeForUi(regionUi, raw?.commune ?? raw?.communeCode ?? "");
+function normalizeApiCase(raw: unknown): CaseItem {
+  const source =
+    typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
+
+  const normalizedStatus = normalizeStatus(source.status);
+  const regionUi = normalizeRegionCodeForUi(
+    typeof source.region === "string"
+      ? source.region
+      : typeof source.regionCode === "string"
+        ? source.regionCode
+        : "",
+  );
+  const communeUi = normalizeCommuneCodeForUi(
+    regionUi,
+    typeof source.commune === "string"
+      ? source.commune
+      : typeof source.communeCode === "string"
+        ? source.communeCode
+        : "",
+  );
 
   return {
-    ...raw,
+    ...source,
     region: regionUi,
     commune: communeUi,
-    local: raw?.local ?? raw?.localCode ?? "",
-    createdBy: raw?.createdBy ?? raw?.createdByUserId ?? undefined,
+    local:
+      typeof source.local === "string"
+        ? source.local
+        : typeof source.localCode === "string"
+          ? source.localCode
+          : "",
+    createdBy:
+      typeof source.createdBy === "string"
+        ? source.createdBy
+        : typeof source.createdByUserId === "string"
+          ? source.createdByUserId
+          : undefined,
     status: normalizedStatus === "Otros / Desconocido" ? "Nuevo" : normalizedStatus,
   } as CaseItem;
 }
@@ -1154,7 +1180,7 @@ export default function App(){
         headers: Object.keys(headers).length ? headers : undefined,
       });
       if (res.ok && res.data && typeof res.data === "object") {
-        const rehydrated = normalizeApiCase(res.data as any);
+        const rehydrated = normalizeApiCase(res.data);
         setCases((prev) => {
           const idx = prev.findIndex((x) => x.id === caseId);
           if (idx >= 0) {
