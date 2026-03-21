@@ -135,7 +135,7 @@ export class CasesService {
         contextId,
         actorId,
         eventType: "CASE_CREATED",
-        payloadJson: payloadJson as any,
+        payloadJson: payloadJson as Prisma.InputJsonValue,
         prevHash: null,
         hash,
         createdAt,
@@ -217,7 +217,7 @@ export class CasesService {
         const createdAt = new Date();
 
         // Payload libre, pero si es cierre forzamos lo mínimo
-        let payloadJson: Record<string, any> = (dto.payloadJson ?? {}) as any;
+        let payloadJson: Record<string, unknown> = (dto.payloadJson ?? {}) as Record<string, unknown>;
 
         if (dto.eventType === "CASE_CLOSED") {
           payloadJson = {
@@ -242,7 +242,7 @@ export class CasesService {
             contextId,
             actorId,
             eventType: dto.eventType,
-            payloadJson: payloadJson as any,
+            payloadJson: payloadJson as Prisma.InputJsonValue,
             prevHash: prevHash || null,
             hash,
             createdAt,
