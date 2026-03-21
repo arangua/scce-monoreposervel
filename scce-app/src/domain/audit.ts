@@ -1,6 +1,10 @@
-import type { AuditLogEntry } from "./types";
-import { chainHash } from "./hash";
 import { nowISO, uuidSimple } from "./date";
+import { chainHash } from "./hash";
+import type { AuditLogEntry } from "./types";
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null;
+}
 
 export function appendEvent(
   log: AuditLogEntry[],
@@ -44,10 +48,9 @@ export function verifyChain(
   let prev = "00000000";
   for (let i = 0; i < events.length; i++) {
     // --- Guardrail runtime mínimo (Fase 5.1-3) ---
-    const e = events[i] as unknown;
-    if (!e || typeof e !== "object") return { ok: false, failIndex: i };
-    const anyE = e as Record<string, unknown>;
-    if (typeof anyE.hash !== "string" || typeof anyE.prevHash !== "string") return { ok: false, failIndex: i };
+    const e: unknown = events[i];
+    if (!isRecord(e)) return { ok: false, failIndex: i };
+    if (typeof e.hash !== "string" || typeof e.prevHash !== "string") return { ok: false, failIndex: i };
 
     const ev = events[i];
     if (ev.hash !== chainHash(ev.prevHash !== undefined ? ev.prevHash : prev, ev))
