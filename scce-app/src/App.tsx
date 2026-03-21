@@ -2585,7 +2585,7 @@ export default function App(){
                   return(
                     <div key={st} style={{marginBottom:10}}>
                       <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
-                        <div style={{width:8,height:8,borderRadius:"50%",background:statusColor(st as CaseStatus)}}/>
+                        <div style={{width:8,height:8,borderRadius:"50%",background:statusColor(st)}}/>
                         <span style={{fontWeight:600,fontSize:"12px",color:themeColor("mutedAlt")}}>{st} ({bucket.length})</span>
                       </div>
                       {bucket.map(c=><CaseCard key={c.id} c={c} onClick={()=>openCaseDetail(c.id)}/>)}
