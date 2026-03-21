@@ -689,7 +689,7 @@ export default function App(){
         try {
           const sig = await signIntegrityHashHex({
             passphrase,
-            hashHex: bundle.integrity!.value,
+            hashHex: bundle.integrity.value,
           });
           bundle.signature = {
             algo: "Ed25519",
