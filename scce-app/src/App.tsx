@@ -85,7 +85,8 @@ function assertStringMax(name: string, v: unknown, max: number, optional = false
 }
 
 function assertIdStable(v: unknown): string {
-  const id = assertStringMax("case.id", v, MAX_ID, false)!;
+  const id = assertStringMax("case.id", v, MAX_ID, false);
+  if (id === undefined) importFail(`Import fail-closed: "case.id" es requerido.`);
   if (!ID_RE.test(id)) importFail(`Import fail-closed: "case.id" contiene caracteres no permitidos. Use solo A-Z a-z 0-9 _ -`);
   return id;
 }
