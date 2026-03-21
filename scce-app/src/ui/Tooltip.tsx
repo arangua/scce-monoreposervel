@@ -76,8 +76,8 @@ export function Tooltip({
     const onPointerDown = (e: PointerEvent) => {
       const a = anchorRef.current;
       const p = panelRef.current;
-      const t = e.target as Node | null;
-      if (!a || !p || !t) return;
+      const t = e.target;
+      if (!a || !p || !(t instanceof Node)) return;
       if (a.contains(t) || p.contains(t)) return;
       setOpen(false);
     };
