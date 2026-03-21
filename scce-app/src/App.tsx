@@ -1375,7 +1375,7 @@ export default function App(){
       closingMotivo: null,
       bypassValidated: null,
       timeline: [
-        { eventId: newEventId("ev"), type: "DETECTED", at: newCase.origin!.detectedAt, actor: currentUser.id, note: "Detectado" },
+        { eventId: newEventId("ev"), type: "DETECTED", at: detectedAt, actor: currentUser.id, note: "Detectado" },
         { eventId: newEventId("ev"), type: "REPORTED", at: now_, actor: currentUser.id, note: "Reportado en SCCE" }
       ],
       actions: [],
