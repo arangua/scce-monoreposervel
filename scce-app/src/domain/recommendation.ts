@@ -10,7 +10,6 @@ export function getRecommendation(
     criticality?: string;
     createdAt?: string;
   },
-  _variant?: "FULL" | "OP"
 ) {
   const el = getElapsed({ createdAt: c.createdAt });
   const slaKey: SlaLevel = (c?.criticality as SlaLevel) ?? "MEDIA";

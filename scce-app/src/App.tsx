@@ -2125,7 +2125,7 @@ export default function App(){
     c: CaseItem;
     variant?: "FULL" | "OP";
   }) => {
-    const rec = getRecommendation(c, variant);
+    const rec = getRecommendation(c);
     const showTip = variant === "FULL";
 
     const badgeEl = (

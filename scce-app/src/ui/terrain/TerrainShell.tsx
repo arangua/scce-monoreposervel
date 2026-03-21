@@ -148,7 +148,7 @@ function OpCyclePanel({
   cases: CaseLike[];
   onOpenCase: (id: string) => void;
 }) {
-  const recs = cases.map((c) => ({ c, rec: getRecommendation({ ...c, createdAt: c.createdAt ?? undefined }, "OP") }));
+  const recs = cases.map((c) => ({ c, rec: getRecommendation({ ...c, createdAt: c.createdAt ?? undefined }) }));
   const high = recs.filter(({ rec }) => rec.level === "high");
   const medium = recs.filter(({ rec }) => rec.level === "medium");
   const low = recs.filter(({ rec }) => rec.level === "low");
