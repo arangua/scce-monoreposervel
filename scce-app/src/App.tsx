@@ -1733,7 +1733,7 @@ export default function App(){
                 acks: [...(ins.acks ?? []), { userId: currentUser.id, role, at: nowISO() }],
               }
         );
-        return { ...x, instructions, timeline: pushTimelineEvent(x.timeline ?? [], traceEv), updatedAt: nowISO() } as CaseItem;
+        return { ...x, instructions, timeline: pushTimelineEvent(x.timeline ?? [], traceEv), updatedAt: nowISO() };
       })
     );
     setAuditLog((prev) =>
