@@ -1015,7 +1015,7 @@ export default function App(){
 
         // Fallback seed: si falla, NO reemplazamos cases
         if (res.ok && Array.isArray(res.data)) {
-          setCases((res.data as any[]).map(normalizeApiCase));
+          setCases((res.data as unknown[]).map(normalizeApiCase));
         }
       }
     } finally {
