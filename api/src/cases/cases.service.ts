@@ -33,7 +33,7 @@ function assertRegionAllowed(ctx: ScceCtx, regionCode: string) {
   }
 }
 
-function stableStringify(value: any): string {
+function stableStringify(value: unknown): string {
   if (value === null || value === undefined) return JSON.stringify(value);
   if (typeof value !== "object") return JSON.stringify(value);
 
@@ -41,8 +41,9 @@ function stableStringify(value: any): string {
     return `[${value.map((v) => stableStringify(v)).join(",")}]`;
   }
 
-  const keys = Object.keys(value).sort((a, b) => a.localeCompare(b));
-  const parts = keys.map((k) => `${JSON.stringify(k)}:${stableStringify(value[k])}`);
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record).sort((a, b) => a.localeCompare(b));
+  const parts = keys.map((k) => `${JSON.stringify(k)}:${stableStringify(record[k])}`);
   return `{${parts.join(",")}}`;
 }
 
@@ -50,7 +51,7 @@ function computeEventHash(input: {
   prevHash: string;
   caseId: string;
   eventType: string;
-  payloadJson: Record<string, any>;
+  payloadJson: Record<string, unknown>;
   createdAtIso: string;
 }) {
   const hashInput = `${input.prevHash}|${input.caseId}|${input.eventType}|${stableStringify(
