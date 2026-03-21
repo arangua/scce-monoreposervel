@@ -1537,7 +1537,7 @@ export default function App(){
       if(x.id!==caseId)return x;
       const tl = pushTimelineEvent(x.timeline ?? [], bypassEv);
       const nd=[...(x.decisions ?? []),{who:currentUser.id,at:nowISO(),fundament:`Bypass ${validated?"VALIDADO":"REVOCADO"}: ${fundament}`}];
-      return{...x,bypassValidated:decision,decisions:nd,timeline:tl,updatedAt:nowISO()} as CaseItem;
+      return{...x,bypassValidated:decision,decisions:nd,timeline:tl,updatedAt:nowISO()};
     }));
     setAuditLog(prev=>appendEvent(prev,validated?"BYPASS_VALIDATED":"BYPASS_REVOKED",currentUser.id,currentUser.role,caseId,fundament.slice(0,80)));
     notify(`Excepción ${validated?"validada":"revocada"}`,"success");
