@@ -1521,7 +1521,7 @@ export default function App(){
       if(x.id!==caseId)return x;
       const tl=[...(x.timeline ?? []),{eventId:newEventId("ev"),type:tlMap[newStatus]||"STATUS_CHANGED",at:nowISO(),actor:currentUser.id,note:`Estado → ${newStatus}`}];
       const tsField = tsMap[newStatus];
-      return{...x,status:newStatus,...(tsField ? {[tsField]:nowISO()} : {}),timeline:tl,updatedAt:nowISO()} as CaseItem;
+      return{...x,status:newStatus,...(tsField ? {[tsField]:nowISO()} : {}),timeline:tl,updatedAt:nowISO()};
     }));
     setAuditLog(prev=>appendEvent(prev,"STATUS_CHANGED",currentUser.id,currentUser.role,caseId,`Estado → ${newStatus}`));
     if (closedSuccess) await openCaseDetail(caseId);
