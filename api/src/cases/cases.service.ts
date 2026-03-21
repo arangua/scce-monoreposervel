@@ -159,7 +159,7 @@ export class CasesService {
     // --- NUEVO (enterprise): verificación de integridad de encadenamiento ---
     let expectedPrev = "";
     for (let i = 0; i < events.length; i++) {
-      const ev: any = events[i];
+      const ev = events[i];
       const prevHash = (ev.prevHash ?? "") as string;
 
       // prevHash debe coincidir con el hash anterior (o "" en el primero)
@@ -167,7 +167,7 @@ export class CasesService {
         throw new ConflictException("Integridad de eventos fallida (prevHash inconsistente)");
       }
 
-      const payloadJson = (ev.payloadJson ?? {}) as Record<string, any>;
+      const payloadJson = (ev.payloadJson ?? {}) as Record<string, unknown>;
       const expectedHash = computeEventHash({
         prevHash,
         caseId: ev.caseId,
