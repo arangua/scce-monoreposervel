@@ -3523,7 +3523,7 @@ export default function App(){
 
   // ─── REPORTS ─────────────────────────────────────────────────────────────
   const Reports=()=>{
-    const avgAct=cases.filter(c=>c.reportedAt&&c.origin?.detectedAt).map(c=>timeDiff(c.origin!.detectedAt,c.reportedAt!)).filter(v=>v!=null);
+    const avgAct=cases.filter(c=>c.reportedAt&&c.origin?.detectedAt).map(c=>timeDiff(c.origin?.detectedAt ?? null,c.reportedAt ?? null)).filter(v=>v!=null);
     const avgAcc=cases.filter(c=>c.firstActionAt&&c.reportedAt).map(c=>timeDiff(c.reportedAt,c.firstActionAt)).filter(v=>v!=null);
     const metricas=[
       ["T. prom. activación", avgAct.length?Math.round(avgAct.reduce((a,b)=>a+b,0)/avgAct.length):null, "min"],
