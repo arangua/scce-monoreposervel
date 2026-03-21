@@ -1,6 +1,14 @@
 // src/domain/caseValidation.ts
-import type { CommuneCode, LocalCatalog, RegionCode } from "./types";
 import { findActiveLocal } from "./catalog";
+import type { CommuneCode, LocalCatalog, RegionCode } from "./types";
+
+function isRegionCode(v: string): v is RegionCode {
+  return v.length > 0;
+}
+
+function isCommuneCode(v: string): v is CommuneCode {
+  return v.length > 0;
+}
 
 export function validateCaseSchema(
   c: { summary?: string; commune?: string; region?: string; local?: string; origin?: { detectedAt?: string } },
@@ -13,8 +21,15 @@ export function validateCaseSchema(
   if (!c.local?.trim()) e.push("Local de votación obligatorio.");
   if (!c.origin?.detectedAt) e.push("Hora de detección obligatoria.");
   if (c.local?.trim() && catalog.length > 0) {
-    if (!findActiveLocal(catalog, (c.region ?? "") as RegionCode, (c.commune ?? "") as CommuneCode, c.local ?? ""))
+    const region = c.region ?? "";
+    const commune = c.commune ?? "";
+    if (
+      isRegionCode(region) &&
+      isCommuneCode(commune) &&
+      !findActiveLocal(catalog, region, commune, c.local ?? "")
+    ) {
       e.push(`Local "${c.local}" no está activo en el catálogo.`);
+    }
   }
   return e;
 }
