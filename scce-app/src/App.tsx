@@ -2045,8 +2045,8 @@ export default function App(){
 
   const assignedLocal = useMemo(() => {
     if (!assignedLocalIdEffective) return null;
-    return (localCatalogById.get(assignedLocalIdEffective) as LocalCatalogEntry | undefined) ?? null;
-  }, [assignedLocalIdEffective, localCatalogById]);
+    return localCatalog.find((e) => e.idLocal === assignedLocalIdEffective) ?? null;
+  }, [assignedLocalIdEffective, localCatalog]);
 
   const assignedCommuneEffective = assignedLocal?.commune ?? "";
 
