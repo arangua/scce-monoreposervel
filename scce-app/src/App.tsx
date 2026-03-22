@@ -3057,7 +3057,7 @@ export default function App(){
                   )}
                 </div>
               </div>
-              {(()=>{const ev=(c.evaluation??{}) as Record<string, number>;return Object.entries({continuidad:"Continuidad",integridad:"Integridad jurídica",seguridad:"Seguridad",exposicion:"Exposición",capacidadLocal:"Capacidad local"}).map(([k,lbl])=>(
+              {(()=>{const ev=(c.evaluation??{});return Object.entries({continuidad:"Continuidad",integridad:"Integridad jurídica",seguridad:"Seguridad",exposicion:"Exposición",capacidadLocal:"Capacidad local"}).map(([k,lbl])=>(
                 <div key={k} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
                   <span style={{color:themeColor("mutedAlt"),fontSize:"11px"}}>{lbl}</span>
                   <div style={{display:"flex",gap:3,alignItems:"center"}}>
