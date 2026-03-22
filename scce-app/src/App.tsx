@@ -2774,18 +2774,21 @@ export default function App(){
         {step===2&&(
           <div style={S.card}>
             <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:10}}>PASO 2 — FICHA DE EVALUACIÓN (inmutable tras guardar)</div>
-            {varDefs.map(v=>(
+            {varDefs.map(v=>{
+              const lv = le as Record<string, number>;
+              return (
               <div key={v.key} style={{...S.card,background:themeColor("bgSurface"),marginBottom:6}}>
                 <div style={{fontWeight:600,marginBottom:1}}>{v.label}</div>
                 <div style={{color:themeColor("muted"),fontSize:"10px",marginBottom:6}}>{v.desc}</div>
                 <div style={{display:"flex",gap:6,alignItems:"center"}}>
                   {[0,1,2,3].map(n=>(
-                    <button key={n} onClick={()=>setLe(p=>({...p,[v.key]:n} as typeof evalForm))} style={{padding:"6px 14px",borderRadius:4,border:"2px solid",cursor:"pointer",fontWeight:700,fontSize:"13px",background:(le as Record<string, number>)[v.key]===n?[themeColor("success"),themeColor("warningAlt"),themeColor("warning"),themeColor("danger")][n]:"transparent",borderColor:["#22c55e44","#eab30844","#f9731644","#ef444444"][n],color:(le as Record<string, number>)[v.key]===n?themeColor("white"):[themeColor("success"),themeColor("warningAlt"),themeColor("warning"),themeColor("danger")][n]}}>{n}</button>
+                    <button key={n} onClick={()=>setLe(p=>({...p,[v.key]:n} as typeof evalForm))} style={{padding:"6px 14px",borderRadius:4,border:"2px solid",cursor:"pointer",fontWeight:700,fontSize:"13px",background:lv[v.key]===n?[themeColor("success"),themeColor("warningAlt"),themeColor("warning"),themeColor("danger")][n]:"transparent",borderColor:["#22c55e44","#eab30844","#f9731644","#ef444444"][n],color:lv[v.key]===n?themeColor("white"):[themeColor("success"),themeColor("warningAlt"),themeColor("warning"),themeColor("danger")][n]}}>{n}</button>
                   ))}
-                  {(le as Record<string, number>)[v.key]===3&&<span style={{color:themeColor("danger"),fontWeight:700,fontSize:"11px"}}>⚠️ ESCALAR</span>}
+                  {lv[v.key]===3&&<span style={{color:themeColor("danger"),fontWeight:700,fontSize:"11px"}}>⚠️ ESCALAR</span>}
                 </div>
               </div>
-            ))}
+            );
+            })}
             {lb.active&&maxVar<3&&lb.cause!=="system_down"&&lb.cause!=="critical_level_3"&&(
               <div style={{...S.card,background:themeColor("redBlock"),border:"2px solid #ef4444",marginTop:8}}>
                 <div style={{color:themeColor("danger"),fontWeight:700,marginBottom:6}}>⚠️ {UI_TEXT.misc.excepcionSinFundamentoObjetivo}</div>
