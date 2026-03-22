@@ -2096,7 +2096,7 @@ export default function App(){
 
     if (filterState.search) {
       const q = filterState.search.toLowerCase();
-      const localText = (c.local || "") + " " + ((c as { localSnapshot?: { nombre?: string }; localRef?: { label?: string } }).localSnapshot?.nombre || "") + " " + ((c as { localRef?: { label?: string } }).localRef?.label || "");
+      const localText = (c.local ?? "") + " " + ((c as { localSnapshot?: { nombre?: string }; localRef?: { label?: string } }).localSnapshot?.nombre || "") + " " + ((c as { localRef?: { label?: string } }).localRef?.label || "");
       if (!String(c.summary ?? "").toLowerCase().includes(q) && !String(c.id ?? "").toLowerCase().includes(q) && !localText.toLowerCase().includes(q)) return false;
     }
 
