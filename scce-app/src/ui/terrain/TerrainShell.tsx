@@ -78,7 +78,7 @@ type CaseLike = { id: string; summary: string; commune: string; status: string; 
 
 function formatPlace(c: { commune?: string; communeName?: string; communeCode?: string | null; local?: string | null; localName?: string | null }): string {
   const communeName = c?.communeName || c?.commune || "—";
-  const communeCode = c?.communeCode ?? null;
+  const communeCode = c?.communeCode;
   const local = c?.localName || c?.local || "—";
   const commune = communeCode ? `${communeName} (${communeCode})` : communeName;
   return `${commune} · ${local}`;
