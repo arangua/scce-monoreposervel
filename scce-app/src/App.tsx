@@ -2521,7 +2521,7 @@ export default function App(){
           </select>
           <select style={{...S.inp,width:"150px"}} disabled={fixedLocalRole || (isCentral ? !(filterState.region || activeRegion) : !filterState.region)} value={fixedLocalRole ? (assignedCommuneEffective ?? "") : filterState.commune} onChange={e=>{if(fixedLocalRole)return;const regionForCommune=isCentral?(filterState.region||activeRegion):filterState.region;if(!regionForCommune)return;setFilterState(p=>({...p,commune:e.target.value}));}}>
             <option value="">Todas las comunas</option>
-            {Object.entries(regionsMap[(isCentral ? (filterState.region || activeRegion) : regionEffective)]?.communes || {}).map(([k,v])=><option key={k} value={k}>{(v as { name?: string })?.name}</option>)}
+            {Object.entries(regionsMap[(isCentral ? (filterState.region || activeRegion) : regionEffective)]?.communes || {}).map(([k,v])=><option key={k} value={k}>{v.name}</option>)}
           </select>
           {fixedLocalRole&&<div style={{fontSize:12,opacity:0.85,color:assignedLocal?themeColor("mutedAlt"):themeColor("warning")}}>{assignedLocal?`📍 Comuna fijada por local asignado: ${assignedLocal.nombre}`:"⚠️ Sin local asignado válido (no se mostrarán casos)"}</div>}
           <IconButton onClick={()=>setFilterState((p)=>({...p,criticality:"",status:"",commune:"",search:"",region:isCentral?"":regionEffective}))} title="Limpiar filtros">✕</IconButton>
