@@ -2708,7 +2708,7 @@ export default function App(){
               ):(
                 <select
                   style={{...S.inp,borderColor:lnc.local?"#22c55e44":"#ef444444"}}
-                  value={lnc.local||""}
+                  value={lnc.local ?? ""}
                   disabled={lockLocal || !lnc.commune}
                   onChange={e=>setLnc(p=>({...p,local:e.target.value}))}
                 >
