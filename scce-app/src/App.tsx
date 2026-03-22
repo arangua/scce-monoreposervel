@@ -3674,12 +3674,12 @@ export default function App(){
       {simCases.length>0&&!simSurvey.submitted&&(
         <div style={{...S.card,marginTop:10,border:"1px solid #6366f144"}}>
           <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:8}}>Encuesta post-simulación</div>
-          {[{key:"claridad",label:"¿El sistema fue claro bajo presión?"},{key:"respaldo",label:"¿Los snapshots de local aportan confianza?"}].map(q=>(
+          {([{key:"claridad",label:"¿El sistema fue claro bajo presión?"},{key:"respaldo",label:"¿Los snapshots de local aportan confianza?"}] as const).map(q=>(
             <div key={q.key} style={{marginBottom:8}}>
               <div style={{fontSize:"12px",color:themeColor("mutedAlt"),marginBottom:4}}>{q.label}</div>
               <div style={{display:"flex",gap:4}}>
                 {[1,2,3,4,5].map(n=>(
-                  <button key={n} onClick={()=>setSimSurvey(p=>({...p,[q.key]:n}))} style={{padding:"4px 10px",borderRadius:3,border:"1px solid",cursor:"pointer",background:(simSurvey as Record<string, number|boolean>)[q.key]===n?themeColor("primary"):"transparent",borderColor:(simSurvey as Record<string, number|boolean>)[q.key]===n?themeColor("primary"):themeColor("mutedDarker"),color:(simSurvey as Record<string, number|boolean>)[q.key]===n?themeColor("white"):themeColor("muted")}}>{n}</button>
+                  <button key={n} onClick={()=>setSimSurvey(p=>({...p,[q.key]:n}))} style={{padding:"4px 10px",borderRadius:3,border:"1px solid",cursor:"pointer",background:simSurvey[q.key]===n?themeColor("primary"):"transparent",borderColor:simSurvey[q.key]===n?themeColor("primary"):themeColor("mutedDarker"),color:simSurvey[q.key]===n?themeColor("white"):themeColor("muted")}}>{n}</button>
                 ))}
               </div>
             </div>
