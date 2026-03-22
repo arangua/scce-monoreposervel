@@ -3554,7 +3554,7 @@ export default function App(){
           </div>
           <div style={S.card}>
             <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:8}}>CRITICIDAD</div>
-            {(["CRITICA","ALTA","MEDIA","BAJA"] as Criticality[]).map(cr=>{const n=cases.filter(c=>c.criticality===cr).length;return(
+            {(["CRITICA","ALTA","MEDIA","BAJA"] as const).map(cr=>{const n=cases.filter(c=>c.criticality===cr).length;return(
               <div key={cr} style={{marginBottom:6}}>
                 <div style={{display:"flex",justifyContent:"space-between",fontSize:"11px",marginBottom:2}}>
                   <span style={{color:critColor(cr)}}>{cr}</span><span style={{color:themeColor("mutedAlt")}}>{n}</span>
