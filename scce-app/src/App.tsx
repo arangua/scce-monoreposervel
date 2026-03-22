@@ -2025,7 +2025,7 @@ export default function App(){
 
   function getCaseLocalIdSafe(c: { localScope?: string; localRef?: { idLocal?: string }; localSnapshot?: { idLocal?: string } | null }, localCatalogById: Map<string, unknown>): string | null {
     if (c?.localScope === "REGIONAL") return null;
-    const raw = (c as { localRef?: { idLocal?: string }; localSnapshot?: { idLocal?: string } | null })?.localRef?.idLocal ?? (c as { localSnapshot?: { idLocal?: string } | null })?.localSnapshot?.idLocal ?? null;
+    const raw = c?.localRef?.idLocal ?? c?.localSnapshot?.idLocal ?? null;
     if (!raw) return null;
     const id = String(raw);
     return localCatalogById.has(id) ? id : null;
