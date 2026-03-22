@@ -2070,8 +2070,8 @@ export default function App(){
     const regionToFilter = filterState.region || (isCentral && filterState.commune && activeRegion ? activeRegion : null);
     if (regionToFilter) {
       const caseRegion =
-        (c as { region?: string; regionCode?: string }).regionCode ??
-        (c as { region?: string; regionCode?: string }).region ??
+        c.regionCode ??
+        c.region ??
         null;
 
       // si el caso no tiene región, NO debe pasar el filtro
