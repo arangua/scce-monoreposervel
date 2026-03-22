@@ -2795,8 +2795,8 @@ export default function App(){
                 </label>
               </div>
             )}
-            <div style={{...S.card,background:themeColor("bgSurface"),border:`2px solid ${critColor(er.criticality as Criticality)}`,marginTop:8}}>
-              <Badge style={S.badge(critColor(er.criticality as Criticality))} size="sm">
+            <div style={{...S.card,background:themeColor("bgSurface"),border:`2px solid ${critColor(er.criticality)}`,marginTop:8}}>
+              <Badge style={S.badge(critColor(er.criticality))} size="sm">
                 CRITICIDAD: {er.criticality}
               </Badge>
               <span style={{marginLeft:8,color:themeColor("muted"),fontSize:"11px"}}>Prioridad sugerida: {er.score}/15</span>
