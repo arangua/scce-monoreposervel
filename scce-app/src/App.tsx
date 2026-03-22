@@ -2790,7 +2790,7 @@ export default function App(){
               <div style={{...S.card,background:themeColor("redBlock"),border:"2px solid #ef4444",marginTop:8}}>
                 <div style={{color:themeColor("danger"),fontWeight:700,marginBottom:6}}>⚠️ {UI_TEXT.misc.excepcionSinFundamentoObjetivo}</div>
                 <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer"}}>
-                  <input type="checkbox" checked={lb.confirmed||false} onChange={e=>setLb(p=>({...p,confirmed:e.target.checked}))}/>
+                  <input type="checkbox" checked={lb.confirmed ?? false} onChange={e=>setLb(p=>({...p,confirmed:e.target.checked}))}/>
                   <span style={{color:themeColor("danger"),fontSize:"12px",fontWeight:600}}>{UI_TEXT.misc.confirmarExcepcionOperativa}</span>
                 </label>
               </div>
