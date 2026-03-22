@@ -1798,14 +1798,14 @@ export default function App(){
 
   function runSimulation(){
     const communes=Object.keys(CONFIG.regions.TRP.communes);
-    const sc=SIM_SCENARIOS.map((s,i)=>{
+    const sc: CaseItem[] = SIM_SCENARIOS.map((s,i)=>{
       const result=calcCriticality(s.ev);
       const commune=communes[i%communes.length];
       const activos=getActiveLocals(localCatalog,"TRP",commune);
       const le=activos.length?activos[0]:null;
       return{id:genId("TRP",commune,100+i),region:"TRP",commune,local:le?le.nombre:"Escuela Simulación",localSnapshot:le?{idLocal:le.idLocal,nombre:le.nombre,region:"TRP",commune,snapshotAt:tsISO(30-i*2)}:null,origin:{actor:"Simulación",channel:"Teams",detectedAt:tsISO(30-i*2)},summary:s.summary,detail:"[SIM] "+s.summary,evidence:[],bypass:false,bypassFlagged:false,evaluation:s.ev,evaluationLocked:true,evaluationHistory:[],criticality:result.criticality,criticalityScore:result.score,status:"Nuevo",assignedTo:null,slaMinutes:SLA_MINUTES[normalizeSlaLevel(result.criticality)]||60,closingMotivo:null,bypassValidated:null,timeline:[{type:"DETECTED",at:tsISO(30-i*2),actor:"SIM",note:"Simulación"}],actions:[],decisions:[],completeness:40,reportedAt:tsISO(28-i*2),firstActionAt:null,escalatedAt:null,mitigatedAt:null,resolvedAt:null,closedAt:null,createdBy:"SIM",createdAt:tsISO(30-i*2),updatedAt:tsISO(30-i*2),isSim:true};
     });
-    setSimCases(sc as CaseItem[]);
+    setSimCases(sc);
     setSimReport({total:sc.length,critica:sc.filter(c=>c.criticality==="CRITICA").length,alta:sc.filter(c=>c.criticality==="ALTA").length,avgScore:Number((sc.reduce((s,c)=>s+(c.criticalityScore ?? 0),0)/sc.length).toFixed(1))});
     setSimSurvey({claridad:0,respaldo:0,submitted:false});
     notify("Simulación: 10 incidentes generados","warning");
