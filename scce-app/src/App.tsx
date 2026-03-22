@@ -2625,7 +2625,7 @@ export default function App(){
     const er=calcCriticality(le);
     const maxVar=Math.max(...Object.values(le));
     const rData=regionsMap[lnc.region||"TRP"];
-    const availableLocals=useMemo(()=>getActiveLocals(localCatalog,lnc.region||"TRP",lnc.commune||""),[lnc.region,lnc.commune]);
+    const availableLocals=useMemo(()=>getActiveLocals(localCatalog,lnc.region||"TRP",lnc.commune ?? ""),[lnc.region,lnc.commune]);
 
     const isFixedLocal = Boolean(assignedLocalIdEffective);
     const isFixedCommune = Boolean(assignedCommuneEffective);
