@@ -628,7 +628,7 @@ export default function App(){
   const regionOptions = useMemo(() => {
     const entriesAll = Object.entries(CONFIG.regions).map(([code, d]) => ({
       code,
-      name: (d as { name?: string }).name ?? code,
+      name: d.name ?? code,
     }));
 
     if (isCentral) {
