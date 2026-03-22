@@ -2727,7 +2727,7 @@ export default function App(){
               </div>
               <div>
                 <label style={S.lbl}>Hora del incidente *</label>
-                <input style={S.inp} type="datetime-local" value={(lnc.origin?.detectedAt||"").slice(0,16)} onChange={e=>setLnc(p=>({...p,origin:{...p.origin,detectedAt:e.target.value}}))}/>
+                <input style={S.inp} type="datetime-local" value={(lnc.origin?.detectedAt ?? "").slice(0,16)} onChange={e=>setLnc(p=>({...p,origin:{...p.origin,detectedAt:e.target.value}}))}/>
                 <div style={{fontSize:"10px",color:themeColor("muted"),marginTop:2}}>Hora en que ocurrió/detectó. Se permite hasta 5 min por desfase de reloj. La hora de registro se guarda al enviar.</div>
               </div>
             </div>
