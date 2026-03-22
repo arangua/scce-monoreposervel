@@ -2733,7 +2733,7 @@ export default function App(){
             </div>
             <div style={{marginBottom:10}}>
               <label style={S.lbl}>Resumen *</label>
-              <input style={S.inp} placeholder="Ej: Urna sellada incorrectamente en mesa 12" value={lnc.summary||""} onChange={e=>setLnc(p=>({...p,summary:e.target.value}))}/>
+              <input style={S.inp} placeholder="Ej: Urna sellada incorrectamente en mesa 12" value={lnc.summary ?? ""} onChange={e=>setLnc(p=>({...p,summary:e.target.value}))}/>
             </div>
             {canDo("bypass",currentUser)&&(
               <div style={{...S.card,background:themeColor("violetBlock"),border:"1px solid #7c3aed44"}}>
