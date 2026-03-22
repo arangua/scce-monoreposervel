@@ -88,6 +88,7 @@ export type InstructionItem = {
 export type CaseItem = {
   id: string;
   region: string;
+  regionCode?: string;
   commune: string;
   status: CaseStatus;
   criticality: Criticality;

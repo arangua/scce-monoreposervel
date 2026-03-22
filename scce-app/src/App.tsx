@@ -2216,7 +2216,7 @@ export default function App(){
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3,flexWrap:"wrap",gap:4}}>
           <span style={{fontSize:"11px",color:themeColor("muted"),fontFamily:"monospace"}}>{c.id}</span>
           <span style={{ opacity: 0.8, marginLeft: 8, fontSize: "11px", color: themeColor("muted") }}>
-            Región: {c.region ?? (c as { regionCode?: string }).regionCode ?? "—"}
+            Región: {c.region ?? c.regionCode ?? "—"}
           </span>
           <div style={{display:"flex",gap:4,alignItems:"center",flexWrap:"wrap"}}>
             {c.bypassFlagged&&!c.bypassValidated&&(
