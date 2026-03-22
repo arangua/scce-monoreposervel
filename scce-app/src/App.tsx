@@ -210,7 +210,6 @@ function isNivelCentral(userId: string): boolean {
 type Role = keyof typeof POLICIES;
 type PolicyAction = keyof (typeof POLICIES)[Role];
 
-type RecLevel = "high" | "medium" | "low";
 
 type Notification = { msg: string; type: string } | null;
 
@@ -2134,7 +2133,7 @@ export default function App(){
     const badgeEl = (
       <Badge
         style={{
-          ...S.badge(recColor(rec.level as RecLevel)),
+          ...S.badge(recColor(rec.level)),
           cursor: showTip ? "help" : "default",
         }}
         size="xs"
