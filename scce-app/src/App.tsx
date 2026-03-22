@@ -871,7 +871,7 @@ export default function App(){
   const [filterState,setFilterState]=useState({criticality:"",status:"",commune:"",search:"",region:""});
   const regionEffective = isCentral
     ? (filterState.region || activeRegion || "ALL")
-    : (effectiveMembership?.regionCode || "");
+    : (effectiveMembership?.regionCode ?? "");
   const [notification, setNotification] = useState<Notification>(null);
   const [simCases,setSimCases]=useState<CaseItem[]>([]);
   const [simReport, setSimReport] = useState<SimReport>(null);
