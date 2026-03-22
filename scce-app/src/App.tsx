@@ -2833,7 +2833,7 @@ export default function App(){
               <div><span style={{color:themeColor("muted")}}>Canal:</span> {newCase?.origin?.channel}</div>
               <div>
               <span style={{color:themeColor("muted")}}>Criticidad:</span>{" "}
-              <Badge style={S.badge(critColor(calcCriticality(evalForm).criticality as Criticality))} size="sm">{calcCriticality(evalForm).criticality}</Badge>
+              <Badge style={S.badge(critColor(calcCriticality(evalForm).criticality))} size="sm">{calcCriticality(evalForm).criticality}</Badge>
             </div>
             </div>
             <div style={{marginBottom:8,padding:"6px 10px",background:themeColor("infoBg"),border:"1px solid #93c5fd",borderRadius:4}}>
