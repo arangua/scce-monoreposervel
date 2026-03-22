@@ -2904,7 +2904,7 @@ export default function App(){
       CLOSED: themeColor("gray"), BYPASS: themeColor("purpleLight"), COMMENT: themeColor("muted"), MITIGATED: themeColor("warningAlt"), RECEPCIONADO: themeColor("purpleLight"),
       REASSESSMENT: themeColor("warning"), IN_MANAGEMENT: themeColor("primary"), BYPASS_VALIDATED: themeColor("success"), BYPASS_REVOKED: themeColor("danger"),
     };
-    const insUserId = currentUser?.id ?? null;
+    const insUserId = currentUser?.id;
     const insUserRole = (currentUser as { role?: string } | null)?.role ?? null;
     /* eslint-disable react-hooks/exhaustive-deps -- deps insUserId/insUserRole evitan closure obsoleto; el linter no ve uso directo */
     const instructionsSorted = useMemo(() => {
