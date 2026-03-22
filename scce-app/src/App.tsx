@@ -201,7 +201,7 @@ const POLICIES = {
 /** Fase 3.6 — detectar si el usuario es Nivel Central (por role en USERS). */
 function isNivelCentral(userId: string): boolean {
   const u = USERS.find((x) => x.id === userId);
-  return (u as { role?: string } | undefined)?.role === "NIVEL_CENTRAL";
+  return u?.role === "NIVEL_CENTRAL";
 }
 
 // =====================
