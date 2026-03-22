@@ -2905,7 +2905,7 @@ export default function App(){
       REASSESSMENT: themeColor("warning"), IN_MANAGEMENT: themeColor("primary"), BYPASS_VALIDATED: themeColor("success"), BYPASS_REVOKED: themeColor("danger"),
     };
     const insUserId = currentUser?.id;
-    const insUserRole = (currentUser as { role?: string } | null)?.role ?? null;
+    const insUserRole = (currentUser as { role?: string } | null)?.role;
     /* eslint-disable react-hooks/exhaustive-deps -- deps insUserId/insUserRole evitan closure obsoleto; el linter no ve uso directo */
     const instructionsSorted = useMemo(() => {
       const list = (c.instructions ?? []).filter((ins) =>
