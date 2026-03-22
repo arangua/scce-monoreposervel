@@ -2690,7 +2690,7 @@ export default function App(){
                 <label style={S.lbl}>Comuna *</label>
                 <select
                   style={S.inp}
-                  value={lnc.commune||""}
+                  value={lnc.commune ?? ""}
                   disabled={lockCommune}
                   onChange={e=>setLnc(p=>({...p,commune:e.target.value,local:""}))}
                 >
