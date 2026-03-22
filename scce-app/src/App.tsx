@@ -1002,7 +1002,7 @@ export default function App(){
         const map: Record<string, { regionScopeMode: "ALL" | "LIST"; regionScope: string[]; regionCode?: string | null }> = {};
         for (const m of meRes.data.memberships) {
           map[m.id] = {
-            regionScopeMode: (m.regionScopeMode === "ALL" ? "ALL" : "LIST") as "ALL" | "LIST",
+            regionScopeMode: (m.regionScopeMode === "ALL" ? "ALL" : "LIST"),
             regionScope: Array.isArray(m.regionScope) ? m.regionScope : [],
             regionCode: m.regionCode ?? null,
           };
