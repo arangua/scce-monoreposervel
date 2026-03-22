@@ -3431,7 +3431,7 @@ export default function App(){
           </select>
           <select style={{...S.inp,width:"160px"}} value={catCommune} onChange={e=>setCatCommune(e.target.value)} disabled={catRegion==="ALL"}>
             <option value="">Todas las comunas</option>
-            {Object.entries(rData?.communes||{}).map(([k,v])=><option key={k} value={k}>{(v as { name?: string }).name}</option>)}
+            {Object.entries(rData?.communes||{}).map(([k,v])=><option key={k} value={k}>{v.name}</option>)}
           </select>
           <input style={{...S.inp,width:"160px"}} placeholder="🔍 Buscar local..." value={searchCat} onChange={e=>setSearchCat(e.target.value)}/>
           <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:"12px",color:themeColor("mutedAlt"),whiteSpace:"nowrap"}}>
