@@ -2519,7 +2519,7 @@ export default function App(){
           <select style={{...S.inp,width:"130px"}} value={filterState.status} onChange={e=>setFilterState(p=>({...p,status:e.target.value}))}>
             {["","Nuevo","Recepcionado por DR","En gestión","Escalado","Mitigado","Resuelto","Cerrado"].map(o=><option key={o} value={o}>{o||"Estado"}</option>)}
           </select>
-          <select style={{...S.inp,width:"150px"}} disabled={fixedLocalRole || (isCentral ? !(filterState.region || activeRegion) : !filterState.region)} value={fixedLocalRole ? (assignedCommuneEffective || "") : filterState.commune} onChange={e=>{if(fixedLocalRole)return;const regionForCommune=isCentral?(filterState.region||activeRegion):filterState.region;if(!regionForCommune)return;setFilterState(p=>({...p,commune:e.target.value}));}}>
+          <select style={{...S.inp,width:"150px"}} disabled={fixedLocalRole || (isCentral ? !(filterState.region || activeRegion) : !filterState.region)} value={fixedLocalRole ? (assignedCommuneEffective ?? "") : filterState.commune} onChange={e=>{if(fixedLocalRole)return;const regionForCommune=isCentral?(filterState.region||activeRegion):filterState.region;if(!regionForCommune)return;setFilterState(p=>({...p,commune:e.target.value}));}}>
             <option value="">Todas las comunas</option>
             {Object.entries(regionsMap[(isCentral ? (filterState.region || activeRegion) : regionEffective)]?.communes || {}).map(([k,v])=><option key={k} value={k}>{(v as { name?: string })?.name}</option>)}
           </select>
