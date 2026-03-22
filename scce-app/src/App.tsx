@@ -1042,7 +1042,7 @@ export default function App(){
 
         // Fallback seed: si falla, NO reemplazamos cases
         if (res.ok && Array.isArray(res.data)) {
-          setCases((res.data as unknown[]).map(normalizeApiCase));
+          setCases(res.data.map(normalizeApiCase));
         }
       }
     } finally {
@@ -1093,7 +1093,7 @@ export default function App(){
       });
       // Si falla, no pisamos el estado actual
       if (res.ok && Array.isArray(res.data)) {
-        setCases((res.data as unknown[]).map(normalizeApiCase));
+        setCases(res.data.map(normalizeApiCase));
       }
     }
     reloadCasesForActiveMembership();
