@@ -3223,7 +3223,7 @@ export default function App(){
                           </Badge>
                           <span style={{color:themeColor("mutedAlt")}}>{scopeFLabel}</span>
                           {hasBypass && (
-                            <Tooltip content={ins.bypass?.reason || ""}>
+                            <Tooltip content={ins.bypass?.reason ?? ""}>
                               <Badge style={{ ...S.badge(themeColor("legacyRedDark")), cursor:"help" }} size="sm">
                                 {UI_TEXT.labels.instructionBypassBadge}
                               </Badge>
