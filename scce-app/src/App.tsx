@@ -857,7 +857,7 @@ export default function App(){
     notify(UI_TEXT.misc.importOk ?? "Import realizado.", "success");
   }
   const [view,setView]=useState<ViewKey>("dashboard");
-  const OP_HOME_VIEW = "op_home" as const;
+  const OP_HOME_VIEW = "op_home";
   const [selectedCase, setSelectedCase] = useState<CaseItem | null>(null);
   type UiMode = "OP" | "FULL";
   function uiModeStorageKey(userId: string) {
