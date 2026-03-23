@@ -2,12 +2,16 @@
 import { findActiveLocal } from "./catalog";
 import type { CommuneCode, LocalCatalog, RegionCode } from "./types";
 
-function isRegionCode(v: string): v is RegionCode {
+function hasTextCode(v: string) {
   return v.length > 0;
 }
 
+function isRegionCode(v: string): v is RegionCode {
+  return hasTextCode(v);
+}
+
 function isCommuneCode(v: string): v is CommuneCode {
-  return v.length > 0;
+  return hasTextCode(v);
 }
 
 export function validateCaseSchema(
