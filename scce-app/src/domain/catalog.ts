@@ -15,6 +15,6 @@ export function findActiveLocal(
         l.nombre === nombre &&
         l.activoGlobal &&
         l.activoEnEleccionActual
-    ) || null
+    ) ?? null
   );
 }
