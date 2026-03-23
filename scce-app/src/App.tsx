@@ -9,6 +9,7 @@ import { isSlaVencido, slaMinutesForCriticality } from "./domain/caseSla";
 import { buildCaseStatusPatch } from "./domain/caseStatusPatch";
 import { validateCaseClosePreconditions } from "./domain/caseCloseValidation";
 import { validateEnGestionPrecondition } from "./domain/caseStatusGuards";
+import { normalizeStatus, type UiStatus } from "./domain/caseStatusNormalize";
 import { getRecommendation } from "./domain/recommendation";
 import { recColor } from "./domain/theme";
 import { themeColor } from "./theme";
@@ -346,35 +347,6 @@ function statusColor(s: UiStatus | "Otros / Desconocido"): string {
   return map[s] ?? themeColor("gray");
 }
 
-type UiStatus =
-  | "Nuevo"
-  | "Recepcionado por DR"
-  | "En gestión"
-  | "Escalado"
-  | "Mitigado"
-  | "Resuelto"
-  | "Cerrado";
-
-const STATUS_MAP: Record<string, UiStatus> = {
-  // backend / legacy
-  OPEN: "Nuevo",
-  NEW: "Nuevo",
-  IN_PROGRESS: "En gestión",
-  ESCALATED: "Escalado",
-  MITIGATED: "Mitigado",
-  RESOLVED: "Resuelto",
-  CLOSED: "Cerrado",
-
-  // ya en español (por si ya existen)
-  "Nuevo": "Nuevo",
-  "Recepcionado por DR": "Recepcionado por DR",
-  "En gestión": "En gestión",
-  "Escalado": "Escalado",
-  "Mitigado": "Mitigado",
-  "Resuelto": "Resuelto",
-  "Cerrado": "Cerrado",
-};
-
 const KNOWN_STATUSES: CaseStatus[] = ["Nuevo","Recepcionado por DR","En gestión","Escalado","Mitigado","Resuelto","Cerrado"];
 const REGION_UI_ALIAS: Record<string, string> = {
   "1": "TRP",
@@ -471,10 +443,7 @@ function normalizeApiCase(raw: unknown): CaseItem {
     status: normalizedStatus === "Otros / Desconocido" ? "Nuevo" : normalizedStatus,
   } as CaseItem;
 }
-function normalizeStatus(s: unknown): UiStatus | "Otros / Desconocido" {
-  const key = String(s ?? "").trim();
-  return STATUS_MAP[key] ?? "Otros / Desconocido";
-}
+
 type SeedEventInput = { type: string; at: string; actor: string; role: string; caseId?: string | null; summary: string };
 
 function buildSeedLog(events: SeedEventInput[]): AuditLogEntry[] {
