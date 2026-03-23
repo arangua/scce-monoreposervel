@@ -6,6 +6,7 @@ import { validateCaseSchema } from "./domain/caseValidation";
 import { fmtDate, fmtTime, timeDiff, nowISO, uuidSimple, tsISO, isDetectedAtInFuture, nowLocalDatetimeInput } from "./domain/date";
 import { checkLocalDivergence } from "./domain/localDivergence";
 import { isSlaVencido, slaMinutesForCriticality } from "./domain/caseSla";
+import { CASE_STATUS_TIMELINE_EVENT, CASE_STATUS_TIMESTAMP_FIELD } from "./domain/caseStatus";
 import { getRecommendation } from "./domain/recommendation";
 import { recColor } from "./domain/theme";
 import { themeColor } from "./theme";
@@ -1525,12 +1526,10 @@ export default function App(){
       }
 
     }
-    const tlMap: Record<CaseStatus, string> = {Escalado:"ESCALATED",Mitigado:"MITIGATED",Resuelto:"RESOLVED",Cerrado:"CLOSED","En gestión":"IN_MANAGEMENT","Recepcionado por DR":"RECEPCIONADO",Nuevo:"DETECTED"};
-    const tsMap: Partial<Record<CaseStatus, string>> = {Escalado:"escalatedAt",Mitigado:"mitigatedAt",Resuelto:"resolvedAt",Cerrado:"closedAt"};
     setCases(prev=>prev.map(x=>{
       if(x.id!==caseId)return x;
-      const tl=[...(x.timeline ?? []),{eventId:newEventId("ev"),type:tlMap[newStatus]||"STATUS_CHANGED",at:nowISO(),actor:currentUser.id,note:`Estado → ${newStatus}`}];
-      const tsField = tsMap[newStatus];
+      const tl=[...(x.timeline ?? []),{eventId:newEventId("ev"),type:CASE_STATUS_TIMELINE_EVENT[newStatus]||"STATUS_CHANGED",at:nowISO(),actor:currentUser.id,note:`Estado → ${newStatus}`}];
+      const tsField = CASE_STATUS_TIMESTAMP_FIELD[newStatus];
       return{...x,status:newStatus,...(tsField ? {[tsField]:nowISO()} : {}),timeline:tl,updatedAt:nowISO()};
     }));
     setAuditLog(prev=>appendEvent(prev,"STATUS_CHANGED",currentUser.id,currentUser.role,caseId,`Estado → ${newStatus}`));
