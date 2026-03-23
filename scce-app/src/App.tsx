@@ -2052,7 +2052,7 @@ export default function App(){
 
   useEffect(() => {
     if (!fixedLocalRole) return;
-    const next = assignedCommuneEffective ?? "";
+    const next = assignedCommuneEffective;
     setFilterState((p) => {
       if ((p.commune ?? "") === next) return p;
       return { ...p, commune: next };
