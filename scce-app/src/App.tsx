@@ -806,8 +806,17 @@ export default function App(){
 
     const signerPub = (raw as { signature?: { publicKeyB64: string } })?.signature?.publicKeyB64 ?? "";
     const fpForAudit = signerPub ? await publicKeyFingerprintShort(signerPub) : "";
+    const contextType = activeMembership?.contextType ?? "OPERACION";
 
     if (v.signatureStatus === "none") {
+      if (contextType === "OPERACION") {
+        notify("Import sin firma bloqueado en OPERACION.", "error");
+        if (currentUser?.id)
+          setAuditLog((prev) =>
+            appendEvent(prev, "IMPORT_SIG_NONE_BLOCKED_OPERATION", currentUser.id, currentUser.role, null, "Import sin firma bloqueado en OPERACION")
+          );
+        return;
+      }
       notify(
         UI_TEXT.misc.importUnsignedWarning ??
           "Import sin firma: permitido, pero no hay garantía de autoría.",
