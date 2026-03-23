@@ -7,6 +7,7 @@ import { fmtDate, fmtTime, timeDiff, nowISO, uuidSimple, tsISO, isDetectedAtInFu
 import { checkLocalDivergence } from "./domain/localDivergence";
 import { isSlaVencido, slaMinutesForCriticality } from "./domain/caseSla";
 import { buildCaseStatusPatch } from "./domain/caseStatusPatch";
+import { validateCaseClosePreconditions } from "./domain/caseCloseValidation";
 import { getRecommendation } from "./domain/recommendation";
 import { recColor } from "./domain/theme";
 import { themeColor } from "./theme";
@@ -1494,11 +1495,17 @@ export default function App(){
     if(newStatus==="En gestión"&&c.status==="Nuevo"&&!c.bypass)return notify("❌ "+UI_TEXT.errors.recepcionarPrimero,"error");
     let closedSuccess = false;
     if(newStatus==="Cerrado"){
-      if(c.bypassFlagged&&!c.bypassValidated)return notify("❌ "+UI_TEXT.errors.excepcionRequiereValidacion,"error");
-      if(!c.actions?.length)return notify("❌ "+UI_TEXT.errors.alMenosUnaAccion,"error");
-      if(!c.decisions?.length)return notify("❌ "+UI_TEXT.errors.alMenosUnaDecision,"error");
-      if(c.status!=="Resuelto")return notify("❌ "+UI_TEXT.errors.casoDebeEstarResuelto,"error");
-      if(!c.closingMotivo)return notify("❌ "+UI_TEXT.errors.ingresaMotivoCierre,"error");
+      const closeErr=validateCaseClosePreconditions({bypassFlagged:c.bypassFlagged,bypassValidated:c.bypassValidated,actions:c.actions,decisions:c.decisions,status:c.status,closingMotivo:c.closingMotivo});
+      if(closeErr){
+        const closeErrMsg={
+          bypassRequiresValidation:UI_TEXT.errors.excepcionRequiereValidacion,
+          requiresAction:UI_TEXT.errors.alMenosUnaAccion,
+          requiresDecision:UI_TEXT.errors.alMenosUnaDecision,
+          mustBeResolved:UI_TEXT.errors.casoDebeEstarResuelto,
+          requiresClosingReason:UI_TEXT.errors.ingresaMotivoCierre,
+        }[closeErr];
+        return notify("❌ "+closeErrMsg,"error");
+      }
       const token = authToken;
       const ctx = activeMembership;
       if (token && ctx) {
