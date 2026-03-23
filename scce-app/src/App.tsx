@@ -2851,7 +2851,7 @@ export default function App(){
             <div style={{display:"flex",justifyContent:"space-between",marginTop:10}}>
               <button style={S.btn("dark")} onClick={()=>setStep(3)}>← Atrás</button>
               <button
-                disabled={!!busyAction["submit_case"]}
+                disabled={busyAction["submit_case"]}
                 style={{...S.btn("success"),padding:"8px 20px"}}
                 onClick={() => withBusy("submit_case", submitCase)}
               >
@@ -3248,10 +3248,10 @@ export default function App(){
                           )}
                           {last && <span style={{fontSize:"10px",color:themeColor("muted")}}>Acusado: {USERS.find(u=>u.id===last.userId)?.name ?? last.userId} @ {fmtDate(last.at)}</span>}
                           {!acked && currentUser?.id && ins.ackRequired && (
-                            <button style={{...S.btn("primary"),fontSize:"10px",padding:"4px 8px"}} title={UI_TEXT.tooltips.ackConfirmReceipt} disabled={!!busyAction[`ack_${c.id}_${ins.id}`]} onClick={()=>withBusy(`ack_${c.id}_${ins.id}`,()=>ackInstruction(c.id,ins.id))}>{UI_TEXT.buttons.ackConfirmReceipt}</button>
+                            <button style={{...S.btn("primary"),fontSize:"10px",padding:"4px 8px"}} title={UI_TEXT.tooltips.ackConfirmReceipt} disabled={busyAction[`ack_${c.id}_${ins.id}`]} onClick={()=>withBusy(`ack_${c.id}_${ins.id}`,()=>ackInstruction(c.id,ins.id))}>{UI_TEXT.buttons.ackConfirmReceipt}</button>
                           )}
                           {!isClosedStatus(ins.status) && canDo("instruct", currentUser) && (
-                            <button style={{...S.btn("dark"),fontSize:"10px",padding:"4px 8px"}} disabled={!!busyAction[`close_${c.id}_${ins.id}`]} onClick={()=>withBusy(`close_${c.id}_${ins.id}`,()=>closeInstruction(c.id,ins.id))}>{UI_TEXT.buttons.closeInstruction}</button>
+                            <button style={{...S.btn("dark"),fontSize:"10px",padding:"4px 8px"}} disabled={busyAction[`close_${c.id}_${ins.id}`]} onClick={()=>withBusy(`close_${c.id}_${ins.id}`,()=>closeInstruction(c.id,ins.id))}>{UI_TEXT.buttons.closeInstruction}</button>
                           )}
                         </div>
                         {/* Fase 3.5 — Responder a instrucción (COMMENT en timeline con refInstructionId) */}
