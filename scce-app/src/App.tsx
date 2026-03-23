@@ -1251,7 +1251,7 @@ export default function App(){
 
   function startNewCase(){
     if (!currentUser) return;
-    const fixedCommune = assignedCommuneEffective ?? "";
+    const fixedCommune = assignedCommuneEffective;
     const fixedLocal = assignedLocal?.nombre ?? "";
     setNewCase({
       region: currentUser.region || (activeRegion === "ALL" ? DEFAULT_REGION : activeRegion),
