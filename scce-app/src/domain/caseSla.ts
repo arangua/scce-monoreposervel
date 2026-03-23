@@ -14,6 +14,11 @@ export function normalizeSlaLevel(v?: string): SlaLevel {
   return v === "CRITICA" || v === "ALTA" || v === "MEDIA" || v === "BAJA" ? v : "MEDIA";
 }
 
+/** Minutos de SLA al crear casos (misma fórmula que App: `SLA_MINUTES[normalizeSlaLevel(...)] || 60`). */
+export function slaMinutesForCriticality(criticality?: string): number {
+  return SLA_MINUTES[normalizeSlaLevel(criticality)] || 60;
+}
+
 export function isSlaVencido(c: {
   createdAt?: string;
   status?: string;
