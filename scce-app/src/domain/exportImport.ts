@@ -51,17 +51,38 @@ export async function validateImportBundle(raw: unknown): Promise<{
   }
 
   const obj = raw as {
+    appVersion?: unknown;
+    exportedAt?: unknown;
     cases?: unknown;
-    integrity?: { value?: unknown };
+    integrity?: { algo?: unknown; value?: unknown };
     signature?: { publicKeyB64?: unknown; valueB64?: unknown; signedAt?: unknown };
   };
+
+  if (typeof obj.appVersion !== "string" || !obj.appVersion.trim()) {
+    return { ok: false, error: "Bundle invalido: falta appVersion.", signatureStatus: "invalid", cases: [] };
+  }
+
+  if (typeof obj.exportedAt !== "string" || !obj.exportedAt.trim()) {
+    return { ok: false, error: "Bundle invalido: falta exportedAt.", signatureStatus: "invalid", cases: [] };
+  }
 
   if (!Array.isArray(obj.cases)) {
     return { ok: false, error: "Bundle invalido: falta cases.", signatureStatus: "invalid", cases: [] };
   }
 
-  if (!obj.integrity || typeof obj.integrity.value !== "string" || !obj.integrity.value.trim()) {
+  if (
+    !obj.integrity ||
+    obj.integrity.algo !== "sha256" ||
+    typeof obj.integrity.value !== "string" ||
+    !obj.integrity.value.trim()
+  ) {
     return { ok: false, error: "Bundle invalido: falta integridad.", signatureStatus: "invalid", cases: [] };
+  }
+
+  const payload = { appVersion: obj.appVersion, exportedAt: obj.exportedAt, cases: obj.cases };
+  const recalculatedIntegrity = await sha256Hex(JSON.stringify(payload));
+  if (recalculatedIntegrity !== obj.integrity.value) {
+    return { ok: false, error: "Integridad fallida.", signatureStatus: "invalid", cases: [] };
   }
 
   if (!obj.signature) {
