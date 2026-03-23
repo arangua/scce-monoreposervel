@@ -326,7 +326,7 @@ function calcCriticality(ev: Record<string, number> | null | undefined): { criti
   return          {criticality:"BAJA",  score:sum,recommendation:"Gestión local. Registrar y monitorear."};
 }
 function critColor(c: Criticality): string {
-  const map = { CRITICA:themeColor("danger"), ALTA:themeColor("warning"), MEDIA:themeColor("warningAlt"), BAJA:themeColor("success") } as const;
+  const map = { CRITICA:themeColor("danger"), ALTA:themeColor("warning"), MEDIA:themeColor("warningAlt"), BAJA:themeColor("success") };
   return map[c] ?? themeColor("gray");
 }
 function statusColor(s: UiStatus | "Otros / Desconocido"): string {
