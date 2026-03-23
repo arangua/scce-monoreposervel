@@ -7,5 +7,5 @@ export function recColor(l: RecLevel): string {
     low: "#94a3b8",
   } as const;
 
-  return map[l] ?? "#94a3b8";
+  return map[l];
 }
