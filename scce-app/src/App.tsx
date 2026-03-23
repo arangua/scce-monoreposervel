@@ -239,7 +239,7 @@ type BypassFormState = { active: boolean; motivo: string; cause: BypassCause; co
 function canDo(action: PolicyAction, user: User | null, caseObj?: CaseItem | null): boolean {
   if (!user) return false;
   const p = POLICIES[user.role];
-  if (!p || !(p as Record<string, boolean>)[action]) return false;
+  if (!p || !p[action]) return false;
   if (caseObj && user.role !== "NIVEL_CENTRAL") {
     if (caseObj.region && user.region && caseObj.region !== user.region) return false;
   }
