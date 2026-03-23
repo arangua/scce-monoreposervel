@@ -1917,9 +1917,9 @@ export default function App(){
           assertStringMax(`cases[${i}].createdBy`,c?.createdBy,MAX_MED,true);
           if (c?.evidence!==undefined&&c?.evidence!==null){
             if (!Array.isArray(c.evidence)) importFail(`Import fail-closed: cases[${i}].evidence debe ser arreglo.`);
-            if ((c.evidence as unknown[]).length>MAX_EVIDENCE_ITEMS) importFail(`Import fail-closed: cases[${i}].evidence excede máximo (${MAX_EVIDENCE_ITEMS}).`);
-            for (let j=0;j<(c.evidence as unknown[]).length;j++){
-              assertStringMax(`cases[${i}].evidence[${j}]`,(c.evidence as unknown[])[j],MAX_LONG,false);
+            if (c.evidence.length>MAX_EVIDENCE_ITEMS) importFail(`Import fail-closed: cases[${i}].evidence excede máximo (${MAX_EVIDENCE_ITEMS}).`);
+            for (let j=0;j<c.evidence.length;j++){
+              assertStringMax(`cases[${i}].evidence[${j}]`,c.evidence[j],MAX_LONG,false);
             }
           }
           const orig=c?.origin as Record<string, unknown>|undefined;
