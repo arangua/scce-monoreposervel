@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef, forwardRef, useImperativeHandle, useCallback } from "react";
 import type { CaseItem, InstructionItem, ImpactLevel, ScopeFunctional, LocalCatalog, LocalCatalogEntry, CaseStatus, Criticality, RegionCode, CommuneCode, AuditLogEntry, CaseEventKind, CaseEvent } from "./domain/types";
 import { calcCompleteness } from "./domain/caseMetrics";
+import { calcCriticality } from "./domain/criticality";
 import { findActiveLocal } from "./domain/catalog";
 import { validateCaseSchema } from "./domain/caseValidation";
 import { fmtDate, fmtTime, timeDiff, nowISO, uuidSimple, tsISO, isDetectedAtInFuture, nowLocalDatetimeInput } from "./domain/date";
@@ -318,16 +319,6 @@ function catalogSelfCheck(catalog: LocalCatalog): string[] {
 // ─── UTILIDADES ──────────────────────────────────────────────────────────────
 function genId(region: RegionCode, commune: CommuneCode, seq: number): string {
   return `${region}-${new Date().getFullYear()}-${commune}-${String(seq).padStart(3, "0")}`;
-}
-function calcCriticality(ev: Record<string, number> | null | undefined): { criticality: Criticality; score: number; recommendation: string } {
-  const vals = Object.values(ev ?? {});
-  const max = vals.length ? Math.max(...vals) : 0;
-  const sum = vals.reduce((a: number, b: number) => a + b, 0);
-
-  if(max>=3)return{criticality:"CRITICA",score:sum,recommendation:"⚠️ Escalamiento INMEDIATO al Director Regional y Nivel Central."};
-  if(sum>=8) return{criticality:"ALTA",  score:sum,recommendation:"Notificar Director Regional. SLA máx. 30 min."};
-  if(sum>=4) return{criticality:"MEDIA", score:sum,recommendation:"Gestionar a través de Registro SCCE. SLA máx. 60 min."};
-  return          {criticality:"BAJA",  score:sum,recommendation:"Gestión local. Registrar y monitorear."};
 }
 function critColor(c: Criticality): string {
   const map = { CRITICA:themeColor("danger"), ALTA:themeColor("warning"), MEDIA:themeColor("warningAlt"), BAJA:themeColor("success") };
