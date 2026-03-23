@@ -1,3 +1,5 @@
+import { getTrustedPublicKeys, verifySignature } from "./signingVault";
+
 type SignatureStatus = "none" | "valid_untrusted" | "valid_trusted" | "invalid";
 
 type ExportBundle = {
@@ -55,7 +57,7 @@ export async function validateImportBundle(raw: unknown): Promise<{
     exportedAt?: unknown;
     cases?: unknown;
     integrity?: { algo?: unknown; value?: unknown };
-    signature?: { publicKeyB64?: unknown; valueB64?: unknown; signedAt?: unknown };
+    signature?: { algo?: unknown; publicKeyB64?: unknown; valueB64?: unknown; signedAt?: unknown };
   };
 
   if (typeof obj.appVersion !== "string" || !obj.appVersion.trim()) {
@@ -89,12 +91,31 @@ export async function validateImportBundle(raw: unknown): Promise<{
     return { ok: true, error: "", signatureStatus: "none", cases: obj.cases };
   }
 
+  const hasAlgo = obj.signature.algo === "Ed25519";
   const hasPub = typeof obj.signature.publicKeyB64 === "string" && obj.signature.publicKeyB64.length > 0;
   const hasVal = typeof obj.signature.valueB64 === "string" && obj.signature.valueB64.length > 0;
   const hasAt = typeof obj.signature.signedAt === "string" && obj.signature.signedAt.length > 0;
 
-  if (!hasPub || !hasVal || !hasAt) {
+  if (!hasAlgo || !hasPub || !hasVal || !hasAt) {
     return { ok: false, error: "Firma inválida.", signatureStatus: "invalid", cases: [] };
+  }
+
+  const signaturePublicKey = obj.signature.publicKeyB64 as string;
+  const signatureValue = obj.signature.valueB64 as string;
+  const integrityValue = obj.integrity.value as string;
+
+  const isValidSignature = await verifySignature({
+    publicKeyB64: signaturePublicKey,
+    signatureB64: signatureValue,
+    hashHex: integrityValue,
+  }).catch(() => false);
+  if (!isValidSignature) {
+    return { ok: false, error: "Firma inválida.", signatureStatus: "invalid", cases: [] };
+  }
+
+  const trustedKeys = await getTrustedPublicKeys();
+  if (trustedKeys.has(signaturePublicKey)) {
+    return { ok: true, error: "", signatureStatus: "valid_trusted", cases: obj.cases };
   }
 
   return { ok: true, error: "", signatureStatus: "valid_untrusted", cases: obj.cases };
