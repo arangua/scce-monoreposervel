@@ -8,6 +8,7 @@ import { checkLocalDivergence } from "./domain/localDivergence";
 import { isSlaVencido, slaMinutesForCriticality } from "./domain/caseSla";
 import { buildCaseStatusPatch } from "./domain/caseStatusPatch";
 import { validateCaseClosePreconditions } from "./domain/caseCloseValidation";
+import { validateEnGestionPrecondition } from "./domain/caseStatusGuards";
 import { getRecommendation } from "./domain/recommendation";
 import { recColor } from "./domain/theme";
 import { themeColor } from "./theme";
@@ -1492,7 +1493,8 @@ export default function App(){
     const c=cases.find(x=>x.id===caseId);
     if(!c)return;
     if(!canDo("update",currentUser,c)&&!canDo("close",currentUser,c))return notify(UI_TEXT.errors.unauthorized,"error");
-    if(newStatus==="En gestión"&&c.status==="Nuevo"&&!c.bypass)return notify("❌ "+UI_TEXT.errors.recepcionarPrimero,"error");
+    const enGestionGuardErr=validateEnGestionPrecondition({currentStatus:c.status,nextStatus:newStatus,bypass:c.bypass});
+    if(enGestionGuardErr==="mustRecepcionarFirst")return notify("❌ "+UI_TEXT.errors.recepcionarPrimero,"error");
     let closedSuccess = false;
     if(newStatus==="Cerrado"){
       const closeErr=validateCaseClosePreconditions({bypassFlagged:c.bypassFlagged,bypassValidated:c.bypassValidated,actions:c.actions,decisions:c.decisions,status:c.status,closingMotivo:c.closingMotivo});
