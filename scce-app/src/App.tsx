@@ -316,7 +316,7 @@ function genId(region: RegionCode, commune: CommuneCode, seq: number): string {
   return `${region}-${new Date().getFullYear()}-${commune}-${String(seq).padStart(3, "0")}`;
 }
 function calcCriticality(ev: Record<string, number> | null | undefined): { criticality: Criticality; score: number; recommendation: string } {
-  const vals = Object.values(ev ?? {}) as number[];
+  const vals = Object.values(ev ?? {});
   const max = vals.length ? Math.max(...vals) : 0;
   const sum = vals.reduce((a: number, b: number) => a + b, 0);
 
