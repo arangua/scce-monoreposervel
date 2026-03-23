@@ -134,7 +134,7 @@ function Row({
           </div>
         </div>
         <div style={{ fontSize: "11px", color: themeColor("mutedAlt"), whiteSpace: "nowrap" }}>
-          {right ?? ""}
+          {right}
         </div>
       </div>
     </button>
