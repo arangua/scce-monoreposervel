@@ -24,7 +24,7 @@ export function isSlaVencido(c: {
   status?: string;
   criticality?: string;
 }): boolean {
-  if (!c.createdAt || ["Resuelto", "Cerrado"].includes(c.status || "")) return false;
+  if (!c.createdAt || ["Resuelto", "Cerrado"].includes(c.status ?? "")) return false;
 
   const slaKey = normalizeSlaLevel(c.criticality);
   const slaMin = SLA_MINUTES[slaKey] ?? 120;
