@@ -45,7 +45,6 @@ export function verifyChain(
   // --- Guardrail runtime mínimo (Fase 5.1-2) ---
   if (!Array.isArray(events)) return { ok: false, failIndex: 0 };
 
-  let prev = "00000000";
   for (let i = 0; i < events.length; i++) {
     // --- Guardrail runtime mínimo (Fase 5.1-3) ---
     const e: unknown = events[i];
@@ -53,9 +52,8 @@ export function verifyChain(
     if (typeof e.hash !== "string" || typeof e.prevHash !== "string") return { ok: false, failIndex: i };
 
     const ev = events[i];
-    if (ev.hash !== chainHash(ev.prevHash !== undefined ? ev.prevHash : prev, ev))
+    if (ev.hash !== chainHash(ev.prevHash, ev))
       return { ok: false, failIndex: i };
-    prev = ev.hash;
   }
   return { ok: true, failIndex: -1 };
 }
