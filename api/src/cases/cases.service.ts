@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   NotFoundException,
   ConflictException,
@@ -10,6 +11,18 @@ import { ScceCtx } from "../auth/ctx.decorator";
 import { PrismaService } from "../prisma.service";
 import { sha256 } from "../common/hash";
 import { CreateCaseDto, CreateCaseEventDto } from "./dto";
+import {
+  buildCloseValidationInputFromOperationalState,
+  validateCaseClosePreconditions,
+} from "./closeValidation";
+
+const INITIAL_OPERATIONAL_STATE = {
+  bypassFlagged: false,
+  bypassValidated: null,
+  actions: [] as unknown[],
+  decisions: [] as unknown[],
+  status: "Nuevo",
+};
 
 function regionWhere(ctx: ScceCtx) {
   if (!ctx.regionScopeMode) return {};
@@ -107,6 +120,13 @@ export class CasesService {
         communeCode: dto.communeCode,
         localCode: dto.localCode,
         localSnapshot: (dto.localSnapshot ?? undefined) as Prisma.InputJsonValue | undefined,
+        operationalState: {
+          bypassFlagged: INITIAL_OPERATIONAL_STATE.bypassFlagged,
+          bypassValidated: INITIAL_OPERATIONAL_STATE.bypassValidated,
+          actions: [...INITIAL_OPERATIONAL_STATE.actions],
+          decisions: [...INITIAL_OPERATIONAL_STATE.decisions],
+          status: INITIAL_OPERATIONAL_STATE.status,
+        } as Prisma.InputJsonValue,
       },
     });
 
@@ -207,6 +227,21 @@ export class CasesService {
 
     return this.prisma.$transaction(
       async (tx) => {
+        if (dto.eventType === "CASE_CLOSED") {
+          const fresh = await tx.case.findFirst({
+            where: { id: caseId, contextType, contextId },
+          });
+          if (!fresh) throw new NotFoundException("Caso no encontrado");
+          const closeInput = buildCloseValidationInputFromOperationalState(
+            fresh.operationalState,
+            dto.reason,
+          );
+          const closeErr = validateCaseClosePreconditions(closeInput);
+          if (closeErr) {
+            throw new BadRequestException(`validateCaseClosePreconditions:${closeErr}`);
+          }
+        }
+
         // Último evento del caso para encadenar prevHash
         const last = await tx.event.findFirst({
           where: { caseId },

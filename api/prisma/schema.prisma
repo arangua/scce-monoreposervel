@@ -87,6 +87,7 @@ model Case {
   communeCode   String
   localCode     String
   localSnapshot Json?
+  operationalState Json?
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 
