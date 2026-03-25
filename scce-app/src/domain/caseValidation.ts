@@ -30,7 +30,7 @@ export function validateCaseSchema(
     if (
       isRegionCode(region) &&
       isCommuneCode(commune) &&
-      !findActiveLocal(catalog, region, commune, c.local ?? "")
+      !findActiveLocal(catalog, region, commune, c.local)
     ) {
       e.push(`Local "${c.local}" no está activo en el catálogo.`);
     }
