@@ -1,43 +1,34 @@
 /**
- * Regresión: criterio "nivel central" (OPERACION/GLOBAL ⇒ opción ALL, activeRegion ALL una vez).
+ * Regresión: criterio "nivel central" según membership activo.
  */
 import { describe, it, expect } from "vitest";
 import { isCentralFromContext } from "./authSession";
 
 describe("isCentralFromContext", () => {
-  it("returns true when membership is OPERACION/GLOBAL (API central)", () => {
-    expect(
-      isCentralFromContext({ regionCode: "ADM" }, undefined)
-    ).toBe(true);
-    expect(
-      isCentralFromContext({ regionCode: "ADM" }, "PESE")
-    ).toBe(true);
+  it("returns true when membership is OPERACION and regionCode is ADM", () => {
+    expect(isCentralFromContext({ contextType: "OPERACION", regionCode: "ADM" })).toBe(true);
   });
 
-  it("returns false when contextId is not GLOBAL", () => {
+  it("returns false when regionCode is not ADM", () => {
+    expect(isCentralFromContext({ contextType: "OPERACION", regionCode: "TRP" })).toBe(false);
     expect(
-      isCentralFromContext({ regionCode: "TRP" }, undefined)
-    ).toBe(false);
-    expect(
-      isCentralFromContext({ regionCode: "TRP", regionScopeMode: "LIST" }, undefined)
+      isCentralFromContext({
+        contextType: "OPERACION",
+        regionCode: "TRP",
+        regionScopeMode: "LIST",
+      })
     ).toBe(false);
   });
 
   it("returns false when contextType is not OPERACION", () => {
-    expect(
-      isCentralFromContext({ role: "PESE" }, undefined)
-    ).toBe(false);
+    expect(isCentralFromContext({ contextType: "SIMULACION", role: "PESE" })).toBe(false);
   });
 
-  it("returns true for demo central roles even without membership", () => {
-    expect(isCentralFromContext(null, "NIVEL_CENTRAL")).toBe(true);
-    expect(isCentralFromContext(null, "NIVEL_CENTRAL_SIM")).toBe(true);
-    expect(isCentralFromContext(null, "ADMIN_PILOTO")).toBe(true);
+  it("returns false when membership is null (role is ignored)", () => {
+    expect(isCentralFromContext(null)).toBe(false);
   });
 
-  it("returns false when membership is null and demo role is not central", () => {
-    expect(isCentralFromContext(null, undefined)).toBe(false);
-    expect(isCentralFromContext(null, "PESE")).toBe(false);
-    expect(isCentralFromContext(null, "REGISTRO_SCCE")).toBe(false);
+  it("returns false when membership is null and role is not central", () => {
+    expect(isCentralFromContext(null)).toBe(false);
   });
 });

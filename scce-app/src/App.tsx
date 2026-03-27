@@ -1,5 +1,15 @@
 import React, { useState, useMemo, useEffect, useRef, forwardRef, useImperativeHandle, useCallback } from "react";
 import type { CaseItem, InstructionItem, ImpactLevel, ScopeFunctional, LocalCatalog, LocalCatalogEntry, CaseStatus, Criticality, RegionCode, CommuneCode, AuditLogEntry, CaseEventKind, CaseEvent } from "./domain/types";
+// ── R-1: helpers extraídos (2026-03-27) ──────────────────────────────────────
+import { importFail, assertStringMax, assertIdStable, assertArrayMax, isLocalSnapshot, assertUnknownItemKind, assertCaseEvent, assertIsoSoft, MAX_ID, MAX_SHORT, MAX_MED, MAX_LONG, MAX_UNKNOWN_ARRAY, MAX_TIMELINE, MAX_EVIDENCE_ITEMS, MAX_TOTAL_PAYLOAD_BYTES } from "./domain/importValidation";
+import {
+  USERS,
+  ROLE_LABELS,
+  canDo,
+  isNivelCentral,
+  type PolicyUser,
+} from "./domain/policyEngine";
+import { genId, calcCriticality, critColor, statusColor, normalizeStatus, buildSeedLog, SIM_SCENARIOS } from "./domain/caseUtils";
 import { calcCompleteness } from "./domain/caseMetrics";
 import { findActiveLocal } from "./domain/catalog";
 import { validateCaseSchema } from "./domain/caseValidation";
@@ -9,7 +19,6 @@ import { SLA_MINUTES, isSlaVencido, type SlaLevel } from "./domain/caseSla";
 import { getRecommendation } from "./domain/recommendation";
 import { recColor } from "./domain/theme";
 import { themeColor } from "./theme";
-import { chainHash } from "./domain/hash";
 import { appendEvent, verifyChain } from "./domain/audit";
 import { migrateLegacyInstructionsInCases } from "./domain/migrations/migrateLegacyInstructions";
 import { HelpDrawer } from "./components/HelpDrawer";
@@ -47,107 +56,49 @@ import {
 } from "./domain/authSession";
 import { API_BASE_URL } from "./config/runtime";
 
+// ── R-4a: vistas extraídas (2026-03-27) ──────────────────────────────────────
+import { ChecklistView } from "./components/ChecklistView";
+import { AuditView } from "./components/AuditView";
+import { SimulationView } from "./components/SimulationView";
+import { TrustView } from "./components/TrustView";
+import { ConfigView, type ElectionConfig } from "./components/ConfigView";
+
 const APP_VERSION = "1.9";
 const MIN_ELECTION_YEAR = 2026;
 
-// 6.3-2 hardening
+// ─────────────────────────────────────────────────────────────────────────────
+// R-1 REFACTOR: constantes/funciones extraídas a:
+//   domain/importValidation.ts  → helpers de assert/validación
+//   domain/policyEngine.ts      → USERS, POLICIES, canDo, isNivelCentral
+//   domain/caseUtils.ts         → genId, calcCriticality, critColor, etc.
+// Las definiciones inline eliminadas — R-2: quitar residuos.
+// ─────────────────────────────────────────────────────────────────────────────
+
 const MAX_CASES = 5000;
-const MAX_ID = 80;
-const MAX_SHORT = 200;
-const MAX_MED = 500;
-const MAX_LONG = 2000;
-// 6.3-3 hardening (arrays y timeline)
-const MAX_UNKNOWN_ARRAY = 200;
-const MAX_TIMELINE = 500;
-const MAX_EVENT_NOTE = 500;
-const MAX_EVIDENCE_ITEMS = 50;
-const MAX_TOTAL_PAYLOAD_BYTES = 5 * 1024 * 1024; // 5 MB post-parse
-// 6.3-4 fechas soft (forma + largo, sin parsear)
-const MAX_DATE_STR = 35;
-const ISO_SOFT_RE = /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})?)?$/;
-const ID_RE = /^[A-Za-z0-9_-]+$/;
 
-function importFail(msg: string): never {
-  throw new Error(msg);
-}
+type User = PolicyUser;
 
-function assertImportString(name: string, v: unknown): string {
-  if (typeof v !== "string") importFail(`Import fail-closed: "${name}" debe ser string.`);
-  const s = v.trim();
-  if (!s) importFail(`Import fail-closed: "${name}" no puede ser vacío.`);
-  return s;
-}
+type SimReport = {
+  total: number;
+  critica?: number;
+  alta?: number;
+  avgScore?: number;
+  byStatus?: Partial<Record<CaseStatus, number>>;
+  byCriticality?: Partial<Record<Criticality, number>>;
+} | null;
+type BypassCause = "" | "system_down" | "risk_imminent" | "critical_level_3" | "other";
+type BypassFormState = { active: boolean; motivo: string; cause: BypassCause; confirmed: boolean };
+type RecLevel = "high" | "medium" | "low";
+type Notification = { msg: string; type: string } | null;
 
-function assertStringMax(name: string, v: unknown, max: number, optional = false): string | undefined {
-  if (v === undefined || v === null) return optional ? undefined : importFail(`Import fail-closed: "${name}" es requerido.`);
-  const s = assertImportString(name, v);
-  if (s.length > max) importFail(`Import fail-closed: "${name}" excede máximo (${max}).`);
-  return s;
-}
-
-function assertIdStable(v: unknown): string {
-  const id = assertStringMax("case.id", v, MAX_ID, false)!;
-  if (!ID_RE.test(id)) importFail(`Import fail-closed: "case.id" contiene caracteres no permitidos. Use solo A-Z a-z 0-9 _ -`);
-  return id;
-}
-
-function assertArrayMax(name: string, v: unknown, max: number, optional = false): unknown[] | undefined {
-  if (v === undefined || v === null) return optional ? undefined : importFail(`Import fail-closed: "${name}" es requerido.`);
-  if (!Array.isArray(v)) importFail(`Import fail-closed: "${name}" debe ser arreglo.`);
-  if (v.length > max) importFail(`Import fail-closed: "${name}" excede máximo (${max}).`);
-  return v;
-}
-
-function assertPlainObject(name: string, v: unknown): Record<string, unknown> {
-  if (typeof v !== "object" || v === null || Array.isArray(v)) importFail(`Import fail-closed: "${name}" debe ser objeto.`);
-  return v as Record<string, unknown>;
-}
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null;
-}
-
-function isLocalSnapshot(v: unknown): v is {
-  idLocal: string;
-  nombre: string;
-  region: string;
-  commune: string;
-  snapshotAt: string;
-} {
-  if (!isRecord(v)) return false;
-  return (
-    typeof v.idLocal === "string" &&
-    typeof v.nombre === "string" &&
-    typeof v.region === "string" &&
-    typeof v.commune === "string" &&
-    typeof v.snapshotAt === "string"
-  );
-}
-
-function assertUnknownItemKind(name: string, v: unknown): void {
-  if (typeof v === "string") {
-    if (v.trim().length > MAX_LONG) importFail(`Import fail-closed: "${name}" string excede máximo (${MAX_LONG}).`);
-    return;
-  }
-  if (typeof v === "object" && v !== null && !Array.isArray(v)) return;
-  importFail(`Import fail-closed: "${name}" debe ser string u objeto.`);
-}
-
-function assertCaseEvent(name: string, v: unknown): void {
-  const o = assertPlainObject(name, v);
-  assertStringMax(`${name}.type`, o.type, MAX_SHORT, false);
-  assertStringMax(`${name}.at`, o.at, MAX_SHORT, false);
-  assertStringMax(`${name}.actor`, o.actor, MAX_MED, false);
-  assertStringMax(`${name}.note`, o.note, MAX_EVENT_NOTE, true);
-}
-
-function assertIsoSoft(name: string, v: unknown, optional = false): string | undefined {
-  if (v === undefined || v === null) return optional ? undefined : importFail(`Import fail-closed: "${name}" es requerido.`);
-  const s = assertImportString(name, v);
-  if (s.length > MAX_DATE_STR) importFail(`Import fail-closed: "${name}" excede máximo (${MAX_DATE_STR}).`);
-  if (!ISO_SOFT_RE.test(s)) importFail(`Import fail-closed: "${name}" no tiene forma ISO válida (soft).`);
-  return s;
-}
+type LncDraft = {
+  region?: string;
+  commune?: string;
+  local?: string;
+  origin?: { channel?: string; detectedAt?: string };
+  summary?: string;
+  [key: string]: unknown;
+};
 
 const CONFIG = {
   regions: {
@@ -171,91 +122,6 @@ const CONFIG = {
 };
 
 const DEFAULT_REGION = "TRP";
-
-const USERS = [
-  {id:"u1",name:"PESE Local",                  username:"pese1",         password:"demo",role:"PESE",               region:"TRP",commune:"IQQ"},
-  {id:"u2",name:"Delegado Junta Electoral",     username:"delegado1",     password:"demo",role:"DELEGADO_JE",        region:"TRP",commune:"IQQ"},
-  {id:"u3",name:"Funcionario DR Eventual",      username:"dr_eventual",   password:"demo",role:"DR_EVENTUAL",        region:"TRP"},
-  {id:"u4",name:"Funcionario Registro SCCE",    username:"registro",      password:"demo",role:"REGISTRO_SCCE",      region:"TRP"},
-  {id:"u5",name:"Funcionario Jefe Operaciones", username:"jefe_ops",      password:"demo",role:"JEFE_OPS",           region:"TRP"},
-  {id:"u6",name:"Funcionario Encargado Gasto",  username:"gasto",         password:"demo",role:"ENCARGADO_GASTO",    region:"TRP"},
-  {id:"u7",name:"Director Regional",            username:"director",      password:"demo",role:"DIRECTOR_REGIONAL",  region:"TRP"},
-  {id:"u8",name:"Usuario Nivel Central",        username:"nivel_central", password:"demo",role:"NIVEL_CENTRAL",      region:null},
-];
-const ROLE_LABELS = {PESE:"PESE",DELEGADO_JE:"Delegado JE",DR_EVENTUAL:"DR Eventual",REGISTRO_SCCE:"Registro SCCE",JEFE_OPS:"Jefe Ops",ENCARGADO_GASTO:"Encargado Gasto",DIRECTOR_REGIONAL:"Director Regional",NIVEL_CENTRAL:"Nivel Central",ADMIN_PILOTO:"Admin Piloto",DR:"DR",EQUIPO_REGIONAL:"Equipo Regional",NIVEL_CENTRAL_SIM:"Nivel Central Sim"} as const;
-const POLICIES = {
-  PESE:              {create:true, update:false,assign:false,close:false,bypass:false,viewAll:false,comment:true, instruct:false,recepcionar:false,export:false,validateBypass:false,manageCatalog:false},
-  DELEGADO_JE:       {create:true, update:false,assign:false,close:false,bypass:false,viewAll:false,comment:true, instruct:false,recepcionar:false,export:false,validateBypass:false,manageCatalog:false},
-  DR_EVENTUAL:       {create:true, update:true, assign:false,close:false,bypass:false,viewAll:false,comment:true, instruct:false,recepcionar:false,export:false,validateBypass:false,manageCatalog:false},
-  REGISTRO_SCCE:     {create:true, update:true, assign:true, close:false,bypass:true, viewAll:true, comment:true, instruct:false,recepcionar:true, export:true, validateBypass:false,manageCatalog:false},
-  JEFE_OPS:          {create:false,update:true, assign:true, close:false,bypass:false,viewAll:true, comment:true, instruct:false,recepcionar:false,export:true, validateBypass:false,manageCatalog:false},
-  ENCARGADO_GASTO:   {create:false,update:false,assign:false,close:false,bypass:false,viewAll:true, comment:true, instruct:false,recepcionar:false,export:false,validateBypass:false,manageCatalog:false},
-  DIRECTOR_REGIONAL: {create:true, update:true, assign:true, close:true, bypass:true, viewAll:true, comment:true, instruct:false,recepcionar:true, export:true, validateBypass:true, manageCatalog:false},
-  NIVEL_CENTRAL:     {create:false,update:false,assign:false,close:false,bypass:false,viewAll:true, comment:true, instruct:true, recepcionar:false,export:true, validateBypass:false,manageCatalog:true},
-  ADMIN_PILOTO:      {create:true, update:true, assign:true, close:true, bypass:true, viewAll:true, comment:true, instruct:false,recepcionar:true, export:true, validateBypass:true, manageCatalog:false},
-  DR:                {create:true, update:true, assign:true, close:false,bypass:true, viewAll:true, comment:true, instruct:false,recepcionar:true, export:true, validateBypass:false,manageCatalog:false},
-  EQUIPO_REGIONAL:   {create:true, update:true, assign:false,close:false,bypass:false,viewAll:true, comment:true, instruct:false,recepcionar:false,export:true, validateBypass:false,manageCatalog:false},
-  NIVEL_CENTRAL_SIM: {create:false,update:false,assign:false,close:false,bypass:false,viewAll:true, comment:true, instruct:true, recepcionar:false,export:true, validateBypass:false,manageCatalog:true},
-} as const;
-
-/** Fase 3.6 — detectar si el usuario es Nivel Central (por role en USERS). */
-function isNivelCentral(userId: string): boolean {
-  const u = USERS.find((x) => x.id === userId);
-  return (u as { role?: string } | undefined)?.role === "NIVEL_CENTRAL";
-}
-
-// =====================
-// Tipado mínimo SCCE (Enterprise)
-// =====================
-type Role = keyof typeof POLICIES;
-type PolicyAction = keyof (typeof POLICIES)[Role];
-
-type RecLevel = "high" | "medium" | "low";
-
-type Notification = { msg: string; type: string } | null;
-
-type User = {
-  id: string;
-  name: string;
-  role: Role;
-  region?: string | null;
-  username?: string;
-  password?: string;
-  commune?: string;
-  assignedLocalId?: string | null;
-};
-
-type SimReport = {
-  total: number;
-  critica?: number;
-  alta?: number;
-  avgScore?: number;
-  byStatus?: Partial<Record<CaseStatus, number>>;
-  byCriticality?: Partial<Record<Criticality, number>>;
-} | null;
-
-type BypassCause = "" | "system_down" | "risk_imminent" | "critical_level_3" | "other";
-type BypassFormState = { active: boolean; motivo: string; cause: BypassCause; confirmed: boolean };
-
-function canDo(action: PolicyAction, user: User | null, caseObj?: CaseItem | null): boolean {
-  if (!user) return false;
-  const p = POLICIES[user.role];
-  if (!p || !(p as Record<string, boolean>)[action]) return false;
-  if (caseObj && user.role !== "NIVEL_CENTRAL") {
-    if (caseObj.region && user.region && caseObj.region !== user.region) return false;
-  }
-  return true;
-}
-
-// Tipos mínimos para eliminar TS7006/TS7034 sin reescribir la app
-type LncDraft = {
-  region?: string;
-  commune?: string;
-  local?: string;
-  origin?: { channel?: string; detectedAt?: string };
-  summary?: string;
-  [key: string]: unknown;
-};
 
 // ─── CATÁLOGO ────────────────────────────────────────────────────────────────
 let _localSeq = 0;
@@ -311,102 +177,6 @@ function catalogSelfCheck(catalog: LocalCatalog): string[] {
   });
   return v;
 }
-
-// ─── UTILIDADES ──────────────────────────────────────────────────────────────
-function genId(region: RegionCode, commune: CommuneCode, seq: number): string {
-  return `${region}-${new Date().getFullYear()}-${commune}-${String(seq).padStart(3, "0")}`;
-}
-function calcCriticality(ev: Record<string, number> | null | undefined) {
-  const vals = Object.values(ev ?? {}) as number[];
-  const max = vals.length ? Math.max(...vals) : 0;
-  const sum = vals.reduce((a: number, b: number) => a + b, 0);
-
-  if(max>=3)return{criticality:"CRITICA",score:sum,recommendation:"⚠️ Escalamiento INMEDIATO al Director Regional y Nivel Central."};
-  if(sum>=8) return{criticality:"ALTA",  score:sum,recommendation:"Notificar Director Regional. SLA máx. 30 min."};
-  if(sum>=4) return{criticality:"MEDIA", score:sum,recommendation:"Gestionar a través de Registro SCCE. SLA máx. 60 min."};
-  return          {criticality:"BAJA",  score:sum,recommendation:"Gestión local. Registrar y monitorear."};
-}
-function critColor(c: Criticality): string {
-  const map = { CRITICA:themeColor("danger"), ALTA:themeColor("warning"), MEDIA:themeColor("warningAlt"), BAJA:themeColor("success") } as const;
-  return map[c] ?? themeColor("gray");
-}
-function statusColor(s: CaseStatus): string {
-  const map = {
-    "Nuevo":themeColor("purple"),
-    "Recepcionado por DR":themeColor("purpleLight"),
-    "En gestión":themeColor("primary"),
-    "Escalado":themeColor("danger"),
-    "Mitigado":themeColor("warning"),
-    "Resuelto":themeColor("success"),
-    "Cerrado":themeColor("gray"),
-  } as const;
-  return map[s] ?? themeColor("gray");
-}
-
-type UiStatus =
-  | "Nuevo"
-  | "Recepcionado por DR"
-  | "En gestión"
-  | "Escalado"
-  | "Mitigado"
-  | "Resuelto"
-  | "Cerrado";
-
-const STATUS_MAP: Record<string, UiStatus> = {
-  // backend / legacy
-  OPEN: "Nuevo",
-  NEW: "Nuevo",
-  IN_PROGRESS: "En gestión",
-  ESCALATED: "Escalado",
-  MITIGATED: "Mitigado",
-  RESOLVED: "Resuelto",
-  CLOSED: "Cerrado",
-
-  // ya en español (por si ya existen)
-  "Nuevo": "Nuevo",
-  "Recepcionado por DR": "Recepcionado por DR",
-  "En gestión": "En gestión",
-  "Escalado": "Escalado",
-  "Mitigado": "Mitigado",
-  "Resuelto": "Resuelto",
-  "Cerrado": "Cerrado",
-};
-
-function normalizeStatus(s: unknown): UiStatus | "Otros / Desconocido" {
-  const key = String(s ?? "").trim();
-  return STATUS_MAP[key] ?? "Otros / Desconocido";
-}
-type SeedEventInput = { type: string; at: string; actor: string; role: string; caseId?: string | null; summary: string };
-
-function buildSeedLog(events: SeedEventInput[]): AuditLogEntry[] {
-  const log: AuditLogEntry[] = [];
-  for (const e of events) {
-    const prevHash: string = log.length ? log[log.length - 1].hash : "00000000";
-    const ev: AuditLogEntry = {
-      eventId: uuidSimple(),
-      ...e,
-      caseId: e.caseId ?? null,
-      prevHash,
-      hash: "",
-    };
-    ev.hash = chainHash(prevHash, ev);
-    log.push(ev);
-  }
-  return log;
-}
-
-const SIM_SCENARIOS=[
-  {summary:"Urna sellada incorrectamente",      ev:{continuidad:1,integridad:2,seguridad:0,exposicion:1,capacidadLocal:2}},
-  {summary:"Vocal no se presenta",              ev:{continuidad:2,integridad:1,seguridad:0,exposicion:1,capacidadLocal:1}},
-  {summary:"Corte de luz en local",             ev:{continuidad:3,integridad:1,seguridad:2,exposicion:2,capacidadLocal:0}},
-  {summary:"Discusión entre apoderados",        ev:{continuidad:0,integridad:0,seguridad:1,exposicion:2,capacidadLocal:1}},
-  {summary:"Sistema de votación lento",         ev:{continuidad:1,integridad:0,seguridad:0,exposicion:0,capacidadLocal:1}},
-  {summary:"Cédula de identidad vencida",       ev:{continuidad:0,integridad:2,seguridad:0,exposicion:1,capacidadLocal:1}},
-  {summary:"Manifestantes frente al local",     ev:{continuidad:1,integridad:0,seguridad:2,exposicion:2,capacidadLocal:1}},
-  {summary:"Mesa sin materiales",               ev:{continuidad:2,integridad:1,seguridad:0,exposicion:0,capacidadLocal:0}},
-  {summary:"Periodista sin credencial",         ev:{continuidad:0,integridad:1,seguridad:0,exposicion:2,capacidadLocal:2}},
-  {summary:"Amenaza de bomba",                  ev:{continuidad:3,integridad:2,seguridad:3,exposicion:3,capacidadLocal:0}},
-];
 
 // ─── SEED ────────────────────────────────────────────────────────────────────
 function makeSeedCases(catalog: LocalCatalog): CaseItem[] {
@@ -506,7 +276,7 @@ export default function App(){
   const currentYear=new Date().getFullYear();
   const defaultYear=Math.max(currentYear,MIN_ELECTION_YEAR);
 
-  const [electionConfig,setElectionConfig]=useState({name:`Elecciones Generales ${defaultYear}`,date:`${defaultYear}-11-15`,year:defaultYear});
+  const [electionConfig,setElectionConfig]=useState<ElectionConfig>({name:`Elecciones Generales ${defaultYear}`,date:`${defaultYear}-11-15`,year:defaultYear});
   const [currentUser, setCurrentUser] = useState<User | null>(null);
 
   // Auth real (API)
@@ -933,13 +703,11 @@ export default function App(){
     if (!getActiveMembership()) {
       const list = ctxRes.data.memberships || [];
 
-      // 1) Si existe ADM, preferirlo como activo por defecto (modo admin)
-      const adm = list.find((m) => m.regionCode === "ADM");
-      const pick = adm ?? (list.length === 1 ? list[0] : list[0] ?? null);
-
-      if (pick) {
-        setActiveMembership(pick);
-        setActiveMembershipState(pick);
+      // BUG-003 FIX: solo auto-seleccionar si hay exactamente 1 membership.
+      // Con 2+ memberships -> Gate B (selector) aparece obligatorio.
+      if (list.length === 1) {
+        setActiveMembership(list[0]);
+        setActiveMembershipState(list[0]);
       }
     }
 
@@ -3351,387 +3119,11 @@ export default function App(){
     );
   };
 
-  // ─── AUDIT VIEW ───────────────────────────────────────────────────────────
-  const AuditView=()=>{
-    const{ok,failIndex}=chainResult;
-    return(
-      <div>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:6}}>
-          <h2 style={{margin:0,fontSize:"16px"}}>Auditoría — Cadena Hash</h2>
-          <div style={{display:"flex",gap:6,alignItems:"center"}}>
-            <Tooltip content={ok ? "Cadena íntegra (hashes coinciden)" : "Cadena comprometida (revisar integridad desde el índice indicado)"}>
-              <Badge
-                style={{ ...S.badge(ok ? themeColor("success") : themeColor("danger")), cursor: "help" }}
-                size="sm"
-              >
-                {ok ? `🔗 Íntegra (${auditLog.length} eventos)` : `⚠️ Comprometida en evento ${failIndex}`}
-              </Badge>
-            </Tooltip>
-            {canDo("export",currentUser)&&<button style={S.btn("dark")} onClick={exportAuditCSV}>⬇ CSV</button>}
-          </div>
-        </div>
-        <div style={S.card}>
-          <div style={{display:"grid",gridTemplateColumns:"110px 150px 100px 100px 1fr 80px",gap:4,padding:"4px 0",borderBottom:"1px solid #e5e7eb",fontSize:"10px",color:themeColor("mutedDark"),fontWeight:700}}>
-            <span>TIMESTAMP</span><span>TIPO</span><span>ACTOR</span><span>CASO</span><span>RESUMEN</span><span>HASH</span>
-          </div>
-          <div style={{maxHeight:500,overflowY:"auto"}}>
-            {[...auditLog].reverse().map((e,i)=>{
-              const u=USERS.find(u=>u.id===e.actor);
-              const realIdx=auditLog.length-1-i;
-              const isFail=!ok&&realIdx===failIndex;
-              const tc: Record<string, string> = {CASE_CREATED:themeColor("success"),BYPASS_USED:themeColor("warning"),BYPASS_FLAGGED:themeColor("danger"),ESCALATED:themeColor("danger"),STATUS_CHANGED:themeColor("warningAlt"),ACTION_ADDED:themeColor("mutedAlt"),EXPORT_DONE:themeColor("purple"),LOCAL_CREATED:themeColor("success"),LOCAL_DEACTIVATED:themeColor("danger"),LOCAL_REACTIVATED:themeColor("warning"),LOCAL_ELECTION_TOGGLED:themeColor("purpleLight")};
-              return<div key={i} style={{display:"grid",gridTemplateColumns:"110px 150px 100px 100px 1fr 80px",gap:4,padding:"4px 0",borderBottom:"1px solid #e5e7eb",fontSize:"10px",background:isFail?themeColor("legacyRedBlock"):"transparent"}}>
-                <span style={{color:themeColor("mutedDark")}}>{fmtDate(e.at)}</span>
-                <span style={{color:tc[e.type]||themeColor("muted"),fontWeight:600}}>{e.type}</span>
-                <span style={{color:themeColor("muted")}}>{u?.name||e.actor}</span>
-                <span style={{color:themeColor("mutedDark"),fontFamily:"monospace"}}>{e.caseId?.slice(-10)||"—"}</span>
-                <span style={{color:themeColor("mutedAlt")}}>{e.summary}</span>
-                <span style={{color:isFail?themeColor("danger"):themeColor("legacyGrayBorder"),fontFamily:"monospace"}}>{e.hash}</span>
-              </div>;
-            })}
-          </div>
-        </div>
-      </div>
-    );
-  };
+  // ── R-4a: AuditView, SimulationView, ChecklistView → components/ ──────────
 
-  // ─── SIMULATION VIEW ──────────────────────────────────────────────────────
-  const SimulationView=()=>(
-    <div>
-      <h2 style={{margin:"0 0 12px",fontSize:"16px"}}>Simulación de Día de Elección</h2>
-      <div style={{...S.card,marginBottom:10,border:"1px solid #6366f144"}}>
-        <div style={{color:themeColor("mutedAlt"),fontSize:"11px",marginBottom:8}}>Genera 10 incidentes para entrenamiento. Los casos incluyen snapshot de local (v1.9).</div>
-        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-          <button style={S.btn("primary")} onClick={runSimulation}>▶ Generar Simulación</button>
-          {simCases.length>0&&<button style={S.btn("warning")} onClick={loadSimCases}>Cargar en Dashboard</button>}
-        </div>
-      </div>
-      {simReport&&(
-        <div style={{...S.g4,marginBottom:10}}>
-          {[{l:"Total",v:simReport.total,c:themeColor("primary")},{l:"Críticos",v:simReport.critica,c:themeColor("danger")},{l:"Altos",v:simReport.alta,c:themeColor("warning")},{l:"Score prom.",v:simReport.avgScore,c:themeColor("warningAlt")}].map(k=>(
-            <div key={k.l} style={S.card}><div style={{color:k.c,fontSize:"22px",fontWeight:700}}>{k.v}</div><div style={{color:themeColor("muted"),fontSize:"11px"}}>{k.l}</div></div>
-          ))}
-        </div>
-      )}
-      {simCases.map(c=>(
-        <div key={c.id} style={{...S.card,borderLeft:`3px solid ${critColor(c.criticality)}`,marginBottom:4}}>
-          <div style={{display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:4}}>
-            <div style={{display:"flex",gap:4,alignItems:"center",flexWrap:"wrap"}}>
-              <span style={{fontFamily:"monospace",color:themeColor("muted"),fontSize:"10px"}}>{c.id}</span>
-              <Badge style={S.badge(critColor(c.criticality))} size="sm">{c.criticality}</Badge>
-              <span style={{fontSize:"11px",fontWeight:600}}>{c.summary}</span>
-            </div>
-            <div style={{display:"flex",gap:4,alignItems:"center"}}>
-              <span style={{fontSize:"10px",color:themeColor("infoIcon")}}>🏫 {c.local}</span>
-              {c.localSnapshot&&<span style={{fontSize:"9px",color:themeColor("purple")}}>📸</span>}
-            </div>
-          </div>
-        </div>
-      ))}
-      {simCases.length>0&&!simSurvey.submitted&&(
-        <div style={{...S.card,marginTop:10,border:"1px solid #6366f144"}}>
-          <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:8}}>Encuesta post-simulación</div>
-          {[{key:"claridad",label:"¿El sistema fue claro bajo presión?"},{key:"respaldo",label:"¿Los snapshots de local aportan confianza?"}].map(q=>(
-            <div key={q.key} style={{marginBottom:8}}>
-              <div style={{fontSize:"12px",color:themeColor("mutedAlt"),marginBottom:4}}>{q.label}</div>
-              <div style={{display:"flex",gap:4}}>
-                {[1,2,3,4,5].map(n=>(
-                  <button key={n} onClick={()=>setSimSurvey(p=>({...p,[q.key]:n}))} style={{padding:"4px 10px",borderRadius:3,border:"1px solid",cursor:"pointer",background:(simSurvey as Record<string, number|boolean>)[q.key]===n?themeColor("primary"):"transparent",borderColor:(simSurvey as Record<string, number|boolean>)[q.key]===n?themeColor("primary"):themeColor("mutedDarker"),color:(simSurvey as Record<string, number|boolean>)[q.key]===n?themeColor("white"):themeColor("muted")}}>{n}</button>
-                ))}
-              </div>
-            </div>
-          ))}
-          <button style={S.btn("success")} onClick={()=>setSimSurvey(p=>({...p,submitted:true}))}>Enviar</button>
-        </div>
-      )}
-      {simSurvey.submitted&&<div style={{...S.card,marginTop:10,color:themeColor("success"),fontWeight:600}}>✓ Encuesta registrada — Claridad: {simSurvey.claridad}/5 · Snapshots: {simSurvey.respaldo}/5</div>}
-    </div>
-  );
+  // ── R-4c: ConfigView → components/ConfigView.tsx ─────────────────────────
 
-  // ─── CHECKLIST ────────────────────────────────────────────────────────────
-  const ChecklistView=()=>{
-    const[checks,setChecks]=useState<Record<string, boolean>>({});
-    const items=[
-      {id:"c1",cat:"Pre-apertura",text:"Verificar locales activos en catálogo (activoGlobal + activoEnEleccionActual)"},
-      {id:"c2",cat:"Pre-apertura",text:"Confirmar año electoral correcto en Config"},
-      {id:"c3",cat:"Pre-apertura",text:"Revisar divergencias pendientes del catálogo (panel naranja)"},
-      {id:"c4",cat:"Pre-apertura",text:"Verificar acceso de todos los roles al SCCE"},
-      {id:"c5",cat:"Apertura",    text:"Confirmar apertura de mesas en locales críticos"},
-      {id:"c6",cat:"Apertura",    text:"Testear registro de incidente con snapshot de local"},
-      {id:"c7",cat:"Operación",   text:"Monitorear panel de divergencias en Dashboard"},
-      {id:"c8",cat:"Operación",   text:"Revisar bypass flagged pendientes de validación"},
-      {id:"c9",cat:"Operación",   text:"Verificar integridad cadena auditoría (badge verde)"},
-      {id:"c10",cat:"Cierre",     text:"Exportar CSV y JSON de casos"},
-      {id:"c11",cat:"Cierre",     text:"Exportar auditoría completa"},
-      {id:"c12",cat:"Cierre",     text:"Verificar casos sin cerrar y completitud ≥80%"},
-    ];
-    const cats=[...new Set(items.map(i=>i.cat))];
-    const done=Object.values(checks).filter(Boolean).length;
-    return(
-      <div>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-          <h2 style={{margin:0,fontSize:"16px"}}>Checklist Electoral</h2>
-          <Badge style={S.badge(done===items.length?themeColor("success"):themeColor("primary"))} size="sm">
-            {done}/{items.length}
-          </Badge>
-        </div>
-        {cats.map(cat=>(
-          <div key={cat} style={{...S.card,marginBottom:8}}>
-            <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:6}}>{cat.toUpperCase()}</div>
-            {items.filter(i=>i.cat===cat).map(it=>(
-              <label key={it.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,cursor:"pointer"}}>
-                <input type="checkbox" checked={!!checks[it.id]} onChange={e=>setChecks(p=>({...p,[it.id]:e.target.checked}))}/>
-                <span style={{color:checks[it.id]?themeColor("success"):themeColor("legacySlate"),fontSize:"12px",textDecoration:checks[it.id]?"line-through":"none"}}>{it.text}</span>
-              </label>
-            ))}
-          </div>
-        ))}
-      </div>
-    );
-  };
-
-  // ─── CONFIG VIEW ──────────────────────────────────────────────────────────
-  const ConfigView=()=>{
-    const[draft,setDraft]=useState({...electionConfig});
-    const[confirmYear,setConfirmYear]=useState(false);
-    const yearChanged=draft.year!==electionConfig.year;
-    const activeCatalogCount=localCatalog.filter(l=>l.activoEnEleccionActual).length;
-    function applyConfig(){
-      if(!currentUser)return;
-      if(yearChanged&&!confirmYear)return notify("Confirma el cambio de año electoral","error");
-      setElectionConfig({...draft,name:draft.name||`Elecciones Generales ${draft.year}`});
-      if(yearChanged){
-        setAuditLog(prev=>appendEvent(prev,"ELECTION_YEAR_CHANGED",currentUser.id,currentUser.role,null,`Año: ${electionConfig.year} → ${draft.year}. Locales activos: ${activeCatalogCount}`));
-        notify(`Año actualizado a ${draft.year}. Revise activación de locales en Catálogo.`,"warning");
-      } else {
-        notify("Configuración guardada","success");
-      }
-      setConfirmYear(false);
-    }
-    return(
-      <div>
-        <h2 style={{margin:"0 0 12px",fontSize:"16px"}}>Configuración</h2>
-        <div style={{...S.card,marginBottom:10}}>
-          <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:10}}>DATOS DE LA ELECCIÓN</div>
-          <div style={{...S.g2,marginBottom:8}}>
-            <div>
-              <label style={S.lbl}>Nombre del proceso</label>
-              <input style={S.inp} value={draft.name} onChange={e=>setDraft(p=>({...p,name:e.target.value}))}/>
-            </div>
-            <div>
-              <label style={S.lbl}>Fecha</label>
-              <input style={S.inp} type="date" value={draft.date} onChange={e=>setDraft(p=>({...p,date:e.target.value}))}/>
-            </div>
-          </div>
-          <div style={{marginBottom:10}}>
-            <label style={S.lbl}>Año Electoral (≥{MIN_ELECTION_YEAR})</label>
-            <div style={{display:"flex",gap:6,alignItems:"flex-start",flexWrap:"wrap"}}>
-              <input style={{...S.inp,width:100}} type="number" min={MIN_ELECTION_YEAR} max={2099} value={draft.year}
-                onChange={e=>{const y=parseInt(e.target.value);if(y>=MIN_ELECTION_YEAR&&y<=2099){setDraft(p=>({...p,year:y,name:`Elecciones Generales ${y}`,date:`${y}-11-15`}));setConfirmYear(false);}}}
-              />
-              {yearChanged&&(
-                <div style={{...S.card,background:themeColor("orangeBlock"),border:"1px solid #f9731644",padding:"8px 10px",flex:1}}>
-                  <div style={{color:themeColor("warning"),fontSize:"11px",fontWeight:600,marginBottom:4}}>⚠️ Cambio: {electionConfig.year} → {draft.year}</div>
-                  <div style={{color:themeColor("muted"),fontSize:"10px",marginBottom:6}}>{activeCatalogCount} local(es) activos en elección actual. Snapshots existentes quedan intactos.</div>
-                  <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}>
-                    <input type="checkbox" checked={confirmYear} onChange={e=>setConfirmYear(e.target.checked)}/>
-                    <span style={{fontSize:"11px",color:themeColor("warning"),fontWeight:600}}>Confirmo el cambio de año</span>
-                  </label>
-                </div>
-              )}
-            </div>
-          </div>
-          <button style={S.btn("success")} onClick={applyConfig}>Guardar configuración</button>
-        </div>
-        <div style={{...S.card,marginBottom:10}}>
-          <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:6}}>INFORMACIÓN DEL SISTEMA</div>
-          <div style={{fontSize:"12px",color:themeColor("muted")}}>
-            {[["Versión",`SCCE v${APP_VERSION}`],["Elección activa",electionConfig.name],["Año electoral",electionConfig.year],["Locales en catálogo",localCatalog.length],["Activos en elección",activeCatalogCount],["Cadena auditoría",chainResult.ok?"ÍNTEGRA ✓":"COMPROMETIDA ⚠️"],["Divergencias activas",divergencias.length]].map(([l,v])=>(
-              <div key={l} style={{marginBottom:3}}><span style={{color:themeColor("mutedDark")}}>{l}:</span> <span style={{color:themeColor("mutedAlt")}}>{String(v)}</span></div>
-            ))}
-            <div style={{marginTop:6,color:themeColor("mutedDarker"),fontSize:"10px"}}>Sin backend · Sin BD · Auditoría append-only · Snapshots v1.9</div>
-          </div>
-        </div>
-        <div id="config-reset" style={{...S.card,scrollMarginTop:80}}>
-          <div style={{color:themeColor("mutedAlt"),fontSize:"11px",fontWeight:600,marginBottom:6}}>RESETEAR SISTEMA</div>
-          <div style={{color:themeColor("muted"),fontSize:"11px",marginBottom:6}}>Restaura datos de demostración. No reversible.</div>
-          <button style={S.btn("danger")} onClick={()=>{if(window.confirm("¿Resetear todo el sistema?"))doReset();}}>Reset Demo</button>
-        </div>
-      </div>
-    );
-  };
-
-  // ─── FIRMA Y CONFIANZA (4.3.b) ─────────────────────────────────────────────
-  const TrustView = () => {
-    const [status, setStatus] = useState<{ cryptoAvailable: boolean; hasKey: boolean; trustedCount: number } | null>(null);
-    const [entriesWithFp, setEntriesWithFp] = useState<{ alias: string; addedAt: string; reason: string; publicKeyB64: string; fingerprint: string }[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [addForm, setAddForm] = useState({ alias: "", publicKeyB64: "", reason: "" });
-
-    const load = async () => {
-      setLoading(true);
-      let cryptoAvailable = false;
-      try {
-        await crypto.subtle.digest("SHA-256", new Uint8Array(1));
-        cryptoAvailable = true;
-      } catch {
-        cryptoAvailable = false;
-      }
-      const hasKey = await hasSigningKey();
-      const entries = await getTrustedEntries();
-      const trustedCount = entries.length;
-      const withFp = await Promise.all(
-        entries.map(async (e) => ({
-          ...e,
-          fingerprint: await publicKeyFingerprintShort(e.publicKeyB64),
-        }))
-      );
-      setStatus({ cryptoAvailable, hasKey, trustedCount });
-      setEntriesWithFp(withFp);
-      setLoading(false);
-    };
-
-    useEffect(() => {
-      void load();
-    }, []);
-
-    const recommendation =
-      status == null
-        ? ""
-        : !status.cryptoAvailable
-          ? (UI_TEXT.misc.trustRecommendationNoSupport ?? "Usar sin firma.")
-          : !status.hasKey
-            ? (UI_TEXT.misc.trustRecommendationNoKey ?? "Crear llave para firmar exports.")
-            : (UI_TEXT.misc.trustRecommendationOk ?? "Puedes firmar y verificar autoría.");
-
-    const handleAdd = async () => {
-      const alias = addForm.alias.trim();
-      const pub = addForm.publicKeyB64.trim();
-      const reason = addForm.reason.trim();
-      if (alias.length < 3) return notify(UI_TEXT.errors.trustAddInvalid ?? "Revisa alias, clave pública y motivo.", "error");
-      if (reason.length < 5) return notify(UI_TEXT.errors.trustAddInvalid ?? "Revisa alias, clave pública y motivo.", "error");
-      let validB64 = false;
-      try {
-        atob(pub.replace(/\s/g, ""));
-        if (pub.length >= 40 && pub.length <= 500) validB64 = true;
-      } catch {
-        validB64 = false;
-      }
-      if (!validB64) return notify(UI_TEXT.errors.trustAddInvalid ?? "Revisa alias, clave pública y motivo.", "error");
-      try {
-        await addTrustedKey({ publicKeyB64: pub, alias, reason });
-        const fp = await publicKeyFingerprintShort(pub);
-        if (currentUser?.id)
-          setAuditLog((prev) =>
-            appendEvent(prev, "TRUST_KEY_ADDED", currentUser.id, currentUser.role, null, `${alias} – ${fp}`)
-          );
-        notify(UI_TEXT.misc.trustAddedOk ?? "Firmante agregado a confianza.", "success");
-        setAddForm({ alias: "", publicKeyB64: "", reason: "" });
-        void load();
-      } catch {
-        notify(UI_TEXT.errors.trustAddFailed ?? "No se pudo agregar el firmante.", "error");
-      }
-    };
-
-    const handleRemove = async (publicKeyB64: string, alias: string, fingerprint: string) => {
-      if (!globalThis.confirm(`¿Quitar a "${alias}" de la lista de confianza?`)) return;
-      try {
-        await removeTrustedKey(publicKeyB64);
-        if (currentUser?.id)
-          setAuditLog((prev) =>
-            appendEvent(prev, "TRUST_KEY_REMOVED", currentUser.id, currentUser.role, null, `${alias} – ${fingerprint}`)
-          );
-        notify(UI_TEXT.misc.trustRemovedOk ?? "Firmante eliminado de confianza.", "success");
-        void load();
-      } catch {
-        notify(UI_TEXT.errors.trustRemoveFailed ?? "No se pudo quitar el firmante.", "error");
-      }
-    };
-
-    if (loading && status == null) return <div style={S.card}>Cargando…</div>;
-
-    return (
-      <div>
-        <h2 style={{ margin: "0 0 12px", fontSize: "16px" }}>
-          {UI_TEXT.labels.trustPanelTitle ?? "Firma y confianza"}
-        </h2>
-        <button style={{ ...S.btn("dark"), marginBottom: 12 }} onClick={() => setView("dashboard")}>← Volver</button>
-
-        <div style={{ ...S.card, marginBottom: 10 }}>
-          <div style={{ color: themeColor("mutedAlt"), fontSize: "11px", fontWeight: 600, marginBottom: 8 }}>
-            {UI_TEXT.labels.trustStatusTitle ?? "Estado de verificación"}
-          </div>
-          <div style={{ fontSize: "12px", color: themeColor("legacySlate") }}>
-            <div style={{ marginBottom: 4 }}>
-              La verificación de autoría está:{" "}
-              <strong>{status?.cryptoAvailable ? (UI_TEXT.misc.trustVerificationAvailable ?? "Disponible") : (UI_TEXT.misc.trustVerificationUnavailable ?? "No disponible")}</strong>
-            </div>
-            <div style={{ marginBottom: 4 }}>
-              Llave local:{" "}
-              <strong>{status?.hasKey ? (UI_TEXT.misc.trustLocalKeyConfigured ?? "Configurada") : (UI_TEXT.misc.trustLocalKeyNotConfigured ?? "No configurada")}</strong>
-            </div>
-            <div style={{ marginBottom: 4 }}>
-              Firmantes confiables: <strong>{status?.trustedCount ?? 0}</strong>
-            </div>
-            <div style={{ marginTop: 6, color: themeColor("mutedAlt") }}>{recommendation}</div>
-          </div>
-        </div>
-
-        <div style={{ ...S.card, marginBottom: 10 }}>
-          <div style={{ color: themeColor("mutedAlt"), fontSize: "11px", fontWeight: 600, marginBottom: 8 }}>
-            {UI_TEXT.labels.trustTrustedListTitle ?? "Firmantes confiables"}
-          </div>
-          {entriesWithFp.length === 0 ? (
-            <div style={{ color: themeColor("muted"), fontSize: "12px" }}>Ninguno. Agrega uno más abajo.</div>
-          ) : (
-            <table style={{ width: "100%", fontSize: "12px", borderCollapse: "collapse" }}>
-              <thead>
-                <tr style={{ textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>
-                  <th style={{ padding: "6px 8px" }}>{UI_TEXT.labels.trustAliasLabel ?? "Alias"}</th>
-                  <th style={{ padding: "6px 8px" }}>{UI_TEXT.labels.trustFingerprintLabel ?? "Huella"}</th>
-                  <th style={{ padding: "6px 8px" }}>Agregada</th>
-                  <th style={{ padding: "6px 8px" }}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {entriesWithFp.map((e) => (
-                  <tr key={e.publicKeyB64} style={{ borderBottom: "1px solid #1e293b" }}>
-                    <td style={{ padding: "6px 8px" }}>{e.alias}</td>
-                    <td style={{ padding: "6px 8px", fontFamily: "monospace", fontSize: "11px" }}>{e.fingerprint}</td>
-                    <td style={{ padding: "6px 8px", color: themeColor("muted") }}>{e.addedAt.slice(0, 10)}</td>
-                    <td style={{ padding: "6px 8px" }}>
-                      <button type="button" style={{ ...S.btn("danger"), fontSize: "10px", padding: "2px 8px" }} onClick={() => handleRemove(e.publicKeyB64, e.alias, e.fingerprint)}>🗑 Quitar</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-
-        <div style={{ ...S.card, marginBottom: 10 }}>
-          <div style={{ color: themeColor("mutedAlt"), fontSize: "11px", fontWeight: 600, marginBottom: 8 }}>
-            {UI_TEXT.labels.trustAddTitle ?? "Agregar firmante confiable"}
-          </div>
-          <div style={{ marginBottom: 8 }}>
-            <label style={S.lbl}>{UI_TEXT.labels.trustAliasLabel ?? "Alias"}</label>
-            <input style={S.inp} value={addForm.alias} onChange={(e) => setAddForm((p) => ({ ...p, alias: e.target.value }))} placeholder="Ej: SERVEL Tarapacá – Piloto" />
-          </div>
-          <div style={{ marginBottom: 8 }}>
-            <label style={S.lbl}>{UI_TEXT.labels.trustPublicKeyLabel ?? "Clave pública"}</label>
-            <textarea style={{ ...S.inp, minHeight: 80 }} value={addForm.publicKeyB64} onChange={(e) => setAddForm((p) => ({ ...p, publicKeyB64: e.target.value }))} placeholder="Pega aquí la clave pública en base64" />
-          </div>
-          <div style={{ marginBottom: 8 }}>
-            <label style={S.lbl}>{UI_TEXT.labels.trustReasonLabel ?? "Motivo"}</label>
-            <textarea style={{ ...S.inp, minHeight: 50 }} value={addForm.reason} onChange={(e) => setAddForm((p) => ({ ...p, reason: e.target.value }))} placeholder="Ej: Clave oficial para intercambio entre equipos" />
-          </div>
-          <button style={S.btn("success")} onClick={handleAdd}>
-            {UI_TEXT.misc.trustAddButton ?? "➕ Agregar a confianza"}
-          </button>
-        </div>
-      </div>
-    );
-  };
+  // ── R-4b: TrustView → components/TrustView.tsx ───────────────────────────
 
   const OpHome = ({ onNew: _onNew }: { onNew: () => void }) => {
     void _onNew;
@@ -3918,12 +3310,40 @@ export default function App(){
         {view==="new_case"&&<NewCaseForm/>}
         {view==="detail"&&<CaseDetail/>}
         {view==="catalog"&&<CatalogView/>}
-        {view==="audit"&&<AuditView/>}
+        {view==="audit"&&<AuditView
+          auditLog={auditLog}
+          setAuditLog={setAuditLog}
+          chainResult={chainResult}
+          currentUser={currentUser}
+          notify={notify}
+        />}
         {view==="reports"&&<Reports/>}
-        {view==="simulation"&&<SimulationView/>}
+        {view==="simulation"&&<SimulationView
+          simCases={simCases}
+          simReport={simReport}
+          simSurvey={simSurvey}
+          setSimSurvey={setSimSurvey}
+          onRunSimulation={runSimulation}
+          onLoadSimCases={loadSimCases}
+        />}
         {view==="checklist"&&<ChecklistView/>}
-        {view==="config"&&<ConfigView/>}
-        {view==="trust"&&<TrustView/>}
+        {view==="config"&&<ConfigView
+          electionConfig={electionConfig}
+          setElectionConfig={setElectionConfig}
+          localCatalog={localCatalog}
+          currentUser={currentUser}
+          setAuditLog={setAuditLog}
+          notify={notify}
+          chainResult={chainResult}
+          divergencias={divergencias}
+          onReset={doReset}
+        />}
+        {view==="trust"&&<TrustView
+          currentUser={currentUser}
+          setAuditLog={setAuditLog}
+          notify={notify}
+          onBack={() => setView("dashboard")}
+        />}
       </div>
       <HelpDrawer open={helpOpen} onClose={()=>setHelpOpen(false)} content={helpByView[view]??helpByView.dashboard} />
     </div>
