@@ -25,41 +25,68 @@ enum RegionScopeMode {
   LIST
 }
 
-model Region {
-  id        String   @id
-  name      String
-  createdAt DateTime @default(now())
+enum CaseStatus {
+  OPEN
+  CLOSED
+}
 
+enum CriticalityLevel {
+  LEVEL_1
+  LEVEL_2
+  LEVEL_3
+  LEVEL_4
+}
+
+enum EventType {
+  CASE_CREATED
+  COMMENT_ADDED
+  INSTRUCTION_CREATED
+  CASE_CLOSED
+  ACK
+  RESOLVE
+  CHANGE_CRITICALITY
+  OPERATIONAL_VALIDATION
+  ASSIGNMENT_CHANGED
+  ACTION_ADDED
+  DECISION_ADDED
+}
+
+model Region {
+  id          String       @id
+  name        String
+  createdAt   DateTime     @default(now())
+
+  Province    Province[]
   simulations Simulation[]
 }
 
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
+  id           String       @id @default(cuid())
+  email        String       @unique
   passwordHash String
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
+  isActive     Boolean      @default(true)
+  createdAt    DateTime     @default(now())
 
-  memberships Membership[]
+  memberships  Membership[]
 }
 
 model Membership {
-  id               String           @id @default(cuid())
-  userId           String
-  contextType      ContextType
-  contextId        String
-  regionCode       String
-  role             Role
-  regionScopeMode  RegionScopeMode  @default(LIST)
-  regionScope      String[]         @default([])
-  createdAt        DateTime         @default(now())
+  id              String          @id @default(cuid())
+  userId          String
+  contextType     ContextType
+  contextId       String
+  role            Role
+  createdAt       DateTime        @default(now())
+  regionCode      String
+  regionScopeMode RegionScopeMode @default(LIST)
+  regionScope     String[]        @default([])
 
-  user User @relation(fields: [userId], references: [id])
+  user            User            @relation(fields: [userId], references: [id])
 
+  @@unique([userId, contextType, contextId, regionCode], map: "Membership_user_context_region_unique")
   @@index([contextType, contextId])
   @@index([userId])
   @@index([regionCode])
-  @@unique([userId, contextType, contextId, regionCode])
 }
 
 model Simulation {
@@ -71,24 +98,39 @@ model Simulation {
   createdBy    String
   createdAt    DateTime @default(now())
 
-  region Region @relation(fields: [regionId], references: [id])
+  region       Region   @relation(fields: [regionId], references: [id])
 
   @@index([regionId])
 }
 
 model Case {
-  id            String      @id @default(cuid())
-  contextType   ContextType
-  contextId     String
-  summary       String
-  status        String
-  criticality   String
-  regionCode    String
-  communeCode   String
-  localCode     String
-  localSnapshot Json?
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+  id               String           @id @default(cuid())
+  contextType      ContextType
+  contextId        String
+  summary          String
+  criticality      String
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  regionCode       String           @default("")
+  communeCode      String           @default("")
+  localCode        String           @default("")
+  localSnapshot    Json?
+
+  title            String
+  description      String?
+  createdByUserId  String
+  criticalityLevel CriticalityLevel
+  status           CaseStatus
+  assignedTo       String?
+
+  detail           String?
+  evaluation       Json?
+  completeness     Int?
+  actions          Json?
+  decisions        Json?
+  instructions     Json?
+
+  Event            Event[]
 
   @@index([contextType, contextId])
   @@index([regionCode, communeCode])
@@ -100,12 +142,40 @@ model Event {
   contextType ContextType
   contextId   String
   actorId     String
-  eventType   String
+  eventType   EventType
   payloadJson Json
   prevHash    String?
   hash        String
   createdAt   DateTime    @default(now())
 
+  Case        Case        @relation(fields: [caseId], references: [id])
+
   @@index([caseId])
   @@index([contextType, contextId])
+}
+
+model Commune {
+  id         String   @id
+  provinceId String
+  name       String
+  isActive   Boolean  @default(true)
+  source     String
+  updatedAt  DateTime
+  createdAt  DateTime @default(now())
+
+  Province   Province @relation(fields: [provinceId], references: [id], onDelete: Cascade)
+
+  @@index([provinceId])
+}
+
+model Province {
+  id        String    @id
+  regionId  String
+  name      String
+  createdAt DateTime  @default(now())
+
+  Commune   Commune[]
+  Region    Region    @relation(fields: [regionId], references: [id], onDelete: Cascade)
+
+  @@index([regionId])
 }

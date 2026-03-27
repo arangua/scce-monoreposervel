@@ -49,40 +49,83 @@ async function main() {
   }
   const passwordHash = await bcrypt.hash(seedPassword, 12);
 
-  // 2) 16 usuarios DR (uno por Director Regional)
-  for (const code of REGION_CODES) {
-    const email = `dr.${code.toLowerCase()}@scce.local`;
-    const user = await prisma.user.upsert({
-      where: { email },
-      update: {
-        isActive: true,
-        // NO actualizar passwordHash: la contraseña se fija solo al crear
-      },
-      create: {
-        email,
-        passwordHash,
-        isActive: true,
-      },
-    });
+  // Helper: upsert un membership dado contextType + contextId + regionCode
+  async function upsertMembership(params: {
+    userId: string;
+    contextType: "OPERACION" | "SIMULACION";
+    contextId: string;
+    regionCode: string;
+    role: "DR" | "ADMIN_PILOTO";
+    regionScopeMode: "ALL" | "LIST";
+    regionScope: string[];
+  }) {
     const existing = await prisma.membership.findFirst({
-      where: { userId: user.id, contextType: "OPERACION", contextId: "GLOBAL", regionCode: code }
+      where: {
+        userId: params.userId,
+        contextType: params.contextType,
+        contextId: params.contextId,
+        regionCode: params.regionCode,
+      }
     });
     if (existing) {
       await prisma.membership.update({
         where: { id: existing.id },
-        data: { regionScopeMode: "LIST", regionScope: [code] }
+        data: {
+          regionScopeMode: params.regionScopeMode,
+          regionScope: params.regionScope,
+          role: params.role,
+        }
       });
     } else {
       await prisma.membership.create({
         data: {
-          userId: user.id,
-          contextType: "OPERACION",
-          contextId: "GLOBAL",
-          regionCode: code,
-          role: "DR",
-          regionScopeMode: "LIST",
-          regionScope: [code]
+          userId: params.userId,
+          contextType: params.contextType,
+          contextId: params.contextId,
+          regionCode: params.regionCode,
+          role: params.role,
+          regionScopeMode: params.regionScopeMode,
+          regionScope: params.regionScope,
         }
+      });
+    }
+  }
+
+  // 2) 16 usuarios DR (solo si SEED_FULL está definido; por defecto piloto mínimo = solo admin)
+  if (process.env.SEED_FULL) {
+    for (const code of REGION_CODES) {
+      const email = `dr.${code.toLowerCase()}@scce.local`;
+      const user = await prisma.user.upsert({
+        where: { email },
+        update: {
+          isActive: true,
+          // NO actualizar passwordHash: la contraseña se fija solo al crear
+        },
+        create: {
+          email,
+          passwordHash,
+          isActive: true,
+        },
+      });
+      // OPERACION GLOBAL — su región
+      await upsertMembership({
+        userId: user.id,
+        contextType: "OPERACION",
+        contextId: "GLOBAL",
+        regionCode: code,
+        role: "DR",
+        regionScopeMode: "LIST",
+        regionScope: [code],
+      });
+      // SIMULACION SIM_1 — su región
+      await upsertMembership({
+        userId: user.id,
+        contextType: "SIMULACION",
+        contextId: "SIM_1",
+        regionCode: code,
+        role: "DR",
+        regionScopeMode: "LIST",
+        regionScope: [code],
       });
     }
   }
@@ -105,50 +148,57 @@ async function main() {
     },
   });
 
-  // Quitar memberships viejos de admin para que solo queden los 2 del piloto
+  // Quitar memberships viejos de admin para que solo queden los 4 del piloto
   await prisma.membership.deleteMany({
     where: { userId: admin.id }
   });
 
+  // 4 memberships del admin: OPERACION + SIMULACION × (DR TRP + ADMIN_PILOTO ALL)
   const adminMemberships: Array<{
+    contextType: "OPERACION" | "SIMULACION";
+    contextId: string;
     regionCode: string;
     role: "DR" | "ADMIN_PILOTO";
     regionScopeMode: "ALL" | "LIST";
     regionScope: string[];
   }> = [
-    { regionCode: "TRP", role: "DR", regionScopeMode: "LIST", regionScope: ["TRP"] },
-    { regionCode: "ADM", role: "ADMIN_PILOTO", regionScopeMode: "ALL", regionScope: [] }
+    // --- OPERACION ---
+    { contextType: "OPERACION",  contextId: "GLOBAL", regionCode: "TRP", role: "DR",          regionScopeMode: "LIST", regionScope: ["TRP"] },
+    { contextType: "OPERACION",  contextId: "GLOBAL", regionCode: "ADM", role: "ADMIN_PILOTO", regionScopeMode: "ALL",  regionScope: [] },
+    // --- SIMULACION ---
+    { contextType: "SIMULACION", contextId: "SIM_1",  regionCode: "TRP", role: "DR",          regionScopeMode: "LIST", regionScope: ["TRP"] },
+    { contextType: "SIMULACION", contextId: "SIM_1",  regionCode: "ADM", role: "ADMIN_PILOTO", regionScopeMode: "ALL",  regionScope: [] },
   ];
 
   for (const m of adminMemberships) {
-    const existing = await prisma.membership.findFirst({
-      where: { userId: admin.id, contextType: "OPERACION", contextId: "GLOBAL", regionCode: m.regionCode }
+    await upsertMembership({
+      userId: admin.id,
+      contextType: m.contextType,
+      contextId: m.contextId,
+      regionCode: m.regionCode,
+      role: m.role,
+      regionScopeMode: m.regionScopeMode,
+      regionScope: m.regionScope,
     });
-    if (existing) {
-      await prisma.membership.update({
-        where: { id: existing.id },
-        data: { regionScopeMode: m.regionScopeMode, regionScope: m.regionScope, role: m.role }
-      });
-    } else {
-      await prisma.membership.create({
-        data: {
-          userId: admin.id,
-          contextType: "OPERACION",
-          contextId: "GLOBAL",
-          regionCode: m.regionCode,
-          role: m.role,
-          regionScopeMode: m.regionScopeMode,
-          regionScope: m.regionScope
-        }
-      });
-    }
   }
 
-  console.log("✅ Seed OK — Piloto 16 DR + admin");
-  console.log("--- 16 Directores Regionales (1 membership cada uno, scope = su región) ---");
-  REGION_CODES.forEach(code => console.log("  ", `dr.${code.toLowerCase()}@scce.local`));
-  console.log("--- Admin piloto (2 memberships: DR TRP + ADMIN_PILOTO) ---");
-  console.log("  ", adminEmail);
+  console.log("\n✅ Seed OK");
+  if (process.env.SEED_FULL) {
+    console.log("--- 16 Directores Regionales (2 memberships c/u: OPERACION + SIMULACION, scope = su región) ---");
+    REGION_CODES.forEach(code => console.log(`    dr.${code.toLowerCase()}@scce.local`));
+    console.log(`    Total DR memberships: ${REGION_CODES.length * 2}`);
+  }
+  console.log("--- Admin piloto (4 memberships: DR TRP ×2 + ADMIN_PILOTO ×2, ambos contextos) ---");
+  console.log(`    ${adminEmail}`);
+  console.log(`    OPERACION/GLOBAL · TRP (DR)`);
+  console.log(`    OPERACION/GLOBAL · ADM (ADMIN_PILOTO · todas las regiones)`);
+  console.log(`    SIMULACION/SIM_1 · TRP (DR)`);
+  console.log(`    SIMULACION/SIM_1 · ADM (ADMIN_PILOTO · todas las regiones)`);
+  if (process.env.SEED_FULL) {
+    console.log(`\n    Total memberships en BD: ${REGION_CODES.length * 2 + 4} (${REGION_CODES.length} DRs ×2 + admin ×4)`);
+  } else {
+    console.log(`\n    Total memberships en BD: 4 (solo admin piloto)`);
+  }
 }
 
 main()

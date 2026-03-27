@@ -1,8 +1,12 @@
 import {
+  IsArray,
+  IsInt,
   IsIn,
   IsObject,
   IsOptional,
   IsString,
+  Max,
+  Min,
   MinLength,
   ValidateIf,
 } from "class-validator";
@@ -35,6 +39,37 @@ export class CreateCaseDto {
   @IsOptional()
   @IsObject()
   localSnapshot?: Record<string, unknown>;
+
+  @IsOptional()
+  @IsString()
+  detail?: string;
+
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsString()
+  assignedTo?: string | null;
+
+  @IsOptional()
+  @IsObject()
+  evaluation?: Record<string, number>;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(100)
+  completeness?: number;
+
+  @IsOptional()
+  @IsArray()
+  actions?: Array<Record<string, unknown>>;
+
+  @IsOptional()
+  @IsArray()
+  decisions?: Array<Record<string, unknown>>;
+
+  @IsOptional()
+  @IsArray()
+  instructions?: Array<Record<string, unknown>>;
 }
 
 // --- NUEVO: DTO para agregar eventos a un caso (append-only) ---
@@ -55,7 +90,6 @@ export class CreateCaseEventDto {
   @IsOptional()
   payloadJson?: Record<string, any>;
 
-  // Reglas mínimas para cierre (enterprise)
   @ValidateIf((o) => o.eventType === "CASE_CLOSED")
   @IsString()
   reason!: string;

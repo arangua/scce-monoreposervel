@@ -4,7 +4,7 @@ import {
   ConflictException,
   ForbiddenException,
 } from "@nestjs/common";
-import { ContextType, Prisma } from "@prisma/client";
+import { CaseStatus, ContextType, Prisma } from "@prisma/client";
 
 import { ScceCtx } from "../auth/ctx.decorator";
 import { PrismaService } from "../prisma.service";
@@ -89,21 +89,31 @@ export class CasesService {
 
   async create(dto: CreateCaseDto, ctx: ScceCtx, actorId: string) {
     if (ctx.contextType === "OPERACION" && ctx.contextId === "GLOBAL") {
-      throw new ForbiddenException(
-        "Creación de casos bloqueada en OPERACION/GLOBAL durante el piloto.",
-      );
+      const operacionEnabled = process.env.OPERACION_ENABLED === "true";
+      if (!operacionEnabled) {
+        throw new ForbiddenException(
+          "OPERACION_BLOQUEADA: La creación de casos en OPERACION/GLOBAL está deshabilitada. " +
+          "Para habilitarla, cambia OPERACION_ENABLED=true en el archivo .env del servidor."
+        );
+      }
     }
     assertRegionAllowed(ctx, dto.regionCode);
 
     const contextType = ctx.contextType;
     const contextId = ctx.contextId;
-    const status = dto.status ?? "OPEN";
+    const status: CaseStatus = dto.status === "CLOSED" ? CaseStatus.CLOSED : CaseStatus.OPEN;
     const criticality = dto.criticality ?? "MEDIA";
 
     const created = await this.prisma.case.create({
       data: {
         contextType: contextType,
         contextId: contextId,
+        title: dto.summary,
+        description: null,
+        createdByUserId: actorId,
+        criticalityLevel: (dto.criticality === "LEVEL_1" || dto.criticality === "LEVEL_2" || dto.criticality === "LEVEL_3" || dto.criticality === "LEVEL_4")
+          ? dto.criticality
+          : "LEVEL_2",
         summary: dto.summary,
         status,
         criticality,
@@ -111,6 +121,13 @@ export class CasesService {
         communeCode: dto.communeCode,
         localCode: dto.localCode,
         localSnapshot: (dto.localSnapshot ?? undefined) as Prisma.InputJsonValue | undefined,
+        detail: dto.detail ?? null,
+        assignedTo: dto.assignedTo ?? null,
+        evaluation: (dto.evaluation ?? undefined) as Prisma.InputJsonValue | undefined,
+        completeness: dto.completeness ?? null,
+        actions: (dto.actions ?? undefined) as Prisma.InputJsonValue | undefined,
+        decisions: (dto.decisions ?? undefined) as Prisma.InputJsonValue | undefined,
+        instructions: (dto.instructions ?? undefined) as Prisma.InputJsonValue | undefined,
       },
     });
 
@@ -205,7 +222,7 @@ export class CasesService {
     if (!c) throw new NotFoundException("Caso no encontrado");
 
     // --- NUEVO (enterprise): caso cerrado no admite nuevos eventos ---
-    if (c.status === "CLOSED") {
+    if (c.status === CaseStatus.CLOSED) {
       throw new ConflictException("Caso cerrado: no admite nuevos eventos");
     }
 
@@ -257,7 +274,7 @@ export class CasesService {
         if (dto.eventType === "CASE_CLOSED") {
           await tx.case.update({
             where: { id: caseId },
-            data: { status: "CLOSED", updatedAt: new Date() },
+            data: { status: CaseStatus.CLOSED, updatedAt: new Date() },
           });
         }
 

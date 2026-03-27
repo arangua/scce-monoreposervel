@@ -6,16 +6,26 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import { Request } from "express";
-import { ContextType } from "@prisma/client";
+import { ContextType, Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma.service";
 
 type AuthedUser = { userId: string; email: string };
+
+// Tipo derivado directamente del select de Prisma — sin cast manual
+const MEMBERSHIP_SELECT = {
+  id: true,
+  contextType: true,
+  contextId: true,
+  regionScopeMode: true,
+  regionScope: true,
+} satisfies Prisma.MembershipSelect;
+
+type MembershipRow = Prisma.MembershipGetPayload<{ select: typeof MEMBERSHIP_SELECT }>;
 
 declare module "express-serve-static-core" {
   interface Request {
     scceContext?: { contextType: ContextType; contextId: string };
     scceMembershipId?: string | null;
-
     scceMembership?: {
       id: string;
       contextType: ContextType;
@@ -41,30 +51,24 @@ export class ContextGuard implements CanActivate {
     const membershipId = (req.header("x-scce-membership-id") || "").trim() || null;
 
     if (membershipId) {
-      const m = await this.prisma.membership.findFirst({
+      // FIX BUG-002: select tipado con Prisma.MembershipGetPayload — sin cast manual
+      const row: MembershipRow | null = await this.prisma.membership.findFirst({
         where: { id: membershipId, userId: user.userId },
-        select: {
-          id: true,
-          contextType: true,
-          contextId: true,
-          regionScopeMode: true,
-          regionScope: true,
-        } as { id: boolean; contextType: boolean; contextId: boolean; regionScopeMode: boolean; regionScope: boolean },
+        select: MEMBERSHIP_SELECT,
       });
 
-      if (!m) {
+      if (!row) {
         throw new ForbiddenException("Invalid or inactive membership");
       }
 
-      const row = m as typeof m & { regionScopeMode?: "ALL" | "LIST"; regionScope?: string[] };
       req.scceMembershipId = row.id;
       req.scceContext = { contextType: row.contextType, contextId: row.contextId };
       req.scceMembership = {
         id: row.id,
         contextType: row.contextType,
         contextId: row.contextId,
-        regionScopeMode: row.regionScopeMode ?? "LIST",
-        regionScope: row.regionScope ?? [],
+        regionScopeMode: row.regionScopeMode,
+        regionScope: row.regionScope,
       };
       return true;
     }
