@@ -51,6 +51,13 @@ enum DecisionStage {
   CLOSED     // Etapa 8: Cerrar o reescalar
 }
 
+// FASE 2: modo operacional del sistema
+enum OperationMode {
+  NORMAL       // Jornada estándar
+  CONTINGENCIA // Incidente crítico activo — SLA reducido 50%
+  DEGRADADO    // Pérdida parcial de comunicaciones — SLA suspendido
+}
+
 // FASE 1: nivel de confianza del dato
 enum DataConfidence {
   VERIFIED  // Confirmado por ≥2 fuentes independientes
@@ -172,6 +179,9 @@ model Case {
   // JSON: { operationalMeaning, legalRisk, reputationalRisk, orientedBy, orientedAt }
   orientation      Json?
 
+  // FASE 2: timestamp cuando el caso superó su SLA
+  slaBreachAt      DateTime?
+
   // Columna legacy preservada para rollback (eliminar tras validación)
   statusLegacy     String?
 
@@ -211,6 +221,14 @@ model Commune {
   Province   Province @relation(fields: [provinceId], references: [id], onDelete: Cascade)
 
   @@index([provinceId])
+}
+
+// FASE 2: configuración global del sistema (clave/valor)
+model SystemConfig {
+  key       String   @id
+  value     String
+  updatedAt DateTime @default(now())
+  updatedBy String?
 }
 
 model Province {

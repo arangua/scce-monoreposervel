@@ -29,6 +29,7 @@ export function useAuth() {
     setCases,
     setAuthBusy,
     setAuditLog,
+    setOperationMode,
     loginForm,
   } = useAppStore();
 
@@ -104,6 +105,15 @@ export function useAuth() {
       }
     }
 
+    // FASE 2: cargar modo operacional desde API
+    const sysRes = await apiRequest<{ operationMode?: string }>("/system/config", { token });
+    if (sysRes.ok && sysRes.data.operationMode) {
+      const validModes = ["NORMAL", "CONTINGENCIA", "DEGRADADO"];
+      if (validModes.includes(sysRes.data.operationMode)) {
+        setOperationMode(sysRes.data.operationMode as "NORMAL" | "CONTINGENCIA" | "DEGRADADO");
+      }
+    }
+
     const effectiveMembership = getActiveMembership();
     if (token && effectiveMembership) {
       const headers: Record<string, string> = {};
@@ -132,6 +142,7 @@ export function useAuth() {
     setMembershipScopes,
     setCtxErr,
     setCases,
+    setOperationMode,
   ]);
 
   const doLogin = useCallback(async () => {

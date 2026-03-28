@@ -8,7 +8,7 @@
 import React from "react";
 import type { CaseItem, CaseStatus } from "../domain/types";
 import { critColor, statusColor, normalizeStatus } from "../domain/caseUtils";
-import { isSlaVencido } from "../domain/caseSla";
+import { getSlaTrafficLight, type OperationMode } from "../domain/caseSla";
 import { getRecommendation } from "../domain/recommendation";
 import { recColor } from "../domain/theme";
 import { checkLocalDivergence } from "../domain/localDivergence";
@@ -53,13 +53,23 @@ const card = {
   padding: "12px",
 } as React.CSSProperties;
 
-// ── SlaBadge ───────────────────────────────────────────────────────────────
-export function SlaBadge({ c }: { c: CaseItem }) {
-  return isSlaVencido(c) ? (
-    <Badge style={{ ...badge(themeColor("danger")) }} size="xs">
-      SLA VENCIDO
+// ── SlaBadge — FASE 2: semáforo SLA con modo operacional ──────────────────────
+export function SlaBadge({ c, mode = "NORMAL" }: { c: CaseItem; mode?: OperationMode }) {
+  const tl = getSlaTrafficLight(c, mode);
+  if (!tl.label) return null;
+
+  const colorMap = {
+    green:  themeColor("success"),
+    yellow: themeColor("warning"),
+    red:    themeColor("danger"),
+  };
+  const color = colorMap[tl.color];
+
+  return (
+    <Badge style={{ ...badge(color) }} size="xs">
+      {tl.color === "green" ? "🟢" : tl.color === "yellow" ? "🟡" : "🔴"} {tl.label}
     </Badge>
-  ) : null;
+  );
 }
 
 // ── RecBadge ───────────────────────────────────────────────────────────────
@@ -168,7 +178,7 @@ export function ClosedOverlay() {
 
 // ── CaseCard ───────────────────────────────────────────────────────────────
 export function CaseCard({ c, onClick }: { c: CaseItem; onClick: () => void }) {
-  const { localCatalog, currentUser } = useAppStore();
+  const { localCatalog, currentUser, operationMode } = useAppStore();
   const { recepcionar } = useCases({ assignedCommuneEffective: "", assignedLocalIdEffective: null });
   const div = checkLocalDivergence(c, localCatalog);
 
@@ -223,7 +233,7 @@ export function CaseCard({ c, onClick }: { c: CaseItem; onClick: () => void }) {
               SIM
             </Badge>
           )}
-          <SlaBadge c={c} />
+          <SlaBadge c={c} mode={operationMode} />
           <RecBadge c={c} />
           <DivBadge c={c} />
           <Badge style={badge(critColor(c.criticality))} size="sm">

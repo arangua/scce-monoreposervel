@@ -23,6 +23,7 @@ import { useAppStore } from "../store/useAppStore";
 import { useCases } from "../hooks/useCases";
 import { useAssignedLocalScope } from "../hooks/useAssignedLocalScope";
 import { SlaBadge, RecBadge, DivBadge, ClosedOverlay } from "./CaseCard";
+// OperationMode importado vía store
 
 const regionsMap = CONFIG_REGIONS as Record<string, { name?: string; communes?: Record<string, { name?: string }> }>;
 

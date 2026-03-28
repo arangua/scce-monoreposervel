@@ -135,6 +135,8 @@ export default function App(){
     loginErr, setLoginErr,
     ctxErr, setCtxErr,
     authBusy,
+    // Modo operacional
+    operationMode, setOperationMode,
     // Simulación
     simCases, setSimCases,
     simReport, setSimReport,
@@ -964,6 +966,25 @@ export default function App(){
             <button type="button" style={S.nBtn(uiMode === "FULL")} onClick={() => setUiModeAndPersist("FULL")} title="Vista completa (central)">Completa</button>
           </div>
           <span style={{fontSize:"10px",color:themeColor("mutedDark")}}>{electionConfig.name}</span>
+          {/* FASE 2: banner modo operacional */}
+          {operationMode !== "NORMAL" && (
+            <Badge
+              style={{
+                ...S.badge(operationMode === "CONTINGENCIA" ? themeColor("warning") : themeColor("danger")),
+                fontWeight: 800,
+                cursor: canDo("recepcionar", currentUser) ? "pointer" : "default",
+              }}
+              size="xs"
+              onClick={() => {
+                if (!canDo("recepcionar", currentUser)) return;
+                const next = operationMode === "CONTINGENCIA" ? "NORMAL" : "CONTINGENCIA";
+                setOperationMode(next);
+              }}
+              title={operationMode === "CONTINGENCIA" ? "Modo contingencia activo (SLA 50%) — click para normalizar" : "Modo degradado activo (SLA suspendido)"}
+            >
+              {operationMode === "CONTINGENCIA" ? "⚠️ CONTINGENCIA" : "🔴 DEGRADADO"}
+            </Badge>
+          )}
           {activeMembership && (
             <Badge style={{ ...S.badge(themeColor("legacyGreenDark")) }} size="xs">
               {activeMembership.contextType}/{activeMembership.contextId}

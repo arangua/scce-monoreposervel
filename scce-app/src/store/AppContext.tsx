@@ -38,6 +38,7 @@ import {
   type ApiUser,
   type Membership,
 } from "../domain/authSession";
+import { type OperationMode } from "../domain/caseSla";
 import { type PolicyUser } from "../domain/policyEngine";
 import { type ViewKey } from "../helpContent";
 import { buildCatalogSeed } from "../domain/catalog";
@@ -203,6 +204,10 @@ export interface AppStore {
   authBusy: boolean;
   setAuthBusy: Dispatch<SetStateAction<boolean>>;
 
+  // ── Modo operacional (FASE 2)
+  operationMode: OperationMode;
+  setOperationMode: Dispatch<SetStateAction<OperationMode>>;
+
   // ── Simulación ────────────────────────────────────────────────────────────
   simCases: CaseItem[];
   setSimCases: Dispatch<SetStateAction<CaseItem[]>>;
@@ -301,6 +306,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [ctxErr, setCtxErr] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
 
+  // Modo operacional (FASE 2)
+  const [operationMode, setOperationMode] = useState<OperationMode>("NORMAL");
+
   // Simulación
   const [simCases, setSimCases] = useState<CaseItem[]>([]);
   const [simReport, setSimReport] = useState<SimReport>(null);
@@ -350,6 +358,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     loginErr, setLoginErr,
     ctxErr, setCtxErr,
     authBusy, setAuthBusy,
+    // Modo operacional
+    operationMode, setOperationMode,
     // Simulación
     simCases, setSimCases,
     simReport, setSimReport,
