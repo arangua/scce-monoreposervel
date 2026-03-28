@@ -86,13 +86,13 @@ function getCaseLocalIdSafe(
 
 // ─── ESTILOS (tema claro profesional) ─────────────────────────────────────────
 const S={
-  app:{fontFamily:"'Segoe UI',system-ui,sans-serif",background:themeColor("bgApp"),color:themeColor("textPrimary"),minHeight:"100vh",fontSize:"13px",width:"100%",boxSizing:"border-box" as const},
-  nav:{background:themeColor("bgSurface"),borderBottom:"1px solid #e5e7eb",padding:"8px 16px",display:"flex",alignItems:"center",gap:"6px",flexWrap:"wrap" as const,minHeight:42},
-  nBtn:(a: boolean)=>({background:a?themeColor("primary"):"transparent",color:a?themeColor("white"):themeColor("textSecondary"),border:"none",padding:"5px 10px",borderRadius:"4px",cursor:"pointer",fontSize:"12px"}),
-  card:{background:themeColor("bgSurface"),border:"1px solid #e5e7eb",borderRadius:"6px",padding:"12px"},
-  badge:(color: string)=>({background:color+"22",color,border:"1px solid "+color+"44",borderRadius:"3px",padding:"2px 6px",fontSize:"11px",fontWeight:600}),
-  btn:(v="primary")=>({background:{primary:themeColor("primary"),success:themeColor("success"),danger:themeColor("danger"),warning:themeColor("warning"),dark:themeColor("textSecondary")}[v]||themeColor("primary"),color:themeColor("white"),border:"none",padding:"6px 12px",borderRadius:"4px",cursor:"pointer",fontSize:"12px",fontWeight:500}),
-  inp:{background:themeColor("bgSurface"),border:"1px solid #e5e7eb",borderRadius:"4px",padding:"6px 8px",color:themeColor("textPrimary"),fontSize:"13px",width:"100%",boxSizing:"border-box"} as React.CSSProperties,
+  app:{fontFamily:"'Inter',system-ui,sans-serif",background:"var(--bg-app)",color:"var(--text-primary)",minHeight:"100vh",fontSize:"13px",width:"100%",boxSizing:"border-box" as const},
+  nav:{background:"var(--bg-surface)",borderBottom:"1px solid var(--border)",padding:"0 16px",display:"flex",alignItems:"center",gap:"2px",flexWrap:"nowrap" as const,minHeight:48,boxShadow:"0 1px 4px rgba(0,0,0,0.07)",overflowX:"auto" as const,overflow:"visible" as const},
+  nBtn:(a: boolean)=>({background:a?"var(--primary)":"transparent",color:a?"#fff":"var(--text-secondary)",border:"none",padding:"5px 10px",borderRadius:"6px",cursor:"pointer",fontSize:"12px",fontWeight: a ? 600 : 400,transition:"all 0.15s"}),
+  card:{background:"var(--bg-surface)",border:"1px solid var(--border)",borderRadius:"8px",padding:"12px",boxShadow:"0 1px 3px rgba(0,0,0,0.05)"},
+  badge:(color: string)=>({background:color+"22",color,border:"1px solid "+color+"44",borderRadius:"4px",padding:"2px 8px",fontSize:"11px",fontWeight:600}),
+  btn:(v="primary")=>({background:{primary:"var(--primary)",success:"var(--success)",danger:"var(--danger)",warning:"var(--warning)",dark:"var(--text-secondary)"}[v]||"var(--primary)",color:"#fff",border:"none",padding:"6px 14px",borderRadius:"6px",cursor:"pointer",fontSize:"12px",fontWeight:600,transition:"opacity 0.15s"}),
+  inp:{background:"var(--bg-surface)",border:"1px solid var(--border)",borderRadius:"6px",padding:"7px 10px",color:"var(--text-primary)",fontSize:"13px",width:"100%",boxSizing:"border-box"} as React.CSSProperties,
   lbl:{display:"block",marginBottom:"3px",color:themeColor("textSecondary"),fontSize:"11px",fontWeight:600,textTransform:"uppercase"} as React.CSSProperties,
   g2:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px"},
   g4:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"8px"},
@@ -136,6 +136,8 @@ export default function App(){
     loginErr, setLoginErr,
     ctxErr, setCtxErr,
     authBusy,
+    // Tema visual
+    darkMode, setDarkMode,
     // Modo operacional
     operationMode, setOperationMode,
     // Simulación
@@ -251,6 +253,12 @@ export default function App(){
     return ()=>window.removeEventListener("mousedown",onDown);
   },[actionsOpen]);
   useEffect(()=>{setHelpOpen(false);},[view]);
+
+  // Sincronizar modo oscuro con DOM y localStorage
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", darkMode ? "dark" : "light");
+    localStorage.setItem("SCCE_DARK_MODE", String(darkMode));
+  }, [darkMode]);
   useEffect(() => {
     if (!currentUser) {
       setUiMode("FULL");
@@ -911,47 +919,64 @@ export default function App(){
     <div style={S.app}>
       <style>{`.tipWrap:hover .tip{display:block!important}input,select,textarea{color:var(--text-primary)!important}::-webkit-scrollbar{width:4px;height:4px}::-webkit-scrollbar-track{background:#0f1117}::-webkit-scrollbar-thumb{background:#374151;border-radius:2px}`}</style>
       <div style={S.nav}>
-        <span style={{fontWeight:800,color:themeColor("primary"),fontSize:"13px",marginRight:4,letterSpacing:.5}}>SCCE</span>
-        <span style={{color:themeColor("mutedDarker"),fontSize:"10px",marginRight:8}}>v{APP_VERSION}</span>
+        {/* Logo */}
+        <span style={{fontWeight:800,color:"var(--primary)",fontSize:"15px",marginRight:2,letterSpacing:.5,flexShrink:0}}>SCCE</span>
+        <span style={{color:"var(--text-muted)",fontSize:"10px",marginRight:10,flexShrink:0}}>v{APP_VERSION}</span>
+        <div style={{width:1,height:20,background:"var(--border)",marginRight:8,flexShrink:0}} />
         {(["dashboard","cop","catalog","audit","reports","simulation","checklist","config"] as const).map(v=>(
           <button key={v} style={S.nBtn(view===v)} onClick={()=>setView(v)}>
-            {v==="dashboard"?"Dashboard":v==="cop"?"🎯 COP":v==="catalog"?"🗂 Catálogo":v==="audit"?"🔗 Auditoría":v==="reports"?"Reportes":v==="simulation"?"Simulación":v==="checklist"?"Checklist":"Config"}
+            {v==="dashboard"?"Panel":v==="cop"?"🎯 Estado":v==="catalog"?"🗂 Catálogo":v==="audit"?"🔗 Auditoría":v==="reports"?"Reportes":v==="simulation"?"Simulación":v==="checklist"?"Verificación":"Configuración"}
           </button>
         ))}
-        <button style={{background:themeColor("greenText"),color:themeColor("white"),border:"1px solid #22c55e66",padding:"5px 12px",borderRadius:"4px",cursor:"pointer",fontSize:"12px",fontWeight:700,boxShadow:"0 0 8px #16a34a44"}} onClick={startNewCase}>+ Incidente</button>
-        <div style={{marginLeft:"auto",display:"flex",gap:6,alignItems:"center"}}>
+        <button style={{background:"var(--primary)",color:"#fff",border:"none",padding:"6px 14px",borderRadius:"6px",cursor:"pointer",fontSize:"12px",fontWeight:700,boxShadow:"0 2px 8px rgba(59,130,246,0.35)"}} onClick={startNewCase}>+ Incidente</button>
+        <div style={{marginLeft:"auto",display:"flex",gap:4,alignItems:"center",flexShrink:0}}>
           <div data-actions-menu style={{position:"relative",display:"flex",alignItems:"center"}}>
-            <button type="button" onClick={()=>setActionsOpen(v=>!v)} title="Acciones globales: Exportar / Importar / Reset Demo" style={S.nBtn(false)} aria-label="Abrir acciones globales" aria-expanded={actionsOpen}>Acciones ▾</button>
+            <button type="button" onClick={()=>setActionsOpen(v=>!v)} style={{...S.nBtn(actionsOpen),fontSize:"12px"}} aria-label="Herramientas del sistema" aria-expanded={actionsOpen}>
+              Herramientas ▾
+            </button>
             {actionsOpen&&(
-              <div style={{position:"absolute",right:0,top:"calc(100% + 6px)",minWidth:220,background:themeColor("white"),border:"1px solid rgba(0,0,0,0.12)",borderRadius:12,boxShadow:"0 12px 30px rgba(0,0,0,0.18)",padding:6,zIndex:1200}} role="menu" aria-label="Acciones globales">
-                <div style={{fontSize:10,opacity:0.7,padding:"6px 8px"}}>Atajos: Ctrl+E Export · Ctrl+I Import</div>
-                <button type="button" role="menuitem" onClick={onExportState} style={{width:"100%",textAlign:"left",padding:"8px 10px",borderRadius:10,border:"0",background:"transparent",cursor:"pointer",fontSize:12,fontWeight:800}}>
-                  📤 {UI_TEXT.buttons.exportState ?? "Exportar"}
+              <div style={{position:"absolute",right:0,top:"calc(100% + 8px)",minWidth:252,background:"var(--bg-surface)",border:"1px solid var(--border)",borderRadius:10,boxShadow:"0 8px 30px rgba(0,0,0,0.18)",padding:6,zIndex:9999}} role="menu">
+                <div style={{fontSize:10,color:"var(--text-muted)",padding:"4px 10px 6px",fontWeight:700,letterSpacing:"0.05em",textTransform:"uppercase" as const}}>Sistema</div>
+                <button type="button" role="menuitem" onClick={onExportState} style={{width:"100%",textAlign:"left",padding:"8px 10px",borderRadius:7,border:"0",background:"transparent",cursor:"pointer",fontSize:12,fontWeight:600,color:"var(--text-primary)",display:"flex",alignItems:"center",gap:8}}>
+                  <span>📤</span><span>Guardar estado del sistema</span>
                 </button>
-                <button type="button" role="menuitem" onClick={()=>importFileRef.current?.click()} style={{width:"100%",textAlign:"left",padding:"8px 10px",borderRadius:10,border:"0",background:"transparent",cursor:"pointer",fontSize:12,fontWeight:800}}>
-                  📥 {UI_TEXT.buttons.importState ?? "Importar"}
+                <button type="button" role="menuitem" onClick={()=>importFileRef.current?.click()} style={{width:"100%",textAlign:"left",padding:"8px 10px",borderRadius:7,border:"0",background:"transparent",cursor:"pointer",fontSize:12,fontWeight:600,color:"var(--text-primary)",display:"flex",alignItems:"center",gap:8}}>
+                  <span>📥</span><span>Cargar estado desde archivo</span>
                 </button>
-                <button type="button" role="menuitem" onClick={()=>{setView("trust");setActionsOpen(false);}} style={{width:"100%",textAlign:"left",padding:"8px 10px",borderRadius:10,border:"0",background:"transparent",cursor:"pointer",fontSize:12,fontWeight:800}}>
-                  🔐 {UI_TEXT.labels.trustPanelTitle ?? "Firma y confianza"}
+                <button type="button" role="menuitem" onClick={()=>{setView("trust");setActionsOpen(false);}} style={{width:"100%",textAlign:"left",padding:"8px 10px",borderRadius:7,border:"0",background:"transparent",cursor:"pointer",fontSize:12,fontWeight:600,color:"var(--text-primary)",display:"flex",alignItems:"center",gap:8}}>
+                  <span>🔐</span><span>Firma y verificación</span>
                 </button>
-                <div style={{height:1,background:"rgba(0,0,0,0.08)",margin:"6px 6px"}} />
-                <button type="button" role="menuitem" onClick={()=>goToSection("reports","reports-export")} style={{width:"100%",textAlign:"left",padding:"8px 10px",borderRadius:10,border:"0",background:"transparent",cursor:"pointer",fontSize:12,fontWeight:800}}>
-                  📦 Exportar (CSV/JSON)
-                  <div style={{fontSize:10,fontWeight:600,opacity:0.7,marginTop:2}}>Ir a Reportes → Exportar</div>
+                <div style={{height:1,background:"var(--border)",margin:"4px 0"}} />
+                <div style={{fontSize:10,color:"var(--text-muted)",padding:"4px 10px 6px",fontWeight:700,letterSpacing:"0.05em",textTransform:"uppercase" as const}}>Exportar / Importar</div>
+                <button type="button" role="menuitem" onClick={()=>goToSection("reports","reports-export")} style={{width:"100%",textAlign:"left",padding:"8px 10px",borderRadius:7,border:"0",background:"transparent",cursor:"pointer",color:"var(--text-primary)"}}>
+                  <div style={{fontSize:12,fontWeight:600,display:"flex",alignItems:"center",gap:8}}><span>📦</span><span>Exportar datos (CSV/JSON)</span></div>
+                  <div style={{fontSize:10,color:"var(--text-muted)",marginTop:1,paddingLeft:22}}>Reportes → Exportar</div>
                 </button>
-                <button type="button" role="menuitem" onClick={()=>goToSection("reports","reports-import")} style={{width:"100%",textAlign:"left",padding:"8px 10px",borderRadius:10,border:"0",background:"transparent",cursor:"pointer",fontSize:12,fontWeight:800}}>
-                  📥 Importar JSON
-                  <div style={{fontSize:10,fontWeight:600,opacity:0.7,marginTop:2}}>Ir a Reportes → Importar</div>
+                <button type="button" role="menuitem" onClick={()=>goToSection("reports","reports-import")} style={{width:"100%",textAlign:"left",padding:"8px 10px",borderRadius:7,border:"0",background:"transparent",cursor:"pointer",color:"var(--text-primary)"}}>
+                  <div style={{fontSize:12,fontWeight:600,display:"flex",alignItems:"center",gap:8}}><span>📥</span><span>Importar datos (JSON)</span></div>
+                  <div style={{fontSize:10,color:"var(--text-muted)",marginTop:1,paddingLeft:22}}>Reportes → Importar</div>
                 </button>
-                <div style={{height:1,background:"rgba(0,0,0,0.08)",margin:"6px 6px"}} />
-                <button type="button" role="menuitem" onClick={()=>goToSection("config","config-reset")} style={{width:"100%",textAlign:"left",padding:"8px 10px",borderRadius:10,border:"0",background:"transparent",cursor:"pointer",fontSize:12,fontWeight:800}}>
-                  🧨 Reset Demo
-                  <div style={{fontSize:10,fontWeight:600,opacity:0.7,marginTop:2}}>Ir a Config → Resetear sistema</div>
+                <div style={{height:1,background:"var(--border)",margin:"4px 0"}} />
+                <button type="button" role="menuitem" onClick={()=>goToSection("config","config-reset")} style={{width:"100%",textAlign:"left",padding:"8px 10px",borderRadius:7,border:"0",background:"transparent",cursor:"pointer",color:"var(--danger)",fontSize:12,fontWeight:600,display:"flex",alignItems:"center",gap:8}}>
+                  <span>🧨</span><span>Reiniciar sistema (demo)</span>
                 </button>
               </div>
             )}
           </div>
-          <button type="button" onClick={()=>setHelpOpen(true)} title="Ayuda del módulo actual" style={S.nBtn(false)} aria-label="Abrir ayuda">?</button>
+          <div style={{position:"relative",display:"inline-flex"}} className="tipWrap">
+            <button type="button" onClick={()=>setHelpOpen(true)}
+              style={{
+                background:"transparent", border:"1px solid var(--border)",
+                borderRadius:"6px", padding:"4px 9px", cursor:"pointer",
+                fontSize:"13px", fontWeight:700, color:"var(--text-secondary)",
+              }}
+              aria-label="Abrir ayuda">
+              ?
+            </button>
+            <div className="tip" style={{display:"none",position:"absolute",top:"calc(100% + 8px)",right:0,background:"#1e293b",color:"#f1f5f9",fontSize:"11px",fontWeight:500,padding:"6px 12px",borderRadius:"6px",whiteSpace:"nowrap",zIndex:99999,boxShadow:"0 4px 16px rgba(0,0,0,0.25)",pointerEvents:"none"}}>
+              Ayuda del módulo actual
+            </div>
+          </div>
           {divergencias.length > 0 && (
           <Badge
             style={{ ...S.badge(themeColor("warning")) }}
@@ -961,12 +986,11 @@ export default function App(){
             ⚡ {divergencias.length}
           </Badge>
         )}
-          <div style={{ display: "flex", gap: 4, alignItems: "center", marginRight: 6 }}>
-            <span style={{ color: themeColor("mutedAlt"), fontSize: "11px", fontWeight: 700 }}>Vista:</span>
-            <button type="button" style={S.nBtn(uiMode === "OP")} onClick={() => setUiModeAndPersist("OP")} title="Vista operativa (terreno)">Operativa</button>
-            <button type="button" style={S.nBtn(uiMode === "FULL")} onClick={() => setUiModeAndPersist("FULL")} title="Vista completa (central)">Completa</button>
+          <div style={{ display: "flex", gap: 2, alignItems: "center", background:"var(--bg-surface-2)", borderRadius:6, padding:"2px", border:"1px solid var(--border)" }}>
+            <button type="button" style={{...S.nBtn(uiMode === "OP"), padding:"3px 8px", fontSize:"11px"}} onClick={() => setUiModeAndPersist("OP")} title="Vista operativa (terreno)">Terreno</button>
+            <button type="button" style={{...S.nBtn(uiMode === "FULL"), padding:"3px 8px", fontSize:"11px"}} onClick={() => setUiModeAndPersist("FULL")} title="Vista completa (central)">Central</button>
           </div>
-          <span style={{fontSize:"10px",color:themeColor("mutedDark")}}>{electionConfig.name}</span>
+          <span style={{fontSize:"10px",color:"var(--text-muted)",maxWidth:140,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" as const}}>{electionConfig.name}</span>
           {/* FASE 2: banner modo operacional */}
           {operationMode !== "NORMAL" && (
             <Badge
@@ -1012,6 +1036,24 @@ export default function App(){
             {ROLE_LABELS[currentUser.role]}
           </Badge>
           <button
+            type="button"
+            data-tooltip={darkMode ? "Modo claro" : "Modo oscuro"}
+            style={{
+              background: "transparent",
+              border: "1px solid var(--border)",
+              borderRadius: "6px",
+              padding: "5px 8px",
+              cursor: "pointer",
+              fontSize: "15px",
+              lineHeight: 1,
+              color: "var(--text-secondary)",
+            }}
+            onClick={() => setDarkMode(d => !d)}
+            aria-label={darkMode ? "Modo claro" : "Modo oscuro"}
+          >
+            {darkMode ? "☀️" : "🌙"}
+          </button>
+          <button
             style={{ ...S.btn("dark"), fontSize: "11px" }}
             onClick={() => {
               // FIX-002 (2026-03-27): limpiar uiMode de localStorage al cerrar sesión
@@ -1037,7 +1079,7 @@ export default function App(){
         </div>
       )}
 
-      <div style={{maxWidth:1100,margin:"0 auto",padding:"12px 16px"}}>
+      <div style={{maxWidth:1200,margin:"0 auto",padding:"12px 16px"}}>
         {view==="dashboard"&&<DashboardView/>}
         {view==="cop"&&<CopView/>}
         {view==="new_case"&&<NewCaseView/>}

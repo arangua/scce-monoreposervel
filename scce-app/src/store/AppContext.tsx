@@ -204,6 +204,10 @@ export interface AppStore {
   authBusy: boolean;
   setAuthBusy: Dispatch<SetStateAction<boolean>>;
 
+  // ── Tema visual
+  darkMode: boolean;
+  setDarkMode: Dispatch<SetStateAction<boolean>>;
+
   // ── Modo operacional (FASE 2)
   operationMode: OperationMode;
   setOperationMode: Dispatch<SetStateAction<OperationMode>>;
@@ -306,6 +310,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [ctxErr, setCtxErr] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
 
+  // Tema visual (persiste en localStorage)
+  const [darkMode, setDarkMode] = useState<boolean>(() => {
+    return localStorage.getItem("SCCE_DARK_MODE") === "true";
+  });
+
   // Modo operacional (FASE 2)
   const [operationMode, setOperationMode] = useState<OperationMode>("NORMAL");
 
@@ -358,6 +367,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     loginErr, setLoginErr,
     ctxErr, setCtxErr,
     authBusy, setAuthBusy,
+    // Tema visual
+    darkMode, setDarkMode,
     // Modo operacional
     operationMode, setOperationMode,
     // Simulación

@@ -23,55 +23,49 @@ import { CaseCard, RecBadge, DivBadge } from "./CaseCard";
 
 const CONFIG = { regions: CONFIG_REGIONS };
 
-// Subset de estilos (mismo patron que App.tsx S)
+// Estilos con variables CSS (soporte modo oscuro)
 const S = {
   card: {
-    background: themeColor("bgSurface"),
-    border: "1px solid #e5e7eb",
-    borderRadius: "6px",
+    background: "var(--bg-surface)",
+    border: "1px solid var(--border)",
+    borderRadius: "8px",
     padding: "12px",
+    boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
   } as React.CSSProperties,
   badge: (color: string) => ({
     background: color + "22",
     color,
     border: "1px solid " + color + "44",
-    borderRadius: "3px",
-    padding: "2px 6px",
+    borderRadius: "4px",
+    padding: "2px 8px",
     fontSize: "11px",
     fontWeight: 600,
   }),
   btn: (v = "primary") =>
     ({
-      background:
-        ({
-          primary: themeColor("primary"),
-          success: themeColor("success"),
-          danger: themeColor("danger"),
-          warning: themeColor("warning"),
-          dark: themeColor("textSecondary"),
-        } as Record<string, string>)[v] || themeColor("primary"),
-      color: themeColor("white"),
+      background: ({primary:"var(--primary)",success:"var(--success)",danger:"var(--danger)",warning:"var(--warning)",dark:"var(--text-secondary)"} as Record<string,string>)[v] || "var(--primary)",
+      color: "#fff",
       border: "none",
-      padding: "6px 12px",
-      borderRadius: "4px",
+      padding: "6px 14px",
+      borderRadius: "6px",
       cursor: "pointer",
       fontSize: "12px",
-      fontWeight: 500,
+      fontWeight: 600,
     }) as React.CSSProperties,
   inp: {
-    background: themeColor("bgSurface"),
-    border: "1px solid #e5e7eb",
-    borderRadius: "4px",
-    padding: "6px 8px",
-    color: themeColor("textPrimary"),
+    background: "var(--bg-surface)",
+    border: "1px solid var(--border)",
+    borderRadius: "6px",
+    padding: "7px 10px",
+    color: "var(--text-primary)",
     fontSize: "13px",
     width: "100%",
     boxSizing: "border-box",
   } as React.CSSProperties,
   g4: {
     display: "grid",
-    gridTemplateColumns: "repeat(4,1fr)",
-    gap: "8px",
+    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+    gap: "10px",
   } as React.CSSProperties,
 };
 
@@ -259,7 +253,7 @@ export function DashboardView() {
         }}
       >
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <h2 style={{ margin: 0, fontSize: "16px" }}>Panel de Operacion</h2>
+          <h2 style={{ margin: 0, fontSize: "17px", fontWeight: 700, color: "var(--text-primary)" }}>Panel de Operación</h2>
           {metrics.critica > 0 && (
             <Badge style={S.badge(themeColor("danger"))} size="sm">
               {metrics.critica} CRITICOS
@@ -337,16 +331,16 @@ export function DashboardView() {
       )}
 
       {/* KPI cards */}
-      <div style={{ ...S.g4, marginBottom: 10 }}>
+      <div style={{ ...S.g4, marginBottom: 12 }}>
         {[
-          { l: "Total", v: metrics.total, c: themeColor("primary") },
-          { l: "Abiertos", v: metrics.open, c: themeColor("warning") },
-          { l: "Criticos+Altos", v: metrics.critica + metrics.alta, c: themeColor("danger") },
-          { l: "Completitud", v: metrics.avgComp + "%", c: themeColor("success") },
+          { l: "Total de incidentes", v: metrics.total,                     c: "var(--primary)" },
+          { l: "Incidentes abiertos",  v: metrics.open,                      c: "var(--warning)" },
+          { l: "Críticos y altos",    v: metrics.critica + metrics.alta,     c: "var(--danger)"  },
+          { l: "Completitud promedio", v: metrics.avgComp + "%",             c: "var(--success)" },
         ].map((k) => (
-          <div key={k.l} style={S.card}>
-            <div style={{ color: k.c, fontSize: "22px", fontWeight: 700 }}>{k.v}</div>
-            <div style={{ color: themeColor("muted"), fontSize: "11px" }}>{k.l}</div>
+          <div key={k.l} style={{ ...S.card, borderLeft: `3px solid ${k.c}`, padding: "14px 16px" }}>
+            <div style={{ color: k.c, fontSize: "26px", fontWeight: 800, lineHeight: 1, marginBottom: 4 }}>{k.v}</div>
+            <div style={{ color: "var(--text-secondary)", fontSize: "11px", fontWeight: 500, textTransform: "uppercase" as const, letterSpacing: "0.05em" }}>{k.l}</div>
           </div>
         ))}
       </div>
