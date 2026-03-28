@@ -152,12 +152,14 @@ export function ClosedOverlay() {
       style={{
         position: "absolute",
         inset: 0,
-        background: "rgba(15,17,23,.82)",
-        zIndex: 50,
+        background: "rgba(15,17,23,0.45)",
+        zIndex: 10,
         display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
+        alignItems: "flex-end",
+        justifyContent: "flex-end",
         borderRadius: "6px",
+        padding: "10px 12px",
+        pointerEvents: "none", // permite clics en elementos debajo
       }}
     >
       <div
@@ -165,12 +167,12 @@ export function ClosedOverlay() {
           background: themeColor("bgSurface"),
           border: "1px solid #e5e7eb",
           borderRadius: "6px",
-          padding: "14px 24px",
+          padding: "6px 14px",
           textAlign: "center",
+          opacity: 0.9,
         }}
       >
-        <div style={{ fontWeight: 700, color: themeColor("mutedAlt") }}>🔒 REGISTRO CERRADO</div>
-        <div style={{ fontSize: "11px", color: themeColor("mutedDark"), marginTop: 3 }}>Solo lectura</div>
+        <div style={{ fontWeight: 700, color: themeColor("mutedAlt"), fontSize: "12px" }}>🔒 Solo lectura</div>
       </div>
     </div>
   );

@@ -907,6 +907,122 @@ function CaseDetailContent({
         </div>
       </div>
 
+      {/* FASE 6: Panel Revisión Post-Incidente — solo visible en casos cerrados */}
+      {!isOpView && isClosed && (() => {
+        // Calcular tiempos reales del ciclo de vida
+        const tDeteccion   = timeDiff(c.origin?.detectedAt, c.reportedAt);
+        const tPrimeraAcc  = timeDiff(c.reportedAt, c.firstActionAt);
+        const tResolucion  = timeDiff(c.reportedAt, c.resolvedAt);
+        const tCicloTotal  = timeDiff(c.createdAt, c.closedAt);
+        const slaLimite    = c.slaMinutes ?? null;
+        const cumplioSLA   = slaLimite && tResolucion != null ? tResolucion <= slaLimite : null;
+
+        // Etapa final alcanzada
+        const etapaFinal   = c.decisionStage ?? "DETECTED";
+        const etapaOrden: Record<string, number> = {
+          DETECTED: 1, VALIDATED: 2, ORIENTED: 3, CLASSIFIED: 4,
+          DECIDED: 5, EXECUTING: 6, VERIFIED: 7, CLOSED: 8,
+        };
+        const etapaLabel: Record<string, string> = {
+          DETECTED: "Detectado", VALIDATED: "Validado", ORIENTED: "Orientado",
+          CLASSIFIED: "Clasificado", DECIDED: "Decidido", EXECUTING: "En ejecución",
+          VERIFIED: "Verificado", CLOSED: "Cerrado",
+        };
+        const etapaNum = etapaOrden[etapaFinal] ?? 1;
+
+        // Contar acciones, decisiones e instrucciones
+        const nAcciones     = (c.actions ?? []).length;
+        const nDecisiones   = (c.decisions ?? []).length;
+        const nInstrucciones = (c.instructions ?? []).length;
+        const nBypass       = c.bypass ? 1 : 0;
+        const nBypassValidado = c.bypassValidated ? 1 : 0;
+
+        return (
+          <div style={{ ...S.card, marginTop: 10, border: "2px solid #6366f144" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: "13px", color: themeColor("primary") }}>REVISIÓN POST-INCIDENTE</div>
+                <div style={{ fontSize: "10px", color: themeColor("muted"), marginTop: 1 }}>After Action Review — Caso cerrado</div>
+              </div>
+              <Badge style={{ ...S.badge(themeColor("primary")), fontSize: "10px" }} size="xs">FASE 6</Badge>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              {/* Columna izquierda: tiempos */}
+              <div>
+                <div style={{ color: themeColor("mutedAlt"), fontSize: "11px", fontWeight: 600, marginBottom: 6 }}>ANÁLISIS DE TIEMPOS</div>
+                {[
+                  { lbl: "T. Activación (detección → reporte)", val: tDeteccion, limite: null },
+                  { lbl: "T. 1ª Acción (reporte → acción)",   val: tPrimeraAcc, limite: null },
+                  { lbl: "T. Resolución (reporte → resuelto)", val: tResolucion, limite: slaLimite },
+                  { lbl: "T. Ciclo total (creación → cierre)", val: tCicloTotal, limite: null },
+                ].map(({ lbl, val, limite }) => {
+                  const over = limite && val != null && val > limite;
+                  return (
+                    <div key={lbl} style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, fontSize: "11px" }}>
+                      <span style={{ color: themeColor("mutedAlt") }}>{lbl}</span>
+                      <span style={{ fontWeight: 600, color: over ? themeColor("danger") : val != null ? themeColor("success") : themeColor("mutedDark") }}>
+                        {val != null ? `${val} min` : "—"}
+                        {limite && val != null && <span style={{ fontSize: "10px", color: themeColor("muted"), marginLeft: 4 }}>(SLA: {limite} min)</span>}
+                      </span>
+                    </div>
+                  );
+                })}
+                <div style={{ marginTop: 6, padding: "5px 8px", borderRadius: 4, background: (cumplioSLA === null ? themeColor("bgSurface") : cumplioSLA ? "#22c55e15" : "#ef444415"), border: `1px solid ${cumplioSLA === null ? "#e5e7eb" : cumplioSLA ? "#22c55e44" : "#ef444444"}` }}>
+                  <span style={{ fontSize: "11px", fontWeight: 700, color: cumplioSLA === null ? themeColor("muted") : cumplioSLA ? themeColor("success") : themeColor("danger") }}>
+                    {cumplioSLA === null ? "— SLA no calculable" : cumplioSLA ? "✅ SLA cumplido" : "❌ SLA excedido"}
+                  </span>
+                </div>
+              </div>
+
+              {/* Columna derecha: flujo C2 y recursos */}
+              <div>
+                <div style={{ color: themeColor("mutedAlt"), fontSize: "11px", fontWeight: 600, marginBottom: 6 }}>FLUJO C2 Y RECURSOS</div>
+                <div style={{ marginBottom: 8 }}>
+                  <div style={{ fontSize: "11px", color: themeColor("mutedAlt"), marginBottom: 3 }}>Etapa decisional alcanzada</div>
+                  <div style={{ display: "flex", gap: 3 }}>
+                    {[1,2,3,4,5,6,7,8].map(n => (
+                      <div key={n} style={{ flex: 1, height: 8, borderRadius: 2, background: n <= etapaNum ? themeColor("primary") : themeColor("border") }} title={Object.entries(etapaOrden).find(([,v]) => v === n)?.[0]} />
+                    ))}
+                  </div>
+                  <div style={{ fontSize: "10px", color: themeColor("muted"), marginTop: 2 }}>
+                    {etapaNum}/8 — {etapaLabel[etapaFinal]}
+                  </div>
+                </div>
+
+                {[
+                  { lbl: "Acciones registradas",    val: nAcciones },
+                  { lbl: "Decisiones registradas",  val: nDecisiones },
+                  { lbl: "Instrucciones emitidas",  val: nInstrucciones },
+                  { lbl: "Excepción (bypass)",      val: nBypass ? (nBypassValidado ? "Sí (✅ validada)" : "Sí (⚠️ sin validar)") : "No" },
+                ].map(({ lbl, val }) => (
+                  <div key={lbl} style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", marginBottom: 3 }}>
+                    <span style={{ color: themeColor("mutedAlt") }}>{lbl}</span>
+                    <span style={{ fontWeight: 600, color: themeColor("textPrimary") }}>{val}</span>
+                  </div>
+                ))}
+
+                {/* Confianza del dato al cierre */}
+                <div style={{ marginTop: 6, display: "flex", justifyContent: "space-between", fontSize: "11px" }}>
+                  <span style={{ color: themeColor("mutedAlt") }}>Confianza del dato</span>
+                  <span style={{ fontWeight: 600, color: DATA_CONFIDENCE_COLORS[safeCD] }}>
+                    {DATA_CONFIDENCE_LABELS[safeCD]}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Motivo de cierre como resumen ejecutivo */}
+            {c.closingMotivo && (
+              <div style={{ marginTop: 10, padding: "8px 10px", background: themeColor("bgSurface"), borderRadius: 4, border: "1px solid #e5e7eb" }}>
+                <div style={{ fontSize: "10px", color: themeColor("muted"), fontWeight: 600, marginBottom: 2 }}>MOTIVO DE CIERRE (RESUMEN EJECUTIVO)</div>
+                <div style={{ fontSize: "12px", color: themeColor("textPrimary") }}>{c.closingMotivo}</div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
       {/* Auditoria */}
       {!isOpView && (
         <div style={{ ...S.card, marginTop: 10 }}>
