@@ -18,6 +18,7 @@ import React, {
   useContext,
   useState,
   useRef,
+  useEffect,
   type ReactNode,
   type Dispatch,
   type SetStateAction,
@@ -82,6 +83,38 @@ export type MembershipScope = {
 };
 
 const MIN_ELECTION_YEAR = 2026;
+
+// ── Persistencia de catálogo en localStorage ───────────────────────────
+// La clave incluye el membershipId para aislar catálogos por DR.
+// Mientras no hay backend, esto garantiza que cada equipo regional
+// conserva su propio catálogo entre sesiones del mismo navegador.
+
+const CATALOG_KEY_PREFIX = "SCCE_CATALOG_V1_";
+
+function catalogKey(membershipId: string | null | undefined): string {
+  return CATALOG_KEY_PREFIX + (membershipId ?? "DEMO");
+}
+
+function saveCatalog(catalog: LocalCatalog, membershipId: string | null | undefined): void {
+  try {
+    localStorage.setItem(catalogKey(membershipId), JSON.stringify(catalog));
+  } catch {
+    // localStorage lleno o no disponible — ignorar silenciosamente
+  }
+}
+
+function loadCatalog(membershipId: string | null | undefined): LocalCatalog | null {
+  try {
+    const raw = localStorage.getItem(catalogKey(membershipId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as LocalCatalog;
+    // Validación mínima: debe ser un array
+    if (!Array.isArray(parsed)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
 
 function defaultElectionConfig(): ElectionConfig {
   const year = Math.max(new Date().getFullYear(), MIN_ELECTION_YEAR);
@@ -259,8 +292,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [auditLog, setAuditLog] = useState<AuditLogEntry[]>(() => makeSeedAudit());
   const [selectedCase, setSelectedCase] = useState<CaseItem | null>(null);
 
-  // Catálogo
-  const [localCatalog, setLocalCatalog] = useState<LocalCatalog>(() => buildCatalogDemo());
+  // Catálogo — carga desde localStorage si existe, si no usa demo
+  // La clave DEMO se usa hasta que el usuario se autentica (ver useEffect más abajo)
+  const activeMembershipId = getActiveMembership()?.id ?? null;
+  const [localCatalog, setLocalCatalog] = useState<LocalCatalog>(() => {
+    const saved = loadCatalog(activeMembershipId);
+    if (saved && saved.length > 0) return saved;
+    return buildCatalogDemo();
+  });
 
   // Configuración electoral
   const [electionConfig, setElectionConfig] = useState<ElectionConfig>(defaultElectionConfig);
@@ -309,6 +348,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [loginErr, setLoginErr] = useState("");
   const [ctxErr, setCtxErr] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
+
+  // ── Persistencia de catálogo ───────────────────────────────────────────────
+  // Guarda en localStorage cada vez que el catálogo cambia
+  useEffect(() => {
+    saveCatalog(localCatalog, activeMembership?.id ?? activeMembershipId);
+  }, [localCatalog, activeMembership]);
+
+  // Cuando el membership cambia (usuario hace login), recarga el catálogo
+  // correcto para ese membership. Si no hay catlog guardado, mantiene el actual.
+  useEffect(() => {
+    if (!activeMembership?.id) return;
+    const saved = loadCatalog(activeMembership.id);
+    if (saved && saved.length > 0) {
+      setLocalCatalog(saved);
+    }
+    // Si no hay catolog guardado para este membership, no sobreescribir el actual
+  }, [activeMembership?.id]);
 
   // Tema visual (persiste en localStorage)
   const [darkMode, setDarkMode] = useState<boolean>(() => {

@@ -416,6 +416,10 @@ export default function App(){
   function doReset(){
     const cat=buildCatalogDemo();
     const y=Math.max(new Date().getFullYear(),MIN_ELECTION_YEAR);
+    // Limpiar catálogos persistidos en localStorage (todas las claves SCCE_CATALOG_V1_*)
+    Object.keys(localStorage)
+      .filter(k => k.startsWith("SCCE_CATALOG_V1_"))
+      .forEach(k => localStorage.removeItem(k));
     clearSession();
     setAuthToken(null);
     setApiUser(null);
@@ -1113,6 +1117,7 @@ export default function App(){
           electionConfig={electionConfig}
           setElectionConfig={setElectionConfig}
           localCatalog={localCatalog}
+          setLocalCatalog={setLocalCatalog}
           currentUser={currentUser}
           setAuditLog={setAuditLog}
           notify={notify}

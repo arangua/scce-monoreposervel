@@ -139,6 +139,17 @@ input, select, textarea {
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 
+/* Forzar herencia de color-scheme en selects/options */
+select {
+  color-scheme: inherit;
+}
+
+[data-theme="dark"] select,
+[data-theme="dark"] select option {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+
 input:focus, select:focus, textarea:focus {
   outline: none;
   border-color: var(--primary);

@@ -201,7 +201,14 @@ export function CatalogView() {
     [cases, localCatalog]
   );
 
-  const [catRegion, setCatRegion] = useState(activeRegion);
+  // Inicializar con la primera región disponible según scope del usuario
+  const defaultRegion = regionOptions[0]?.code ?? activeRegion;
+  const [catRegion, setCatRegion] = useState(() => {
+    // Si activeRegion está en las opciones disponibles, usarla
+    if (regionOptions.some(o => o.code === activeRegion)) return activeRegion;
+    // Si no, usar la primera opción disponible (excluir ALL)
+    return regionOptions.find(o => o.code !== "ALL")?.code ?? regionOptions[0]?.code ?? activeRegion;
+  });
   const [catCommune, setCatCommune] = useState("");
   const [newNombre, setNewNombre] = useState("");
   const [showInactive, setShowInactive] = useState(false);
@@ -273,9 +280,9 @@ export function CatalogView() {
           </div>
         ))}
       </div>
-      <div style={{ ...S.card, marginBottom: 8, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+      <div style={{ ...S.card, marginBottom: 8, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", background: "var(--bg-surface)", border: "1px solid var(--border)" }}>
         <select
-          style={{ ...S.inp, width: "180px" }}
+          style={{ ...S.inp, width: "200px", background: "var(--bg-surface)", color: "var(--text-primary)", borderColor: "var(--border)" }}
           value={catRegion}
           onChange={(e) => {
             setCatRegion(e.target.value);
@@ -284,11 +291,16 @@ export function CatalogView() {
         >
           {regionOptions.map((o) => (
             <option key={o.code} value={o.code}>
-              {o.name}
+              {o.code !== "ALL" ? `${o.code} — ${o.name}` : o.name}
             </option>
           ))}
         </select>
-        <select style={{ ...S.inp, width: "160px" }} value={catCommune} onChange={(e) => setCatCommune(e.target.value)} disabled={catRegion === "ALL"}>
+        <select
+          style={{ ...S.inp, width: "180px", background: "var(--bg-surface)", color: "var(--text-primary)", borderColor: "var(--border)" }}
+          value={catCommune}
+          onChange={(e) => setCatCommune(e.target.value)}
+          disabled={catRegion === "ALL"}
+        >
           <option value="">Todas las comunas</option>
           {Object.entries(rData?.communes || {}).map(([k, v]) => (
             <option key={k} value={k}>
@@ -308,27 +320,33 @@ export function CatalogView() {
           <div style={{ flex: 1, minWidth: 150 }}>
             <label style={S.lbl}>Región</label>
             <select
-              style={S.inp}
+              style={{ ...S.inp, background: "var(--bg-surface)", color: "var(--text-primary)", borderColor: "var(--border)" }}
               value={catRegion}
               onChange={(e) => {
                 setCatRegion(e.target.value);
                 setCatCommune("");
               }}
             >
-              {Object.entries(regionsMap).map(([k, v]) => (
-                <option key={k} value={k}>
-                  {v?.name}
-                </option>
-              ))}
+              {regionOptions
+                .filter(o => o.code !== "ALL")
+                .map((o) => (
+                  <option key={o.code} value={o.code}>
+                    {o.code} — {o.name}
+                  </option>
+                ))}
             </select>
           </div>
           <div style={{ flex: 1, minWidth: 140 }}>
             <label style={S.lbl}>Comuna *</label>
-            <select style={S.inp} value={catCommune} onChange={(e) => setCatCommune(e.target.value)}>
+            <select
+              style={{ ...S.inp, background: "var(--bg-surface)", color: "var(--text-primary)", borderColor: "var(--border)" }}
+              value={catCommune}
+              onChange={(e) => setCatCommune(e.target.value)}
+            >
               <option value="">Seleccione...</option>
               {Object.entries(rData?.communes || {}).map(([k, v]) => (
                 <option key={k} value={k}>
-                  {v.name}
+                  {(v as { name?: string }).name}
                 </option>
               ))}
             </select>
