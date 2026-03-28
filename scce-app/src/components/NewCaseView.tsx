@@ -11,8 +11,8 @@ import React, {
   forwardRef,
   useImperativeHandle,
 } from "react";
-import type { CaseItem, Criticality, DataConfidence } from "../domain/types";
-import { DATA_CONFIDENCE_LABELS, DATA_CONFIDENCE_COLORS } from "../domain/types";
+import type { CaseItem, Criticality, DataConfidence, ImpactScope, ReportChannel } from "../domain/types";
+import { DATA_CONFIDENCE_LABELS, DATA_CONFIDENCE_COLORS, IMPACT_SCOPE_LABELS, IMPACT_SCOPE_COLORS, REPORT_CHANNEL_LABELS } from "../domain/types";
 import { canDo } from "../domain/policyEngine";
 import { calcCriticality, critColor } from "../domain/caseUtils";
 import { CONFIG_REGIONS, getActiveLocals } from "../domain/catalog";
@@ -194,6 +194,10 @@ export function NewCaseView({ hideBack = false }: { hideBack?: boolean }) {
   const [lb, setLb] = useState(bypassForm);
   // FASE 1: confianza del dato
   const [dataConfidence, setDataConfidence] = useState<DataConfidence>("UNKNOWN");
+  // GOBERNANZA: alcance del impacto, reportado por, canal de reporte
+  const [impactScope, setImpactScope] = useState<ImpactScope>("LOCAL");
+  const [reportedBy, setReportedBy] = useState("");
+  const [reportChannel, setReportChannel] = useState<ReportChannel>("SCCE");
   const er = calcCriticality(le);
   const maxVar = Math.max(...Object.values(le));
   const rData = regionsMap[lnc.region || "TRP"];
@@ -275,7 +279,7 @@ export function NewCaseView({ hideBack = false }: { hideBack?: boolean }) {
         <h2 style={{ margin: 0, fontSize: "16px" }}>Nuevo Incidente — Ficha 60s</h2>
       </div>
       <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
-        {["Identificación", "Confianza", "Evaluación", "Detalles", "Confirmar"].map((st, i) => (
+        {["Identificación", "Gobernanza", "Confianza", "Evaluación", "Detalles", "Confirmar"].map((st, i) => (
           <div
             key={st}
             style={{
@@ -471,7 +475,7 @@ export function NewCaseView({ hideBack = false }: { hideBack?: boolean }) {
                   return notify("Otra causal requiere explicación detallada (mín. 15 caracteres)", "error");
                 setNewCase({ ...lnc } as CaseItem);
                 setBypassForm(lb);
-                setStep(2);
+                setStep(2); // → Gobernanza
               }}
             >
               Siguiente →
@@ -480,10 +484,98 @@ export function NewCaseView({ hideBack = false }: { hideBack?: boolean }) {
         </div>
       )}
 
+      {/* GOBERNANZA: Paso 2 — Alcance, canal de reporte y reportado por */}
       {step === 2 && (
         <div style={S.card}>
           <div style={{ color: themeColor("mutedAlt"), fontSize: "11px", fontWeight: 600, marginBottom: 10 }}>
-            PASO 2 — CONFIANZA DEL DATO
+            PASO 2 — GOBERNANZA
+          </div>
+          <div style={{ color: themeColor("textSecondary"), fontSize: "12px", marginBottom: 12 }}>
+            Define el alcance del impacto y cómo llegó este reporte. Esta información determina qué niveles de mando se activarán.
+          </div>
+
+          {/* Alcance del impacto */}
+          <div style={{ marginBottom: 12 }}>
+            <label style={S.lbl}>Alcance del impacto *</label>
+            <div style={{ display: "grid", gap: 6, marginTop: 4 }}>
+              {(["LOCAL", "COMUNAL", "REGIONAL", "NACIONAL"] as ImpactScope[]).map((val) => (
+                <button
+                  key={val}
+                  type="button"
+                  onClick={() => setImpactScope(val)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 10,
+                    padding: "8px 14px", borderRadius: 6,
+                    border: `2px solid ${impactScope === val ? IMPACT_SCOPE_COLORS[val] : "#e5e7eb"}`,
+                    background: impactScope === val ? IMPACT_SCOPE_COLORS[val] + "22" : "transparent",
+                    cursor: "pointer", textAlign: "left", width: "100%",
+                  }}
+                >
+                  <span style={{ width: 10, height: 10, borderRadius: "50%", background: IMPACT_SCOPE_COLORS[val], flexShrink: 0 }} />
+                  <span style={{ fontWeight: impactScope === val ? 700 : 500, fontSize: "12px" }}>
+                    {IMPACT_SCOPE_LABELS[val]}
+                  </span>
+                  {val === "NACIONAL" && (
+                    <span style={{ marginLeft: "auto", fontSize: "10px", color: themeColor("danger") }}>⚠️ Notifica a Central</span>
+                  )}
+                  {val === "REGIONAL" && (
+                    <span style={{ marginLeft: "auto", fontSize: "10px", color: themeColor("warning") }}>⚠️ Requiere DR</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Canal de reporte */}
+          <div style={{ marginBottom: 10 }}>
+            <label style={S.lbl}>Canal por el que llegó el reporte</label>
+            <select
+              style={S.inp}
+              value={reportChannel}
+              onChange={e => setReportChannel(e.target.value as ReportChannel)}
+            >
+              {(Object.keys(REPORT_CHANNEL_LABELS) as ReportChannel[]).map(ch => (
+                <option key={ch} value={ch}>{REPORT_CHANNEL_LABELS[ch]}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Reportado por — solo si el canal NO es SCCE */}
+          {reportChannel !== "SCCE" && (
+            <div style={{ marginBottom: 10 }}>
+              <label style={S.lbl}>Reportado por (nombre de quien informó)</label>
+              <input
+                style={S.inp}
+                placeholder="Ej: Juan Pérez, PESE local 005"
+                value={reportedBy}
+                onChange={e => setReportedBy(e.target.value)}
+              />
+              <div style={{ fontSize: "10px", color: themeColor("muted"), marginTop: 2 }}>
+                Quien detectó y reportó el incidente. Tú eres quien lo estás registrando en el sistema.
+              </div>
+            </div>
+          )}
+
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 12 }}>
+            <button style={S.btn("dark")} type="button" onClick={() => setStep(1)}>← Atrás</button>
+            <button
+              style={S.btn("primary")}
+              type="button"
+              onClick={() => {
+                setNewCase(p => p ? { ...p, impactScope, reportedBy: reportedBy || undefined, reportChannel } : p);
+                setStep(3); // → Confianza
+              }}
+            >
+              Siguiente →
+            </button>
+          </div>
+        </div>
+      )}
+
+      {step === 3 && (
+        <div style={S.card}>
+          <div style={{ color: themeColor("mutedAlt"), fontSize: "11px", fontWeight: 600, marginBottom: 10 }}>
+            PASO 3 — CONFIANZA DEL DATO
           </div>
           <div style={{ color: themeColor("textSecondary"), fontSize: "12px", marginBottom: 12 }}>
             ¿Con qué nivel de certeza conoces la información de este incidente?
@@ -525,13 +617,13 @@ export function NewCaseView({ hideBack = false }: { hideBack?: boolean }) {
             ))}
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", marginTop: 12 }}>
-            <button style={S.btn("dark")} type="button" onClick={() => setStep(1)}>← Atrás</button>
+            <button style={S.btn("dark")} type="button" onClick={() => setStep(2)}>← Atrás</button>
             <button
               style={S.btn("primary")}
               type="button"
               onClick={() => {
                 setNewCase((p) => p ? { ...p, dataConfidence } : p);
-                setStep(3);
+                setStep(4); // → Evaluación
               }}
             >
               Siguiente →
@@ -540,10 +632,10 @@ export function NewCaseView({ hideBack = false }: { hideBack?: boolean }) {
         </div>
       )}
 
-      {step === 3 && (
+      {step === 4 && (
         <div style={S.card}>
           <div style={{ color: themeColor("mutedAlt"), fontSize: "11px", fontWeight: 600, marginBottom: 10 }}>
-            PASO 3 — FICHA DE EVALUACIÓN (inmutable tras guardar)
+            PASO 4 — FICHA DE EVALUACIÓN (inmutable tras guardar)
           </div>
           {varDefs.map((v) => (
             <div key={v.key} style={{ ...S.card, background: themeColor("bgSurface"), marginBottom: 6 }}>
@@ -615,7 +707,7 @@ export function NewCaseView({ hideBack = false }: { hideBack?: boolean }) {
             <div style={{ marginTop: 6, color: themeColor("mutedAlt"), fontSize: "12px" }}>{er.recommendation}</div>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10 }}>
-            <button style={S.btn("dark")} onClick={() => setStep(1)}>
+            <button style={S.btn("dark")} onClick={() => setStep(3)}>
               ← Atrás
             </button>
             <button
@@ -625,7 +717,7 @@ export function NewCaseView({ hideBack = false }: { hideBack?: boolean }) {
                   return notify("Confirmar Modo urgente atípico", "error");
                 setEvalForm(le);
                 setBypassForm(lb);
-                setStep(4);
+                setStep(5); // → Detalles
               }}
             >
               Siguiente →
@@ -634,7 +726,7 @@ export function NewCaseView({ hideBack = false }: { hideBack?: boolean }) {
         </div>
       )}
 
-      {step === 4 && (
+      {step === 5 && (
         <DetailStepContent
           ref={detailStepRef}
           initialDetail={newCase?.detail ?? ""}
@@ -643,13 +735,13 @@ export function NewCaseView({ hideBack = false }: { hideBack?: boolean }) {
           onConfirm={() => {
             const d = detailStepRef.current?.getDetail?.() ?? newCase?.detail ?? "";
             setNewCase((p) => (p ? { ...p, detail: d } : p));
-            setStep(5);
+            setStep(6); // → Confirmar
           }}
-          onBack={() => setStep(3)}
+          onBack={() => setStep(4)}
         />
       )}
 
-      {step === 5 && (
+      {step === 6 && (
         <div style={S.card}>
           <div style={{ color: themeColor("mutedAlt"), fontSize: "11px", fontWeight: 600, marginBottom: 10 }}>
             PASO 4 — CONFIRMAR Y REGISTRAR
@@ -692,8 +784,19 @@ export function NewCaseView({ hideBack = false }: { hideBack?: boolean }) {
               {DATA_CONFIDENCE_LABELS[dataConfidence]}
             </span>
           </div>
+          {/* GOBERNANZA: resumen en confirmación */}
+          <div style={{ marginBottom: 8, padding: "6px 10px", background: IMPACT_SCOPE_COLORS[impactScope] + "15", border: `1px solid ${IMPACT_SCOPE_COLORS[impactScope]}44`, borderRadius: 4 }}>
+            <span style={{ fontSize: "11px", color: themeColor("textSecondary") }}>Alcance del impacto: </span>
+            <span style={{ fontWeight: 700, color: IMPACT_SCOPE_COLORS[impactScope], fontSize: "12px" }}>
+              {impactScope}
+            </span>
+            <span style={{ fontSize: "11px", color: themeColor("muted"), marginLeft: 8 }}>
+              Canal: {REPORT_CHANNEL_LABELS[reportChannel]}
+              {reportedBy && ` · Reportado por: ${reportedBy}`}
+            </span>
+          </div>
           <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10 }}>
-            <button style={S.btn("dark")} onClick={() => setStep(4)}>
+            <button style={S.btn("dark")} onClick={() => setStep(5)}>
               ← Atrás
             </button>
             <button

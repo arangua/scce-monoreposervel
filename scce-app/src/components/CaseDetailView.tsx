@@ -7,7 +7,7 @@
  */
 import React, { useState, useMemo } from "react";
 import type { CaseItem, ImpactLevel, ScopeFunctional, CaseStatus, DataConfidence, OrientationData } from "../domain/types";
-import { DATA_CONFIDENCE_LABELS, DATA_CONFIDENCE_COLORS } from "../domain/types";
+import { DATA_CONFIDENCE_LABELS, DATA_CONFIDENCE_COLORS, IMPACT_SCOPE_LABELS, IMPACT_SCOPE_COLORS, REPORT_CHANNEL_LABELS } from "../domain/types";
 import { critColor, statusColor, normalizeStatus } from "../domain/caseUtils";
 import { checkLocalDivergence } from "../domain/localDivergence";
 import { fmtDate, fmtTime, timeDiff, nowISO } from "../domain/date";
@@ -371,6 +371,19 @@ function CaseDetailContent({
                 <>
                   <div><span style={{ color: themeColor("muted") }}>SLA:</span> {c.slaMinutes} min</div>
                   {(() => { const comp = c.completeness ?? 0; return <div><span style={{ color: themeColor("muted") }}>Complet.:</span> <span style={{ color: comp >= 80 ? themeColor("success") : comp >= 50 ? themeColor("warningAlt") : themeColor("danger") }}>{comp}%</span></div>; })()}
+                  {c.impactScope && (
+                    <div>
+                      <span style={{ color: themeColor("muted") }}>Alcance:</span>{" "}
+                      <span style={{ fontWeight: 600, color: IMPACT_SCOPE_COLORS[c.impactScope] }}>{c.impactScope}</span>
+                    </div>
+                  )}
+                  {c.reportChannel && c.reportChannel !== "SCCE" && (
+                    <div>
+                      <span style={{ color: themeColor("muted") }}>Canal reporte:</span>{" "}
+                      {REPORT_CHANNEL_LABELS[c.reportChannel]}
+                      {c.reportedBy && <span style={{ color: themeColor("mutedAlt") }}> · {c.reportedBy}</span>}
+                    </div>
+                  )}
                 </>
               )}
             </div>

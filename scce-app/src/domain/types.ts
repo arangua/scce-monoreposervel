@@ -77,6 +77,64 @@ export const DECISION_STAGE_ORDER: Record<DecisionStage, number> = {
 
 export type Criticality = "CRITICA" | "ALTA" | "MEDIA" | "BAJA";
 
+// GOBERNANZA: alcance del impacto del incidente
+export type ImpactScope =
+  | "LOCAL"     // Afecta 1 local de votación
+  | "COMUNAL"   // Afecta varios locales o toda una comuna
+  | "REGIONAL"  // Afecta el proceso en la región
+  | "NACIONAL"; // Podría afectar la validez del proceso nacional
+
+export const IMPACT_SCOPE_LABELS: Record<ImpactScope, string> = {
+  LOCAL:    "Local — afecta 1 local de votación",
+  COMUNAL:  "Comunal — afecta varios locales o una comuna",
+  REGIONAL: "Regional — afecta el proceso en la región",
+  NACIONAL: "Nacional — podría afectar el proceso nacional",
+};
+
+export const IMPACT_SCOPE_COLORS: Record<ImpactScope, string> = {
+  LOCAL:    "#22c55e",
+  COMUNAL:  "#eab308",
+  REGIONAL: "#f97316",
+  NACIONAL: "#ef4444",
+};
+
+// GOBERNANZA: responsable por nivel de mando
+export type CommandLevel =
+  | "LOCAL"    // PESE / Delegado del local
+  | "REGIONAL" // Jefe Ops / Funcionario comisionado / Director Regional
+  | "CENTRAL"; // Autoridades SERVEL central
+
+export type CaseResponsible = {
+  id: string;               // uuid
+  level: CommandLevel;      // nivel de mando
+  userId: string;           // id del responsable
+  userName: string;         // nombre para trazabilidad
+  role: string;             // rol en el momento de la asignación
+  assignedAt: string;       // ISO timestamp
+  assignedBy: string;       // quién asignó
+  ackAt?: string | null;    // acuse de recibo
+  status: "PENDIENTE" | "ACTIVO" | "DELEGADO" | "LIBERADO";
+  notes?: string;           // ej. "comisionado al local LOC-005"
+};
+
+// GOBERNANZA: canal de reporte original
+export type ReportChannel =
+  | "SCCE"      // Registrado directamente en el sistema
+  | "TELEFONO"  // Reportado por teléfono, registrado por funcionario DR
+  | "WHATSAPP"  // Reportado por WhatsApp
+  | "RADIO"     // Comunicación radial
+  | "PRESENCIAL" // Reporte presencial
+  | "OTRO";     // Otro medio
+
+export const REPORT_CHANNEL_LABELS: Record<ReportChannel, string> = {
+  SCCE:       "SCCE (sistema)",
+  TELEFONO:   "Teléfono",
+  WHATSAPP:   "WhatsApp",
+  RADIO:      "Radio",
+  PRESENCIAL: "Presencial",
+  OTRO:       "Otro",
+};
+
 /** Fase 3.5/3.8 — comentario libre, respuesta, o eventos formales del ciclo de instrucción */
 export type CaseEventKind =
   | "COMMENT"
@@ -162,6 +220,13 @@ export type CaseItem = {
   dataConfidence?: DataConfidence;
   // FASE 1: orientación (etapa 3 del flujo C2)
   orientation?: OrientationData;
+  // GOBERNANZA: alcance del impacto
+  impactScope?: ImpactScope;
+  // GOBERNANZA: responsables por nivel de mando
+  responsables?: CaseResponsible[];
+  // GOBERNANZA: reportado por (puede diferir del registrado por)
+  reportedBy?: string;        // nombre/id de quien detectó y reportó
+  reportChannel?: ReportChannel; // canal por el que llegó el reporte
   summary: string;
   local?: string;
   localSnapshot?: { idLocal: string; nombre: string; region: string; commune: string; snapshotAt: string } | null;
