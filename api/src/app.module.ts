@@ -4,11 +4,15 @@ import { AppService } from "./app.service";
 import { AuthModule } from "./auth/auth.module";
 import { HealthController } from "./health.controller";
 import { PrismaModule } from "./prisma.module";
+import { ContextsController } from "./contexts.controller";
+import { SystemController } from "./system.controller";
 import { CasesModule } from "./cases/cases.module";
+import { AdminModule } from "./admin/admin.module";
+import { CatalogModule } from "./catalog/catalog.module";
 
 @Module({
-  imports: [PrismaModule, AuthModule, CasesModule],
-  controllers: [AppController, HealthController],
+  imports: [PrismaModule, AuthModule, CasesModule, AdminModule, CatalogModule],
+  controllers: [AppController, HealthController, ContextsController, SystemController],
   providers: [AppService],
 })
 export class AppModule {}

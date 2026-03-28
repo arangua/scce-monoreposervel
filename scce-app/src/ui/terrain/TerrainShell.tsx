@@ -113,7 +113,7 @@ function Row({
           justifyContent: "space-between",
           gap: 10,
           padding: "6px 0",
-          borderTop: `1px solid ${themeColor("mutedDarker")}`,
+          borderTop: "1px solid #334155",
         }}
       >
         <div style={{ minWidth: 0 }}>
@@ -121,7 +121,7 @@ function Row({
             style={{
               fontWeight: 700,
               fontSize: "12px",
-              color: themeColor("legacySlate"),
+              color: "#e2e8f0",
               whiteSpace: "nowrap",
               overflow: "hidden",
               textOverflow: "ellipsis",
@@ -129,7 +129,7 @@ function Row({
           >
             {c.summary || "—"}
           </div>
-          <div style={{ fontSize: "11px", color: themeColor("mutedAlt") }}>
+          <div style={{ fontSize: "11px", color: "#94a3b8" }}>
             {formatPlace(c)}
           </div>
         </div>
@@ -157,8 +157,8 @@ function OpCyclePanel({
     <div>
       {high.length > 0 && (
         <div style={{ marginBottom: 16 }}>
-          <div style={{ fontWeight: 900, margin: "8px 0", color: themeColor("legacySlate"), letterSpacing: 0.3, fontSize: 11, textTransform: "uppercase" }}>
-            Prioridad inmediata
+          <div style={{ fontWeight: 700, margin: "8px 0 4px", color: "#ef4444", letterSpacing: 0.5, fontSize: 10, textTransform: "uppercase" as const }}>
+            🚨 Prioridad inmediata
           </div>
           {high.map(({ c, rec }) => (
             <Row key={c.id} c={c} right={`${rec.icon} ${rec.label}`} onOpen={onOpenCase} />
@@ -167,8 +167,8 @@ function OpCyclePanel({
       )}
       {medium.length > 0 && (
         <div style={{ marginBottom: 16 }}>
-          <div style={{ fontWeight: 900, margin: "8px 0", color: themeColor("legacySlate"), letterSpacing: 0.3, fontSize: 11, textTransform: "uppercase" }}>
-            En seguimiento
+          <div style={{ fontWeight: 700, margin: "8px 0 4px", color: "#f59e0b", letterSpacing: 0.5, fontSize: 10, textTransform: "uppercase" as const }}>
+            ⚠️ En seguimiento
           </div>
           {medium.map(({ c, rec }) => (
             <Row key={c.id} c={c} right={`${rec.icon} ${rec.label}`} onOpen={onOpenCase} />
@@ -177,8 +177,8 @@ function OpCyclePanel({
       )}
       {low.length > 0 && (
         <div style={{ marginBottom: 16 }}>
-          <div style={{ fontWeight: 900, margin: "8px 0", color: themeColor("legacySlate"), letterSpacing: 0.3, fontSize: 11, textTransform: "uppercase" }}>
-            Confirmaciones recientes
+          <div style={{ fontWeight: 700, margin: "8px 0 4px", color: "#4ade80", letterSpacing: 0.5, fontSize: 10, textTransform: "uppercase" as const }}>
+            ✅ En gestión
           </div>
           {low.map(({ c, rec }) => (
             <Row key={c.id} c={c} right={`${rec.icon} ${rec.label}`} onOpen={onOpenCase} />
@@ -237,92 +237,54 @@ export function TerrainShell({
         : currentUser?.role ?? "—";
 
   return (
-    <div style={{ minHeight: "100vh", background: themeColor("legacyBlueBlock"), display: "flex", flexDirection: "column" }}>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          padding: "10px 16px",
-          background: themeColor("legacyBlueBlock"),
-          borderBottom: `1px solid ${themeColor("legacyDark4")}`,
-          marginBottom: 16,
-        }}
-      >
-        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-          <span style={{ fontWeight: 600, color: themeColor("legacySlate"), fontSize: 14 }}>SCCE</span>
-          <span style={{ opacity: 0.7, color: themeColor("mutedAlt"), fontSize: 13 }}>{roleLabel}</span>
-        </div>
-
+    <div style={{ minHeight: "100vh", background: "#0f172a", display: "flex", flexDirection: "column", fontFamily: "'Inter',system-ui,sans-serif" }}>
+      {/* Navbar modo terreno */}
+      <div style={{
+        display: "flex", justifyContent: "space-between", alignItems: "center",
+        padding: "0 16px", background: "#1e293b",
+        borderBottom: "1px solid #334155", minHeight: 48,
+      }}>
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          <span style={{ opacity: 0.6, fontSize: 12, color: themeColor("mutedAlt") }}>Elección 2026</span>
+          <span style={{ fontWeight: 800, color: "#60a5fa", fontSize: 15, letterSpacing: 0.5 }}>SCCE</span>
+          <span style={{ width: 1, height: 18, background: "#334155" }} />
+          <span style={{ color: "#94a3b8", fontSize: 12 }}>{roleLabel}</span>
+          {pendingCount > 0 && (
+            <span style={{ background: "#f59e0b", color: "#fff", fontWeight: 700, fontSize: 11, padding: "2px 8px", borderRadius: 99 }}>
+              {pendingCount} pendiente{pendingCount > 1 ? "s" : ""}
+            </span>
+          )}
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <span style={{ color: "#64748b", fontSize: 11 }}>Elección 2026</span>
           {!isCrisisMode && onGoToDashboard && (
-            <button
-              type="button"
-              onClick={onGoToDashboard}
-              style={{
-                background: themeColor("legacyDark4"),
-                color: themeColor("white"),
-                border: `1px solid ${rgbaFromKey("white", 0.1)}`,
-                padding: "6px 10px",
-                borderRadius: 8,
-                cursor: "pointer",
-                fontSize: 13,
-              }}
-              title="Ir al panel general"
-            >
-              Dashboard
+            <button type="button" onClick={onGoToDashboard}
+              style={{ background: "#3b82f6", color: "#fff", border: "none", padding: "5px 12px", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600 }}
+              title="Ir al panel general de operaciones">
+              Panel general
             </button>
           )}
           {membershipsCount > 1 && onSwitchContext && (
-            <button
-              type="button"
-              onClick={onSwitchContext}
-              style={{
-                background: themeColor("blueDark"),
-                color: themeColor("white"),
-                border: `1px solid ${rgbaFromKey("primary", 0.4)}`,
-                padding: "6px 12px",
-                borderRadius: 8,
-                cursor: "pointer",
-                fontSize: 13,
-              }}
-              title="Elegir otro rol/contexto sin cerrar sesión"
-            >
+            <button type="button" onClick={onSwitchContext}
+              style={{ background: "#1e40af", color: "#fff", border: "none", padding: "5px 12px", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600 }}
+              title="Cambiar a otro contexto o rol sin cerrar sesión">
               Cambiar contexto
             </button>
           )}
-          <button
-            type="button"
-            onClick={() => (onLogout ? onLogout() : window.location.reload())}
-            style={{
-              background: themeColor("mutedDarker"),
-              color: themeColor("white"),
-              border: "none",
-              padding: "6px 12px",
-              borderRadius: 8,
-              cursor: "pointer",
-              fontSize: 13,
-            }}
-            title="Cerrar sesión e iniciar con otro usuario"
-          >
-            Cambiar usuario
+          <button type="button" onClick={() => (onLogout ? onLogout() : window.location.reload())}
+            style={{ background: "#475569", color: "#fff", border: "none", padding: "5px 12px", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600 }}
+            title="Cerrar sesión">
+            Salir
           </button>
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "340px 1fr", gap: 12, padding: 12, flex: 1 }}>
-        <section>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
-            <span style={{ fontWeight: 700, color: themeColor("legacySlate"), fontSize: 12 }}>
-              Modo Operativo · {currentUser.name}
+      <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 0, flex: 1, minHeight: 0 }}>
+        {/* Sidebar de casos */}
+        <section style={{ background: "#1e293b", borderRight: "1px solid #334155", padding: "12px 14px", overflowY: "auto" as const }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+            <span style={{ fontWeight: 700, color: "#f1f5f9", fontSize: 13 }}>
+              Incidentes activos ({activeCases.length})
             </span>
-            <Chip tone={pendingCount > 0 ? "warning" : "neutral"} title="Instrucciones dirigidas a ti no cerradas">
-              Con pendientes: {pendingCount}
-            </Chip>
-          </div>
-          <div style={{ fontWeight: 700, marginBottom: 8, color: themeColor("mutedAlt"), fontSize: 14 }}>
-            Casos activos ({activeCases.length})
           </div>
 
         {filterPendingOnly && (
@@ -356,13 +318,16 @@ export function TerrainShell({
           </div>
         )}
 
-        <OpCyclePanel
-          cases={activeCases}
-          onOpenCase={(id) => setSelectedCaseId(id)}
-        />
-      </section>
+          <OpCyclePanel
+            cases={activeCases}
+            onOpenCase={(id) => setSelectedCaseId(id)}
+          />
+        </section>
 
-      <section>{children}</section>
+        {/* Contenido principal */}
+        <section style={{ padding: "16px", overflowY: "auto" as const, background: "#0f172a" }}>
+          {children}
+        </section>
       </div>
     </div>
   );

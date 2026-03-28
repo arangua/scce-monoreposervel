@@ -34,14 +34,11 @@ export class AuthService {
       where: { userId },
       select: {
         id: true,
-        userId: true,
         contextType: true,
         contextId: true,
         regionCode: true,
-        role: true,
         regionScopeMode: true,
         regionScope: true,
-        createdAt: true,
       },
       orderBy: { createdAt: "asc" },
     });

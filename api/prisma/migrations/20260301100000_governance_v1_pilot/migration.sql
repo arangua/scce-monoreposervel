@@ -1,0 +1,3 @@
+-- governance_v1_pilot
+-- Datos de gobernanza aplicados via seed (prisma/seed.ts).
+-- No requiere DDL adicional.

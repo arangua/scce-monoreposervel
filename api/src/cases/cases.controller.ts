@@ -1,11 +1,11 @@
-import { Controller, Get, Post, Body, Param, UseGuards, Req } from "@nestjs/common";
+import { Controller, Get, Post, Patch, Body, Param, UseGuards, Req } from "@nestjs/common";
 
 import { JwtAuthGuard } from "../auth/jwt.guard";
 import { ContextGuard } from "../auth/context.guard";
 import { Ctx, type ScceCtx } from "../auth/ctx.decorator";
 
 import { CasesService } from "./cases.service";
-import { CreateCaseDto, CreateCaseEventDto } from "./dto";
+import { CreateCaseDto, CreateCaseEventDto, UpdateCaseDto } from "./dto";
 
 type AuthedRequest = { user?: { userId: string }; scceContext?: ScceCtx };
 
@@ -44,5 +44,33 @@ export class CasesController {
   ) {
     const userId = req.user?.userId ?? "";
     return this.cases.addEvent(id, ctx.contextType, ctx.contextId, userId, dto);
+  }
+
+  // FASE 4: actualizar campos mutables
+  @Patch(":id")
+  update(
+    @Param("id") id: string,
+    @Body() dto: UpdateCaseDto,
+    @Ctx() ctx: ScceCtx,
+    @Req() req: AuthedRequest
+  ) {
+    const userId = req.user?.userId ?? "";
+    return this.cases.update(id, dto, ctx, userId);
+  }
+
+  // FASE 3: avanzar etapa decisional C2
+  @Patch(":id/stage")
+  advanceStage(
+    @Param("id") id: string,
+    @Body() body: { stage: string; justification?: string },
+    @Ctx() ctx: ScceCtx,
+    @Req() req: AuthedRequest
+  ) {
+    const userId = req.user?.userId ?? "";
+    return this.cases.advanceStage(
+      id, ctx.contextType, ctx.contextId, userId,
+      body.stage as any,
+      body.justification,
+    );
   }
 }

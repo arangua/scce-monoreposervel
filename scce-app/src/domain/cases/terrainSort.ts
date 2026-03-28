@@ -1,9 +1,54 @@
 /**
  * Orden táctico para vista terreno: pendientes → severidad → recencia.
  * Campos reales: criticalityScore, criticality, updatedAt.
+ * Fase 3.6: isClosedStatus, isInstructionForUser, totalPendingForUser.
  */
 
-type AnyUser = { id?: string } | null | undefined;
+type AnyUser = { id?: string; role?: string } | null | undefined;
+
+/** Fase 3.6/3.7 — instrucción con to y opcionalmente cc (para visibilidad y pendientes). */
+type InsLike = {
+  to?: { role?: string; userId?: string };
+  cc?: { role?: string; userId?: string }[];
+  status?: string;
+};
+
+/** Fase 3.6 — instrucción cerrada/resuelta (no pendiente). */
+export function isClosedStatus(s?: string | null): boolean {
+  const v = typeof s === "string" ? s.trim().toUpperCase() : "";
+  return v === "DONE" || v === "CERRADA" || v === "CLOSED" || v === "RESUELTA";
+}
+
+/** Fase 3.6/3.7 — visible si está en to O en cc (destinatario o copia). */
+export function isInstructionForUser(
+  ins: InsLike,
+  user: AnyUser
+): boolean {
+  if (!ins || !user?.id) return false;
+
+  if (ins.to?.userId && ins.to.userId === user.id) return true;
+  if (ins.to?.role && user.role && ins.to.role === user.role) return true;
+
+  if (ins.cc?.length) {
+    for (const cc of ins.cc) {
+      if (cc.userId && cc.userId === user.id) return true;
+      if (cc.role && user.role && cc.role === user.role) return true;
+    }
+  }
+
+  return false;
+}
+
+/** Fase 3.6 — total de instrucciones pendientes para el usuario en todos los casos. */
+export function totalPendingInstructionsForUser(
+  cases: { instructions?: InsLike[] }[],
+  currentUser: AnyUser
+): number {
+  const all = cases.flatMap((c) => c.instructions ?? []);
+  return all.filter(
+    (ins) => isInstructionForUser(ins, currentUser) && !isClosedStatus(ins.status)
+  ).length;
+}
 
 function toTimeMs(iso: string | null | undefined): number {
   if (iso == null || typeof iso !== "string") return 0;

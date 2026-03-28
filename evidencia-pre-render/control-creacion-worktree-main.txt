@@ -1,0 +1,30 @@
+﻿CONTROL CREACION WORKTREE MAIN — PRE RENDER
+Fecha: 2026-03-13 13:45:08
+====================================================================================================
+1) Rama actual en carpeta original
+wip/after-build-green
+====================================================================================================
+2) Estado corto en carpeta original
+ M api/prisma/schema.prisma
+ M api/prisma/seed.ts
+ M api/src/cases/cases.service.ts
+ M api/src/cases/dto.ts
+ M package-lock.json
+ M scce-app/package.json
+ M scce-app/src/App.tsx
+ M scce-app/src/domain/authSession.test.ts
+ M scce-app/src/domain/authSession.ts
+?? evidencia-pre-render/
+
+====================================================================================================
+3) Carpeta worktree creada
+C:\Users\arang\OneDrive\Escritorio\0001_SCCE_MAIN_PRE_RENDER
+====================================================================================================
+4) Rama en worktree nuevo
+main
+====================================================================================================
+5) Estado corto en worktree nuevo
+
+====================================================================================================
+6) Objetivo
+Preparar una copia limpia en main sin tocar ni mover el arbol actual de wip/after-build-green.

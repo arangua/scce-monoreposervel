@@ -1,0 +1,31 @@
+﻿CONTROL COPIA EVIDENCIA A WORKTREE MAIN
+Fecha: 2026-03-13 13:49:22
+====================================================================================================
+1) Repo origen actual
+C:\Users\arang\OneDrive\Escritorio\0001 SCCE_REVISION
+====================================================================================================
+2) Repo destino worktree main
+C:\Users\arang\OneDrive\Escritorio\0001_SCCE_MAIN_PRE_RENDER
+====================================================================================================
+3) Rama en origen
+wip/after-build-green
+====================================================================================================
+4) Rama en destino
+main
+====================================================================================================
+5) Archivos copiados al destino
+FullName                                                                                                              
+--------                                                                                                              
+C:\Users\arang\OneDrive\Escritorio\0001_SCCE_MAIN_PRE_RENDER\evidencia-pre-render\extraccion-objetivo-wip             
+C:\Users\arang\OneDrive\Escritorio\0001_SCCE_MAIN_PRE_RENDER\evidencia-pre-render\extraccion-objetivo-wip\api         
+C:\Users\arang\OneDrive\Escritorio\0001_SCCE_MAIN_PRE_RENDER\evidencia-pre-render\extraccion-objetivo-wip\scce-app    
+C:\Users\arang\OneDrive\Escritorio\0001_SCCE_MAIN_PRE_RENDER\evidencia-pre-render\extraccion-objetivo-wip\api\prisma  
+C:\Users\arang\OneDrive\Escritorio\0001_SCCE_MAIN_PRE_RENDER\evidencia-pre-render\extraccion-objetivo-wip\api\src     
+C:\Users\arang\OneDrive\Escritorio\0001_SCCE_MAIN_PRE_RENDER\evidencia-pre-render\extraccion-objetivo-wip\api\src\auth
+C:\Users\arang\OneDrive\Escritorio\0001_SCCE_MAIN_PRE_RENDER\evidencia-pre-render\extraccion-objetivo-wip\scce-app\src
+====================================================================================================
+6) Estado corto en destino despues de la copia
+
+====================================================================================================
+7) Objetivo
+Dejar en el worktree main el script y los archivos objetivo congelados, sin ejecutar la alineacion todavia.

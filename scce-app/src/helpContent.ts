@@ -1,11 +1,14 @@
 export type ViewKey =
   | "dashboard"
+  | "cop"
+  | "op_home"
   | "catalog"
   | "audit"
   | "reports"
   | "simulation"
   | "checklist"
   | "config"
+  | "trust"
   | "new_case"
   | "detail"
   | "op_home"
@@ -19,6 +22,16 @@ export type HelpBlock = {
 };
 
 export const helpByView: Record<ViewKey, HelpBlock> = {
+  cop: {
+    title: "COP — Estado Operacional",
+    purpose: "Vista consolidada del estado operacional en tiempo real: casos activos, etapas C2, SLA y alertas inmediatas.",
+    quickSteps: [
+      "Revisa los KPIs superiores para una lectura rápida del estado.",
+      "El bloque de alertas muestra casos críticos con SLA vencido.",
+      "El gráfico de etapas C2 muestra dónde están atascados los casos.",
+      "Haz click en cualquier caso para abrir su detalle."
+    ]
+  },
   dashboard: {
     title: "Inicio",
     purpose:
@@ -27,6 +40,16 @@ export const helpByView: Record<ViewKey, HelpBlock> = {
       "Revisa los números principales.",
       "Observa si hay alertas o situaciones pendientes.",
       "Usa las pestañas superiores para ir al módulo que necesites."
+    ]
+  },
+
+  op_home: {
+    title: "Modo Operativo — Inicio",
+    purpose: "Vista de terreno: casos del local asignado y respuestas recibidas.",
+    quickSteps: [
+      "Selecciona un caso de la izquierda para ver detalle.",
+      "Usa + Nuevo incidente para registrar un incidente.",
+      "Usa Volver para regresar a esta pantalla."
     ]
   },
 
@@ -127,25 +150,13 @@ export const helpByView: Record<ViewKey, HelpBlock> = {
     ]
   },
 
-  op_home: {
-    title: "Operaciones - Inicio",
-    purpose:
-      "Vista de operaciones: casos y prioridades para el terreno.",
-    quickSteps: [
-      "Revisa los casos ordenados por prioridad.",
-      "Abre un caso para ver detalle o instrucciones.",
-      "Usa los filtros si necesitas acotar la lista."
-    ]
-  },
-
   trust: {
-    title: "Claves de confianza",
-    purpose:
-      "Gestionar claves de firma y lista de claves confiables para import/export.",
+    title: "Firma y confianza",
+    purpose: "Ver estado de verificación de autoría, llave local y lista de firmantes confiables.",
     quickSteps: [
-      "Revisa el estado de tu clave local.",
-      "Agrega o quita claves de la lista confiable.",
-      "Export e import usan estas claves para verificación."
+      "Revisa si la verificación está disponible y si tienes llave configurada.",
+      "Agrega o quita firmantes confiables según necesidad.",
+      "Al importar, un firmante confiable evita tener que escribir CONFIAR."
     ]
   }
 };
