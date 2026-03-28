@@ -1,5 +1,6 @@
 export type ViewKey =
   | "dashboard"
+  | "cop"
   | "op_home"
   | "catalog"
   | "audit"
@@ -19,6 +20,16 @@ export type HelpBlock = {
 };
 
 export const helpByView: Record<ViewKey, HelpBlock> = {
+  cop: {
+    title: "COP — Estado Operacional",
+    purpose: "Vista consolidada del estado operacional en tiempo real: casos activos, etapas C2, SLA y alertas inmediatas.",
+    quickSteps: [
+      "Revisa los KPIs superiores para una lectura rápida del estado.",
+      "El bloque de alertas muestra casos críticos con SLA vencido.",
+      "El gráfico de etapas C2 muestra dónde están atascados los casos.",
+      "Haz click en cualquier caso para abrir su detalle."
+    ]
+  },
   dashboard: {
     title: "Inicio",
     purpose:

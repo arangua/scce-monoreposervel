@@ -44,6 +44,7 @@ import { NewCaseView } from "./components/NewCaseView";
 import { CatalogView } from "./components/CatalogView";
 import { ReportsView } from "./components/ReportsView";
 import { CaseDetailView } from "./components/CaseDetailView";
+import { CopView } from "./components/CopView";
 import { useAppStore } from "./store/useAppStore";
 import { useAuth } from "./hooks/useAuth";
 import { useExportImport } from "./hooks/useExportImport";
@@ -912,9 +913,9 @@ export default function App(){
       <div style={S.nav}>
         <span style={{fontWeight:800,color:themeColor("primary"),fontSize:"13px",marginRight:4,letterSpacing:.5}}>SCCE</span>
         <span style={{color:themeColor("mutedDarker"),fontSize:"10px",marginRight:8}}>v{APP_VERSION}</span>
-        {(["dashboard","catalog","audit","reports","simulation","checklist","config"] as const).map(v=>(
+        {(["dashboard","cop","catalog","audit","reports","simulation","checklist","config"] as const).map(v=>(
           <button key={v} style={S.nBtn(view===v)} onClick={()=>setView(v)}>
-            {v==="dashboard"?"Dashboard":v==="catalog"?"🗂 Catálogo":v==="audit"?"🔗 Auditoría":v==="reports"?"Reportes":v==="simulation"?"Simulación":v==="checklist"?"Checklist":"Config"}
+            {v==="dashboard"?"Dashboard":v==="cop"?"🎯 COP":v==="catalog"?"🗂 Catálogo":v==="audit"?"🔗 Auditoría":v==="reports"?"Reportes":v==="simulation"?"Simulación":v==="checklist"?"Checklist":"Config"}
           </button>
         ))}
         <button style={{background:themeColor("greenText"),color:themeColor("white"),border:"1px solid #22c55e66",padding:"5px 12px",borderRadius:"4px",cursor:"pointer",fontSize:"12px",fontWeight:700,boxShadow:"0 0 8px #16a34a44"}} onClick={startNewCase}>+ Incidente</button>
@@ -1038,6 +1039,7 @@ export default function App(){
 
       <div style={{maxWidth:1100,margin:"0 auto",padding:"12px 16px"}}>
         {view==="dashboard"&&<DashboardView/>}
+        {view==="cop"&&<CopView/>}
         {view==="new_case"&&<NewCaseView/>}
         {view==="detail"&&<CaseDetailView exportCaseTXT={exportCaseTXT}/>}
         {view==="catalog"&&<CatalogView/>}
