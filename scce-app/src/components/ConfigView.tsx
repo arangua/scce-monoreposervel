@@ -10,6 +10,8 @@ import { appendEvent } from "../domain/audit";
 import type { AuditLogEntry, LocalCatalog, ElectionConfig } from "../domain/types";
 import type { PolicyUser } from "../domain/policyEngine";
 import { importarLocalesDesdeExcel, type ExcelRow } from "../domain/catalog";
+import { importCatalogToApi } from "../hooks/useCatalogApi";
+import { getToken, getActiveMembership } from "../domain/authSession";
 
 export type { ElectionConfig }; // re-exportar para compatibilidad con imports existentes
 
@@ -104,28 +106,43 @@ export function ConfigView({
   ) {
     setEstado({ loading: true, resultado: null });
     try {
-      // Leer Excel con SheetJS (disponible globalmente via CDN o import dinámico)
+      // 1. Leer y parsear Excel con SheetJS
       const XLSX = await import("https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs");
       const buffer = await file.arrayBuffer();
       const wb     = XLSX.read(buffer, { type: "array" });
       const ws     = wb.Sheets[wb.SheetNames[0]];
       const filas  = XLSX.utils.sheet_to_json(ws, { defval: "" }) as ExcelRow[];
 
+      // 2. Validar contra DPA oficial
       const resultado = importarLocalesDesdeExcel(filas, modo);
-
       if (resultado.errores.length > 0) {
         setEstado({ loading: false, resultado });
         return;
       }
 
-      // Aplicar al catálogo
+      // 3. Persistir en la API si hay sesión activa
+      const tieneSession = !!getToken() && !!getActiveMembership();
+      if (tieneSession) {
+        const itemsApi = resultado.catalog.map(l => ({
+          regionCode:  l.region,
+          communeCode: l.commune,
+          nombre:      l.nombre,
+          direccion:   (l as { direccion?: string }).direccion,
+          mesas:       (l as { mesas?: number }).mesas,
+        }));
+        const apiRes = await importCatalogToApi(itemsApi, modo);
+        if (!apiRes) {
+          // API falló — advertir pero continuar con localStorage
+          notify("⚠️ No se pudo persistir en el servidor. El catálogo se guardó localmente.", "warning");
+        }
+      }
+
+      // 4. Actualizar estado local (y localStorage via useEffect en AppContext)
       setLocalCatalog(prev => {
         if (modo === "eleccion") {
-          // Reemplaza locales de elección, mantiene los de simulación
           const simLocales = prev.filter(l => !l.activoEnEleccionActual);
           return [...simLocales, ...resultado.catalog];
         } else {
-          // Reemplaza locales de simulación, mantiene los de elección
           const elecLocales = prev.filter(l => l.activoEnEleccionActual);
           return [...elecLocales, ...resultado.catalog];
         }
@@ -133,19 +150,19 @@ export function ConfigView({
 
       if (currentUser) {
         setAuditLog(prev => appendEvent(
-          prev,
-          "CATALOG_IMPORTED",
-          currentUser.id,
-          currentUser.role,
-          null,
-          `Catálogo ${modo}: ${resultado.totalImportados} locales importados desde ${file.name}`
+          prev, "CATALOG_IMPORTED",
+          currentUser.id, currentUser.role, null,
+          `Catálogo ${modo}: ${resultado.totalImportados} locales desde ${file.name}${
+            tieneSession ? " [API+local]" : " [local]"
+          }`
         ));
       }
 
       setEstado({ loading: false, resultado });
       notify(
-        `${resultado.totalImportados} locales importados correctamente` +
-        (resultado.advertencias.length > 0 ? ` (${resultado.advertencias.length} advertencias)` : ""),
+        `${resultado.totalImportados} locales importados` +
+        (tieneSession ? " y guardados en el servidor" : " (guardados localmente)") +
+        (resultado.advertencias.length > 0 ? ` — ${resultado.advertencias.length} advertencias` : ""),
         resultado.advertencias.length > 0 ? "warning" : "success"
       );
     } catch (err) {

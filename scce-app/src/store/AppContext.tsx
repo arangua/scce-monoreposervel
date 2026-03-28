@@ -44,6 +44,7 @@ import { type PolicyUser } from "../domain/policyEngine";
 import { type ViewKey } from "../helpContent";
 import { buildCatalogSeed, buildCatalogDemo } from "../domain/catalog";
 import { makeSeedCases, makeSeedAudit } from "../domain/seed";
+import { fetchCatalogFromApi } from "../hooks/useCatalogApi";
 
 // ─── Tipos auxiliares ────────────────────────────────────────────────────────
 
@@ -349,22 +350,40 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [ctxErr, setCtxErr] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
 
-  // ── Persistencia de catálogo ───────────────────────────────────────────────
-  // Guarda en localStorage cada vez que el catálogo cambia
+  // ── Persistencia de catálogo: API primero, localStorage como fallback ────────
+  //
+  // Cuando el membership cambia (login), intenta cargar desde la API.
+  // Si no hay sesión activa o la API falla, cae a localStorage (piloto offline).
+  // El localStorage sigue actualizándose como cache local.
+  useEffect(() => {
+    if (!activeMembership?.id) return;
+
+    async function cargarCatalogo() {
+      // 1. Intentar API
+      const apiCatalog = await fetchCatalogFromApi();
+      if (apiCatalog !== null) {
+        // API respondió — usar como fuente de verdad
+        setLocalCatalog(apiCatalog);
+        // Actualizar localStorage como cache
+        saveCatalog(apiCatalog, activeMembership?.id);
+        return;
+      }
+      // 2. Fallback: localStorage
+      const saved = loadCatalog(activeMembership?.id);
+      if (saved && saved.length > 0) {
+        setLocalCatalog(saved);
+      }
+      // 3. Si no hay nada guardado, mantener el demo actual
+    }
+
+    void cargarCatalogo();
+  }, [activeMembership?.id]);
+
+  // Cache local: guarda en localStorage cada vez que el catálogo cambia
+  // (cubre tanto el caso online como offline)
   useEffect(() => {
     saveCatalog(localCatalog, activeMembership?.id ?? activeMembershipId);
   }, [localCatalog, activeMembership]);
-
-  // Cuando el membership cambia (usuario hace login), recarga el catálogo
-  // correcto para ese membership. Si no hay catlog guardado, mantiene el actual.
-  useEffect(() => {
-    if (!activeMembership?.id) return;
-    const saved = loadCatalog(activeMembership.id);
-    if (saved && saved.length > 0) {
-      setLocalCatalog(saved);
-    }
-    // Si no hay catolog guardado para este membership, no sobreescribir el actual
-  }, [activeMembership?.id]);
 
   // Tema visual (persiste en localStorage)
   const [darkMode, setDarkMode] = useState<boolean>(() => {
