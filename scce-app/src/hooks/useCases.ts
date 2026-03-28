@@ -282,6 +282,9 @@ export function useCases({
       )
     );
     setAuditLog((prev) => appendEvent(prev, "STATUS_CHANGED", currentUser.id, currentUser.role, caseId, "Estado → Recepcionado por DR"));
+    // FASE 4: persistir en API
+    const afterRec = cases.find((x) => x.id === caseId);
+    if (afterRec) syncCase({ ...afterRec, status: "Recepcionado por DR" });
     notify("Caso recepcionado", "success");
   }
 
@@ -336,6 +339,9 @@ export function useCases({
       })
     );
     setAuditLog((prev) => appendEvent(prev, "STATUS_CHANGED", currentUser.id, currentUser.role, caseId, `Estado → ${newStatus}`));
+    // FASE 4: persistir en API
+    const updated = cases.find((x) => x.id === caseId);
+    if (updated) syncCase({ ...updated, status: newStatus });
   }
 
   function validateBypass(caseId: string, decision: string, fundament: string) {
@@ -422,6 +428,9 @@ export function useCases({
       })
     );
     setAuditLog((prev) => appendEvent(prev, "ACTION_ADDED", currentUser.id, currentUser.role, caseId, action.slice(0, 80)));
+    // FASE 4: persistir en API
+    const afterAdd = cases.find((x) => x.id === caseId);
+    if (afterAdd) syncCase(afterAdd);
   }
 
   function addDecision(caseId: string, fundament: string) {
@@ -441,6 +450,9 @@ export function useCases({
       })
     );
     setAuditLog((prev) => appendEvent(prev, "DECISION_ADDED", currentUser.id, currentUser.role, caseId, fundament.slice(0, 60)));
+    // FASE 4: persistir en API
+    const afterDec = cases.find((x) => x.id === caseId);
+    if (afterDec) syncCase(afterDec);
   }
 
   function addComment(caseId: string, comment: string) {
@@ -629,6 +641,36 @@ export function useCases({
     notify("Instrucción cerrada", "success");
   }
 
+  // FASE 4: sincronizar caso con la API (fire-and-forget, no bloquea UI)
+  async function syncCase(updatedCase: import("../domain/types").CaseItem) {
+    const token = authToken;
+    const ctx = getActiveMembership();
+    if (!token || !ctx) return; // sin sesión activa, solo local
+    const headers: Record<string, string> = {};
+    if (ctx.id) headers["x-scce-membership-id"] = ctx.id;
+    if (ctx.contextType) headers["x-scce-context-type"] = ctx.contextType;
+    if (ctx.contextId) headers["x-scce-context-id"] = ctx.contextId;
+    await apiRequest(`/cases/${updatedCase.id}`, {
+      method: "PATCH",
+      token,
+      headers,
+      body: {
+        status: updatedCase.status,
+        actions: updatedCase.actions ?? [],
+        decisions: updatedCase.decisions ?? [],
+        instructions: updatedCase.instructions ?? [],
+        assignedTo: updatedCase.assignedTo ?? null,
+        completeness: updatedCase.completeness ?? 0,
+        closingMotivo: updatedCase.closingMotivo ?? null,
+        dataConfidence: updatedCase.dataConfidence ?? "UNKNOWN",
+        orientation: updatedCase.orientation ?? null,
+        evaluation: updatedCase.evaluation ?? {},
+      },
+    });
+    // Si falla, no hacemos nada — el estado local sigue siendo válido
+    // En una futura iteración se puede agregar retry o notificación
+  }
+
   // FASE 3: avanzar etapa decisional C2
   async function advanceStage(
     caseId: string,
@@ -715,5 +757,6 @@ export function useCases({
     ackInstruction,
     closeInstruction,
     advanceStage,
+    syncCase,
   };
 }

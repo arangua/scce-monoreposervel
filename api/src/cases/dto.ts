@@ -101,6 +101,61 @@ export class CreateCaseDto {
   orientation?: OrientationPayload;
 }
 
+// --- FASE 4: DTO para actualizar campos mutables de un caso ---
+export class UpdateCaseDto {
+  @IsOptional()
+  @IsString()
+  status?: string;
+
+  @IsOptional()
+  @IsString()
+  criticality?: string;
+
+  @IsOptional()
+  @IsArray()
+  actions?: Array<Record<string, unknown>>;
+
+  @IsOptional()
+  @IsArray()
+  decisions?: Array<Record<string, unknown>>;
+
+  @IsOptional()
+  @IsArray()
+  instructions?: Array<Record<string, unknown>>;
+
+  @IsOptional()
+  @IsArray()
+  timeline?: Array<Record<string, unknown>>;
+
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsString()
+  assignedTo?: string | null;
+
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsString()
+  closingMotivo?: string | null;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(100)
+  completeness?: number;
+
+  @IsOptional()
+  @IsIn(DATA_CONFIDENCE_VALUES)
+  dataConfidence?: DataConfidenceValue;
+
+  @IsOptional()
+  @IsObject()
+  orientation?: OrientationPayload;
+
+  @IsOptional()
+  @IsObject()
+  evaluation?: Record<string, number>;
+}
+
 // --- NUEVO: DTO para agregar eventos a un caso (append-only) ---
 
 export const ALLOWED_EVENT_TYPES = [

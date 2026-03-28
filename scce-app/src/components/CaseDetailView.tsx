@@ -140,6 +140,7 @@ function CaseDetailContent({
     ackInstruction,
     closeInstruction,
     advanceStage,
+    syncCase,
   } = useCases({ assignedCommuneEffective, assignedLocalIdEffective });
 
   // FASE 3: estado local para el panel de etapa decisional
@@ -384,6 +385,8 @@ function CaseDetailContent({
                 if (!motDraft) return notify("Ingresa el motivo", "error");
                 setCases(prev => prev.map(x => x.id !== c.id ? x : { ...x, closingMotivo: motDraft, updatedAt: nowISO() }));
                 setAuditLog(prev => appendEvent(prev, "CASE_UPDATED", currentUser!.id, currentUser!.role, c.id, "Motivo de cierre registrado"));
+                // FASE 4: persistir motivo en API
+                syncCase({ ...c, closingMotivo: motDraft });
                 notify("Motivo guardado", "success");
               }}>{c.closingMotivo ? "Actualizar" : "Guardar motivo"}</button>
               {c.closingMotivo && <div style={{ marginTop: 4, fontSize: "11px", color: themeColor("success") }}>✓ {c.closingMotivo.slice(0, 60)}</div>}
@@ -526,6 +529,8 @@ function CaseDetailContent({
                       };
                       setCases(prev => prev.map(x => x.id !== c.id ? x : { ...x, dataConfidence: confidenceDraft, orientation: newOrientation, updatedAt: now }));
                       setAuditLog(prev => appendEvent(prev, "CASE_UPDATED", currentUser!.id, currentUser!.role, c.id, `Orientación C2 registrada — confianza: ${confidenceDraft}`));
+                      // FASE 4: persistir orientación en API
+                      syncCase({ ...c, dataConfidence: confidenceDraft, orientation: newOrientation });
                       setShowOrientationForm(false);
                       notify("Orientación registrada", "success");
                     }}

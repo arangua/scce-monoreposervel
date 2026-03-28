@@ -35,7 +35,7 @@ export const DB_TO_UI_STATUS: Record<CaseStatus, string> = {
 import { ScceCtx } from "../auth/ctx.decorator";
 import { PrismaService } from "../prisma.service";
 import { sha256 } from "../common/hash";
-import { CreateCaseDto, CreateCaseEventDto } from "./dto";
+import { CreateCaseDto, CreateCaseEventDto, UpdateCaseDto } from "./dto";
 
 function regionWhere(ctx: ScceCtx) {
   if (!ctx.regionScopeMode) return {};
@@ -236,6 +236,52 @@ export class CasesService {
     }
 
     return events;
+  }
+
+  // --- FASE 4: actualizar campos mutables de un caso ---
+  async update(id: string, dto: UpdateCaseDto, ctx: ScceCtx, actorId: string) {
+    const c = await this.prisma.case.findFirst({
+      where: { id, contextType: ctx.contextType, contextId: ctx.contextId, ...regionWhere(ctx) },
+    });
+    if (!c) throw new NotFoundException("Caso no encontrado");
+    if (c.status === CaseStatus.CLOSED) throw new ConflictException("Caso cerrado");
+
+    // Mapear status UI → DB si viene en el payload
+    const newStatus: CaseStatus | undefined = dto.status
+      ? (UI_TO_DB_STATUS[dto.status] ?? undefined)
+      : undefined;
+
+    // Construir el objeto de actualización solo con campos presentes
+    const data: Record<string, unknown> = { updatedAt: new Date() };
+    if (newStatus !== undefined)     data.status        = newStatus;
+    if (dto.actions !== undefined)   data.actions       = dto.actions;
+    if (dto.decisions !== undefined) data.decisions     = dto.decisions;
+    if (dto.instructions !== undefined) data.instructions = dto.instructions;
+    if (dto.timeline !== undefined)  data.timeline      = dto.timeline;
+    if (dto.assignedTo !== undefined) data.assignedTo   = dto.assignedTo;
+    if (dto.completeness !== undefined) data.completeness = dto.completeness;
+    if (dto.evaluation !== undefined) data.evaluation   = dto.evaluation;
+    if (dto.dataConfidence !== undefined) data.dataConfidence = dto.dataConfidence as DataConfidence;
+    if (dto.orientation !== undefined) data.orientation  = dto.orientation;
+    // closingMotivo se guarda en campo detail (campo libre ya existente)
+    if (dto.closingMotivo !== undefined) data.detail = dto.closingMotivo;
+
+    // Side effect: si se cierra el caso, fijar decisionStage
+    if (newStatus === CaseStatus.CLOSED) data.decisionStage = DecisionStage.CLOSED;
+
+    const updated = await this.prisma.case.update({ where: { id }, data: data as any });
+
+    // Evento de auditoría inmutable
+    const last = await this.prisma.event.findFirst({ where: { caseId: id }, orderBy: { createdAt: "desc" } });
+    const prevHash = last?.hash ?? "";
+    const createdAt = new Date();
+    const payloadJson = { fields: Object.keys(data).filter(k => k !== "updatedAt") };
+    const hash = computeEventHash({ prevHash, caseId: id, eventType: "CHANGE_CRITICALITY", payloadJson, createdAtIso: createdAt.toISOString() });
+    await this.prisma.event.create({
+      data: { caseId: id, contextType: ctx.contextType, contextId: ctx.contextId, actorId, eventType: "CHANGE_CRITICALITY", payloadJson: payloadJson as any, prevHash: prevHash || null, hash, createdAt },
+    });
+
+    return updated;
   }
 
   // --- FASE 3: avanzar etapa decisional C2 ---
