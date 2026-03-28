@@ -7,17 +7,13 @@
 import React, { useState } from "react";
 import { themeColor } from "../theme";
 import { appendEvent } from "../domain/audit";
-import type { AuditLogEntry, LocalCatalog } from "../domain/types";
+import type { AuditLogEntry, LocalCatalog, ElectionConfig } from "../domain/types";
 import type { PolicyUser } from "../domain/policyEngine";
+
+export type { ElectionConfig }; // re-exportar para compatibilidad con imports existentes
 
 const APP_VERSION = "1.9";
 const MIN_ELECTION_YEAR = 2026;
-
-export type ElectionConfig = {
-  name: string;
-  date: string;
-  year: number;
-};
 
 export type ConfigViewProps = {
   electionConfig: ElectionConfig;

@@ -143,7 +143,7 @@ regionCode, regionScopeMode (RegionScopeMode enum: ALL|LIST), regionScope (text[
 | DEUDA-002 | regionCode semántico (TRP) vs ISO (15) — sin mapeo explícito | 🟠 | 🔄 Agrupar con DEUDA-005 (refactor App.tsx) |
 | DEUDA-003 | Sin ExceptionFilter global → stack traces no se loggean en prod | 🟠 | ✅ RESUELTO 2026-03-27 |
 | DEUDA-004 | JWT secret hardcodeado (`SCCE_DEV_SECRET_CHANGE_ME`) | 🟠 | ⚠️ Solo dev, OK por ahora |
-| DEUDA-005 | God Component App.tsx (~3900 líneas) | 🔴 | 🔄 Plan elaborado — ver docs/QA/REFACTOR_PLAN_APP.md |
+| DEUDA-005 | God Component App.tsx (~3900 líneas) | 🔴 | ✅ RESUELTO 2026-03-27 — 196 558 → 52 574 bytes (−73%) |
 
 ---
 

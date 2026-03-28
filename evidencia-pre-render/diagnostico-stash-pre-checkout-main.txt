@@ -1,0 +1,49 @@
+﻿DIAGNOSTICO STASH — PRE CHECKOUT A MAIN
+Fecha: 2026-03-13 13:42:51
+====================================================================================================
+1) Rama actual
+wip/after-build-green
+====================================================================================================
+2) Ultimos 3 stashes
+stash@{0}: On wip/after-build-green: pre-render/pre-checkout-main/2026-03-13
+stash@{1}: On wip/after-build-green: temp-before-rebase-context-fix-20260310
+
+====================================================================================================
+3) Estado corto actual
+ M api/prisma/schema.prisma
+ M api/prisma/seed.ts
+ M api/src/cases/cases.service.ts
+ M api/src/cases/dto.ts
+ M package-lock.json
+ M scce-app/package.json
+ M scce-app/src/App.tsx
+ M scce-app/src/domain/authSession.test.ts
+ M scce-app/src/domain/authSession.ts
+?? evidencia-pre-render/
+
+====================================================================================================
+4) Archivos contenidos en stash@{0}
+M	api/prisma/schema.prisma
+M	api/prisma/seed.ts
+M	api/src/cases/cases.service.ts
+M	api/src/cases/dto.ts
+M	package-lock.json
+M	scce-app/package.json
+M	scce-app/src/App.tsx
+M	scce-app/src/domain/authSession.test.ts
+M	scce-app/src/domain/authSession.ts
+====================================================================================================
+5) Diff resumido de stash@{0}
+api/prisma/schema.prisma                | 140 +++++--
+ api/prisma/seed.ts                      |  76 ++--
+ api/src/cases/cases.service.ts          |  21 +-
+ api/src/cases/dto.ts                    |  36 +-
+ package-lock.json                       |  64 ++++
+ scce-app/package.json                   |   5 +-
+ scce-app/src/App.tsx                    | 634 +++++++++++++++++++++-----------
+ scce-app/src/domain/authSession.test.ts |  39 +-
+ scce-app/src/domain/authSession.ts      |  41 ++-
+ 9 files changed, 733 insertions(+), 323 deletions(-)
+====================================================================================================
+6) Objetivo
+Confirmar si el stash guardo realmente los archivos rastreados clave o si el working tree quedo intacto.

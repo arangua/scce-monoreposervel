@@ -25,9 +25,39 @@ enum RegionScopeMode {
   LIST
 }
 
+// FASE 0: estados ricos del caso (7 valores — mapean al flujo UI completo)
+// El tipo en PostgreSQL se llama CaseStatusRich (migración 20260328100000_phase0_case_status_rich)
 enum CaseStatus {
-  OPEN
-  CLOSED
+  NEW           // "Nuevo"
+  RECEIVED      // "Recepcionado por DR"
+  IN_MANAGEMENT // "En gestión"
+  ESCALATED     // "Escalado"
+  MITIGATED     // "Mitigado"
+  RESOLVED      // "Resuelto"
+  CLOSED        // "Cerrado"
+
+  @@map("CaseStatusRich")
+}
+
+// FASE 0: etapas del flujo decisional C2 (8 etapas del modelo v2)
+enum DecisionStage {
+  DETECTED   // Etapa 1: ¿Qué ocurrió?
+  VALIDATED  // Etapa 2: ¿Qué sabemos realmente?
+  ORIENTED   // Etapa 3: ¿Qué significa?
+  CLASSIFIED // Etapa 4: ¿Cuál es la criticidad?
+  DECIDED    // Etapa 5: ¿Se resuelve o escala?
+  EXECUTING  // Etapa 6: ¿Quién hace qué?
+  VERIFIED   // Etapa 7: ¿Funcionó?
+  CLOSED     // Etapa 8: Cerrar o reescalar
+}
+
+// FASE 1: nivel de confianza del dato
+enum DataConfidence {
+  VERIFIED  // Confirmado por ≥2 fuentes independientes
+  HIGH      // Una fuente confiable, sin contradicción
+  MEDIUM    // Fuente única, no verificada
+  LOW       // Rumor o reporte indirecto
+  UNKNOWN   // No evaluado aún (default)
 }
 
 enum CriticalityLevel {
@@ -49,6 +79,8 @@ enum EventType {
   ASSIGNMENT_CHANGED
   ACTION_ADDED
   DECISION_ADDED
+  COMMAND_TRANSFER // FASE 3: transferencia formal de mando
+  STAGE_ADVANCED   // FASE 0: avance de etapa decisional
 }
 
 model Region {
@@ -129,6 +161,19 @@ model Case {
   actions          Json?
   decisions        Json?
   instructions     Json?
+
+  // FASE 0: etapa del flujo decisional C2
+  decisionStage    DecisionStage @default(DETECTED)
+
+  // FASE 1: nivel de confianza del dato (default UNKNOWN al crear)
+  dataConfidence   DataConfidence @default(UNKNOWN)
+
+  // FASE 1: orientación (análisis operacional/jurídico/reputacional)
+  // JSON: { operationalMeaning, legalRisk, reputationalRisk, orientedBy, orientedAt }
+  orientation      Json?
+
+  // Columna legacy preservada para rollback (eliminar tras validación)
+  statusLegacy     String?
 
   Event            Event[]
 

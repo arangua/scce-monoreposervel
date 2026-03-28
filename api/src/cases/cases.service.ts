@@ -4,7 +4,33 @@ import {
   ConflictException,
   ForbiddenException,
 } from "@nestjs/common";
-import { CaseStatus, ContextType, Prisma } from "@prisma/client";
+import { CaseStatus, DecisionStage, DataConfidence, ContextType, Prisma } from "@prisma/client";
+
+// FASE 0: mapping UI status (español) → enum CaseStatus (BD)
+export const UI_TO_DB_STATUS: Record<string, CaseStatus> = {
+  "Nuevo":               CaseStatus.NEW,
+  "Recepcionado por DR": CaseStatus.RECEIVED,
+  "En gestión":          CaseStatus.IN_MANAGEMENT,
+  "Escalado":            CaseStatus.ESCALATED,
+  "Mitigado":            CaseStatus.MITIGATED,
+  "Resuelto":            CaseStatus.RESOLVED,
+  "Cerrado":             CaseStatus.CLOSED,
+  // valores legacy del frontend anterior
+  "OPEN":               CaseStatus.NEW,
+  "CLOSED":             CaseStatus.CLOSED,
+  "IN_PROGRESS":        CaseStatus.IN_MANAGEMENT,
+};
+
+// FASE 0: mapping inverso BD → UI status
+export const DB_TO_UI_STATUS: Record<CaseStatus, string> = {
+  [CaseStatus.NEW]:           "Nuevo",
+  [CaseStatus.RECEIVED]:      "Recepcionado por DR",
+  [CaseStatus.IN_MANAGEMENT]: "En gestión",
+  [CaseStatus.ESCALATED]:     "Escalado",
+  [CaseStatus.MITIGATED]:     "Mitigado",
+  [CaseStatus.RESOLVED]:      "Resuelto",
+  [CaseStatus.CLOSED]:        "Cerrado",
+};
 
 import { ScceCtx } from "../auth/ctx.decorator";
 import { PrismaService } from "../prisma.service";
@@ -101,7 +127,8 @@ export class CasesService {
 
     const contextType = ctx.contextType;
     const contextId = ctx.contextId;
-    const status: CaseStatus = dto.status === "CLOSED" ? CaseStatus.CLOSED : CaseStatus.OPEN;
+    // FASE 0: mapear status del DTO al enum rico
+    const status: CaseStatus = UI_TO_DB_STATUS[dto.status ?? ""] ?? CaseStatus.NEW;
     const criticality = dto.criticality ?? "MEDIA";
 
     const created = await this.prisma.case.create({
@@ -128,6 +155,10 @@ export class CasesService {
         actions: (dto.actions ?? undefined) as Prisma.InputJsonValue | undefined,
         decisions: (dto.decisions ?? undefined) as Prisma.InputJsonValue | undefined,
         instructions: (dto.instructions ?? undefined) as Prisma.InputJsonValue | undefined,
+        // FASE 1: confianza del dato y orientación
+        dataConfidence: (dto.dataConfidence as DataConfidence | undefined) ?? DataConfidence.UNKNOWN,
+        orientation: (dto.orientation ?? undefined) as Prisma.InputJsonValue | undefined,
+        // statusLegacy: columna de rollback, nullable tras migración 20260328160000
       },
     });
 
@@ -270,11 +301,15 @@ export class CasesService {
           },
         });
 
-        // Side-effect controlado: al cerrar, actualiza status del caso (sin romper append-only)
+        // Side-effect controlado: al cerrar, actualiza status + decisionStage
         if (dto.eventType === "CASE_CLOSED") {
           await tx.case.update({
             where: { id: caseId },
-            data: { status: CaseStatus.CLOSED, updatedAt: new Date() },
+            data: {
+              status: CaseStatus.CLOSED,
+              decisionStage: DecisionStage.CLOSED,
+              updatedAt: new Date(),
+            },
           });
         }
 

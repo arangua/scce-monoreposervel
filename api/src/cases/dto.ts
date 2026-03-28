@@ -11,6 +11,25 @@ import {
   ValidateIf,
 } from "class-validator";
 
+// FASE 1: valores válidos para dataConfidence
+export const DATA_CONFIDENCE_VALUES = [
+  "VERIFIED",
+  "HIGH",
+  "MEDIUM",
+  "LOW",
+  "UNKNOWN",
+] as const;
+export type DataConfidenceValue = (typeof DATA_CONFIDENCE_VALUES)[number];
+
+// FASE 1: estructura de orientation
+export type OrientationPayload = {
+  operationalMeaning: string;
+  legalRisk: string;
+  reputationalRisk: string;
+  orientedBy: string;
+  orientedAt: string;
+};
+
 export class CreateCaseDto {
   @IsString()
   @MinLength(1, { message: "summary no puede estar vacío" })
@@ -70,6 +89,16 @@ export class CreateCaseDto {
   @IsOptional()
   @IsArray()
   instructions?: Array<Record<string, unknown>>;
+
+  // FASE 1: nivel de confianza del dato
+  @IsOptional()
+  @IsIn(DATA_CONFIDENCE_VALUES)
+  dataConfidence?: DataConfidenceValue;
+
+  // FASE 1: orientación (3 dimensiones)
+  @IsOptional()
+  @IsObject()
+  orientation?: OrientationPayload;
 }
 
 // --- NUEVO: DTO para agregar eventos a un caso (append-only) ---

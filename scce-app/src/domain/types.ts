@@ -14,6 +14,67 @@ export type CaseStatus =
   | "Resuelto"
   | "Cerrado";
 
+// FASE 0: etapas del flujo decisional C2 (modelo v2)
+// FASE 1: nivel de confianza del dato
+export type DataConfidence =
+  | "VERIFIED"  // Confirmado por ≥2 fuentes independientes
+  | "HIGH"      // Una fuente confiable, sin contradicción
+  | "MEDIUM"    // Fuente única, no verificada
+  | "LOW"       // Rumor o reporte indirecto
+  | "UNKNOWN";  // No evaluado aún (default)
+
+export const DATA_CONFIDENCE_LABELS: Record<DataConfidence, string> = {
+  VERIFIED: "Verificado (≥2 fuentes)",
+  HIGH:     "Alto (fuente confiable)",
+  MEDIUM:   "Medio (sin verificar)",
+  LOW:      "Bajo (reporte indirecto)",
+  UNKNOWN:  "Sin evaluar",
+};
+
+export const DATA_CONFIDENCE_COLORS: Record<DataConfidence, string> = {
+  VERIFIED: "#22c55e",
+  HIGH:     "#84cc16",
+  MEDIUM:   "#eab308",
+  LOW:      "#f97316",
+  UNKNOWN:  "#9ca3af",
+};
+
+// FASE 1: estructura de orientación (etapa 3 del flujo C2)
+export type OrientationData = {
+  operationalMeaning: string;  // ¿Qué implica para la operación?
+  legalRisk: string;           // Riesgo jurídico (impugnación, nulidad)
+  reputationalRisk: string;    // Exposición mediática o ciudadana
+  orientedBy: string;          // membershipId o userId del analista
+  orientedAt: string;          // ISO timestamp
+};
+
+export type DecisionStage =
+  | "DETECTED"    // Etapa 1: ¿Qué ocurrió?
+  | "VALIDATED"   // Etapa 2: ¿Qué sabemos realmente?
+  | "ORIENTED"    // Etapa 3: ¿Qué significa?
+  | "CLASSIFIED"  // Etapa 4: ¿Cuál es la criticidad?
+  | "DECIDED"     // Etapa 5: ¿Se resuelve o escala?
+  | "EXECUTING"   // Etapa 6: ¿Quién hace qué?
+  | "VERIFIED"    // Etapa 7: ¿Funcionó?
+  | "CLOSED";     // Etapa 8: Cerrar o reescalar
+
+export const DECISION_STAGE_LABELS: Record<DecisionStage, string> = {
+  DETECTED:   "Detectado",
+  VALIDATED:  "Validado",
+  ORIENTED:   "Orientado",
+  CLASSIFIED: "Clasificado",
+  DECIDED:    "Decidido",
+  EXECUTING:  "En ejecución",
+  VERIFIED:   "Verificado",
+  CLOSED:     "Cerrado",
+};
+
+// Orden numérico de etapas para validar transiciones
+export const DECISION_STAGE_ORDER: Record<DecisionStage, number> = {
+  DETECTED: 1, VALIDATED: 2, ORIENTED: 3, CLASSIFIED: 4,
+  DECIDED: 5, EXECUTING: 6, VERIFIED: 7, CLOSED: 8,
+};
+
 export type Criticality = "CRITICA" | "ALTA" | "MEDIA" | "BAJA";
 
 /** Fase 3.5/3.8 — comentario libre, respuesta, o eventos formales del ciclo de instrucción */
@@ -95,6 +156,12 @@ export type CaseItem = {
   commune: string;
   status: CaseStatus;
   criticality: Criticality;
+  // FASE 0: etapa del flujo decisional C2
+  decisionStage?: DecisionStage;
+  // FASE 1: nivel de confianza del dato
+  dataConfidence?: DataConfidence;
+  // FASE 1: orientación (etapa 3 del flujo C2)
+  orientation?: OrientationData;
   summary: string;
   local?: string;
   localSnapshot?: { idLocal: string; nombre: string; region: string; commune: string; snapshotAt: string } | null;
@@ -144,6 +211,13 @@ export type LocalCatalogEntry = {
 };
 
 export type LocalCatalog = LocalCatalogEntry[];
+
+// ─── Configuración electoral ─────────────────────────────────────────────────
+export type ElectionConfig = {
+  name: string;
+  date: string;
+  year: number;
+};
 
 export type AuditLogEntry = {
   eventId: string;

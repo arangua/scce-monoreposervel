@@ -1,0 +1,23 @@
+﻿CONTROL STASH PREVIO — CHECKOUT A MAIN
+Fecha: 2026-03-13 13:40:32
+====================================================================================================
+1) Rama actual
+wip/after-build-green
+====================================================================================================
+2) Ultimo stash
+stash@{0}: On wip/after-build-green: pre-render/pre-checkout-main/2026-03-13
+====================================================================================================
+3) Estado corto del repo despues del stash
+ M api/prisma/schema.prisma
+ M api/prisma/seed.ts
+ M api/src/cases/cases.service.ts
+ M api/src/cases/dto.ts
+ M package-lock.json
+ M scce-app/package.json
+ M scce-app/src/App.tsx
+ M scce-app/src/domain/authSession.test.ts
+ M scce-app/src/domain/authSession.ts
+
+====================================================================================================
+4) Objetivo
+Dejar el arbol limpio, sin commit y de forma reversible, para poder cambiar a main con seguridad.
