@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, UseGuards, Req } from "@nestjs/common";
+import { Controller, Get, Post, Patch, Body, Param, UseGuards, Req } from "@nestjs/common";
 
 import { JwtAuthGuard } from "../auth/jwt.guard";
 import { ContextGuard } from "../auth/context.guard";
@@ -44,5 +44,21 @@ export class CasesController {
   ) {
     const userId = req.user?.userId ?? "";
     return this.cases.addEvent(id, ctx.contextType, ctx.contextId, userId, dto);
+  }
+
+  // FASE 3: avanzar etapa decisional C2
+  @Patch(":id/stage")
+  advanceStage(
+    @Param("id") id: string,
+    @Body() body: { stage: string; justification?: string },
+    @Ctx() ctx: ScceCtx,
+    @Req() req: AuthedRequest
+  ) {
+    const userId = req.user?.userId ?? "";
+    return this.cases.advanceStage(
+      id, ctx.contextType, ctx.contextId, userId,
+      body.stage as any,
+      body.justification,
+    );
   }
 }

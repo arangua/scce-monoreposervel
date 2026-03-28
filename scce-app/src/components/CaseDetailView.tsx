@@ -139,7 +139,27 @@ function CaseDetailContent({
     createInstruction,
     ackInstruction,
     closeInstruction,
+    advanceStage,
   } = useCases({ assignedCommuneEffective, assignedLocalIdEffective });
+
+  // FASE 3: estado local para el panel de etapa decisional
+  const STAGE_ORDER_LOCAL: Record<string, number> = {
+    DETECTED: 1, VALIDATED: 2, ORIENTED: 3, CLASSIFIED: 4,
+    DECIDED: 5, EXECUTING: 6, VERIFIED: 7, CLOSED: 8,
+  };
+  const STAGE_LABELS: Record<string, string> = {
+    DETECTED: "Detectado", VALIDATED: "Validado", ORIENTED: "Orientado",
+    CLASSIFIED: "Clasificado", DECIDED: "Decidido", EXECUTING: "En ejecución",
+    VERIFIED: "Verificado", CLOSED: "Cerrado",
+  };
+  const STAGE_COLORS: Record<string, string> = {
+    DETECTED: "#9ca3af", VALIDATED: "#60a5fa", ORIENTED: "#34d399",
+    CLASSIFIED: "#fbbf24", DECIDED: "#f97316", EXECUTING: "#a78bfa",
+    VERIFIED: "#22c55e", CLOSED: "#6b7280",
+  };
+  const [stageJust, setStageJust] = useState("");
+  const [showStageForm, setShowStageForm] = useState(false);
+  const [stageTarget, setStageTarget] = useState<string>("");
 
   const notify = (msg: string, type = "info") => {
     setNotification({ msg, type });
@@ -515,6 +535,87 @@ function CaseDetailContent({
                 </div>
               )}
             </div>
+            );
+          })()}
+
+          {/* FASE 3: Panel Etapa Decisional C2 */}
+          {!isOpView && canDo("recepcionar", currentUser, c) && (() => {
+            const currentStage = c.decisionStage ?? "DETECTED";
+            const currentOrder = STAGE_ORDER_LOCAL[currentStage] ?? 1;
+            const stageColor = STAGE_COLORS[currentStage] ?? "#9ca3af";
+            const nextStages = Object.entries(STAGE_ORDER_LOCAL)
+              .filter(([, order]) => order > currentOrder)
+              .sort(([, a], [, b]) => a - b);
+            return (
+              <div style={{ ...S.card, marginBottom: 8, border: `1px solid ${stageColor}44` }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                  <div style={{ color: themeColor("mutedAlt"), fontSize: "11px", fontWeight: 600 }}>C2 — ETAPA DECISIONAL</div>
+                  {!isClosed && (
+                    <button style={{ ...S.btn("dark"), fontSize: "10px", padding: "2px 8px" }} onClick={() => setShowStageForm(p => !p)}>
+                      {showStageForm ? "✕ Cancelar" : "▶ Avanzar"}
+                    </button>
+                  )}
+                </div>
+
+                {/* Barra de progreso de etapas */}
+                <div style={{ display: "flex", gap: 3, marginBottom: 8, flexWrap: "wrap" }}>
+                  {Object.entries(STAGE_ORDER_LOCAL).sort(([,a],[,b]) => a-b).map(([stage, order]) => (
+                    <div key={stage} style={{
+                      flex: 1, minWidth: 28, height: 6, borderRadius: 3,
+                      background: order <= currentOrder ? STAGE_COLORS[stage] : themeColor("border"),
+                      transition: "background 0.2s",
+                    }} title={STAGE_LABELS[stage]} />
+                  ))}
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", background: stageColor + "15", borderRadius: 4, marginBottom: 8 }}>
+                  <span style={{ width: 10, height: 10, borderRadius: "50%", background: stageColor, flexShrink: 0, display: "inline-block" }} />
+                  <span style={{ fontSize: "12px", color: themeColor("textSecondary") }}>Etapa actual:</span>
+                  <span style={{ fontWeight: 700, color: stageColor, fontSize: "12px" }}>
+                    {STAGE_ORDER_LOCAL[currentStage]}/8 — {STAGE_LABELS[currentStage]}
+                  </span>
+                </div>
+
+                {/* Formulario avance */}
+                {showStageForm && nextStages.length > 0 && (
+                  <div style={{ display: "grid", gap: 6, marginTop: 4 }}>
+                    <div>
+                      <label style={S.lbl}>Próxima etapa</label>
+                      <select style={S.inp} value={stageTarget} onChange={e => setStageTarget(e.target.value)}>
+                        <option value="">Seleccionar...</option>
+                        {nextStages.map(([stage]) => (
+                          <option key={stage} value={stage}>{STAGE_ORDER_LOCAL[stage]}/8 — {STAGE_LABELS[stage]}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={S.lbl}>Justificación *</label>
+                      <textarea
+                        style={{ ...S.inp, height: 48, resize: "vertical", fontSize: "12px" }}
+                        placeholder="Fundamento del avance de etapa..."
+                        value={stageJust}
+                        onChange={e => setStageJust(e.target.value)}
+                      />
+                    </div>
+                    <button
+                      style={{ ...S.btn("primary") }}
+                      disabled={!stageTarget || !stageJust.trim()}
+                      onClick={async () => {
+                        if (!stageTarget || !stageJust.trim()) return;
+                        await advanceStage(c.id, stageTarget as import("../domain/types").DecisionStage, stageJust);
+                        setShowStageForm(false);
+                        setStageJust("");
+                        setStageTarget("");
+                      }}
+                    >
+                      Registrar avance
+                    </button>
+                  </div>
+                )}
+                {showStageForm && nextStages.length === 0 && (
+                  <div style={{ fontSize: "12px", color: themeColor("mutedAlt"), fontStyle: "italic" }}>Etapa final alcanzada</div>
+                )}
+              </div>
             );
           })()}
 

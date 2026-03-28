@@ -238,6 +238,65 @@ export class CasesService {
     return events;
   }
 
+  // --- FASE 3: avanzar etapa decisional C2 ---
+  async advanceStage(
+    caseId: string,
+    contextType: ContextType,
+    contextId: string,
+    actorId: string,
+    targetStage: DecisionStage,
+    justification?: string,
+  ) {
+    const STAGE_ORDER: Record<DecisionStage, number> = {
+      DETECTED: 1, VALIDATED: 2, ORIENTED: 3, CLASSIFIED: 4,
+      DECIDED: 5, EXECUTING: 6, VERIFIED: 7, CLOSED: 8,
+    };
+
+    const c = await this.prisma.case.findFirst({ where: { id: caseId, contextType, contextId } });
+    if (!c) throw new NotFoundException("Caso no encontrado");
+    if (c.status === CaseStatus.CLOSED) throw new ConflictException("Caso cerrado");
+
+    const currentOrder = STAGE_ORDER[c.decisionStage] ?? 1;
+    const targetOrder  = STAGE_ORDER[targetStage];
+    if (!targetOrder) throw new ConflictException("Etapa inválida");
+    if (targetOrder <= currentOrder) {
+      throw new ConflictException(
+        `No se puede retroceder de ${c.decisionStage} a ${targetStage}`
+      );
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      // Actualizar etapa en el caso
+      const updated = await tx.case.update({
+        where: { id: caseId },
+        data: { decisionStage: targetStage, updatedAt: new Date() },
+      });
+
+      // Registrar evento inmutable
+      const last = await tx.event.findFirst({ where: { caseId }, orderBy: { createdAt: "desc" } });
+      const prevHash = last?.hash ?? "";
+      const createdAt = new Date();
+      const payloadJson = {
+        from: c.decisionStage,
+        to: targetStage,
+        ...(justification ? { justification } : {}),
+      };
+      const hash = computeEventHash({ prevHash, caseId, eventType: "STAGE_ADVANCED", payloadJson, createdAtIso: createdAt.toISOString() });
+
+      await tx.event.create({
+        data: {
+          caseId, contextType, contextId, actorId,
+          eventType: "STAGE_ADVANCED",
+          payloadJson: payloadJson as any,
+          prevHash: prevHash || null,
+          hash, createdAt,
+        },
+      });
+
+      return updated;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
+
   // --- agregar evento append-only (comentario / instrucción / cierre) ---
   async addEvent(
     caseId: string,

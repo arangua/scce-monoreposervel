@@ -629,6 +629,74 @@ export function useCases({
     notify("Instrucción cerrada", "success");
   }
 
+  // FASE 3: avanzar etapa decisional C2
+  async function advanceStage(
+    caseId: string,
+    targetStage: import("../domain/types").DecisionStage,
+    justification: string
+  ) {
+    if (!currentUser) return;
+    if (!justification.trim()) return notify("La justificación es obligatoria", "error");
+
+    const STAGE_ORDER: Record<string, number> = {
+      DETECTED: 1, VALIDATED: 2, ORIENTED: 3, CLASSIFIED: 4,
+      DECIDED: 5, EXECUTING: 6, VERIFIED: 7, CLOSED: 8,
+    };
+
+    const c = cases.find((x) => x.id === caseId);
+    if (!c) return;
+    const currentOrder = STAGE_ORDER[c.decisionStage ?? "DETECTED"] ?? 1;
+    const targetOrder  = STAGE_ORDER[targetStage];
+    if (!targetOrder || targetOrder <= currentOrder) {
+      return notify("Etapa inválida o retroceso no permitido", "error");
+    }
+
+    // Llamada a la API si hay sesión activa
+    const token = authToken;
+    const ctx = getActiveMembership();
+    if (token && ctx) {
+      const headers: Record<string, string> = {};
+      if (ctx.id) headers["x-scce-membership-id"] = ctx.id;
+      if (ctx.contextType) headers["x-scce-context-type"] = ctx.contextType;
+      if (ctx.contextId) headers["x-scce-context-id"] = ctx.contextId;
+      const res = await apiRequest<{ decisionStage: string }>(`/cases/${caseId}/stage`, {
+        method: "PATCH",
+        token,
+        body: { stage: targetStage, justification },
+        headers,
+      });
+      if (!res.ok) return notify(res.error || "Error al avanzar etapa", "error");
+    }
+
+    // Actualizar localmente
+    setCases((prev) =>
+      prev.map((x) =>
+        x.id !== caseId
+          ? x
+          : ({
+              ...x,
+              decisionStage: targetStage,
+              timeline: [
+                ...(x.timeline ?? []),
+                {
+                  eventId: newEventId("ev"),
+                  type: "STAGE_ADVANCED",
+                  at: nowISO(),
+                  actor: currentUser.id,
+                  note: `Etapa → ${targetStage}: ${justification.slice(0, 80)}`,
+                },
+              ],
+              updatedAt: nowISO(),
+            } as import("../domain/types").CaseItem)
+      )
+    );
+    setAuditLog((prev) =>
+      appendEvent(prev, "COMMENT_ADDED", currentUser.id, currentUser.role, caseId,
+        `Etapa C2 → ${targetStage}: ${justification.slice(0, 60)}`)
+    );
+    notify(`Etapa avanzada → ${targetStage}`, "success");
+  }
+
   return {
     submitCase,
     recepcionar,
@@ -646,5 +714,6 @@ export function useCases({
     createInstruction,
     ackInstruction,
     closeInstruction,
+    advanceStage,
   };
 }
