@@ -27,9 +27,9 @@ export function makeSeedCases(catalog: LocalCatalog): CaseItem[] {
 
   return [
     {
-      id: genId("TRP","IQQ",1),
-      region: "TRP", commune: "IQQ", local: "Liceo Arturo Pérez Canto",
-      localSnapshot: snap("TRP","IQQ","Liceo Arturo Pérez Canto"),
+      id: genId("01","01101",1),
+      region: "01", commune: "01101", local: "Liceo Arturo Pérez Canto",
+      localSnapshot: snap("01","01101","Liceo Arturo Pérez Canto"),
       origin: { actor:"PESE Local", channel:"Teams", detectedAt:tsISO(95) },
       summary: "Urna sellada de forma incorrecta — sello roto en mesa 12",
       detail: "El vocal de mesa reporta precinto roto.",
@@ -52,9 +52,9 @@ export function makeSeedCases(catalog: LocalCatalog): CaseItem[] {
       createdBy: "u1", createdAt: tsISO(95), updatedAt: tsISO(85),
     },
     {
-      id: genId("TRP","IQQ",2),
-      region: "TRP", commune: "IQQ", local: "Escuela Alemania",
-      localSnapshot: snap("TRP","IQQ","Escuela Alemania"),
+      id: genId("01","01101",2),
+      region: "01", commune: "01101", local: "Escuela Alemania",
+      localSnapshot: snap("01","01101","Escuela Alemania"),
       origin: { actor:"Delegado JE", channel:"WhatsApp", detectedAt:tsISO(130) },
       summary: "Vocal de mesa no se presenta — 40 min tras apertura",
       detail: "Mesa 5 abre con solo 2 vocales.",
@@ -78,9 +78,9 @@ export function makeSeedCases(catalog: LocalCatalog): CaseItem[] {
       createdBy: "u2", createdAt: tsISO(130), updatedAt: tsISO(80),
     },
     {
-      id: genId("TRP","ALH",3),
-      region: "TRP", commune: "ALH", local: "Liceo Altiplano",
-      localSnapshot: snap("TRP","ALH","Liceo Altiplano"),
+      id: genId("01","01107",3),
+      region: "01", commune: "01107", local: "Liceo Altiplano",
+      localSnapshot: snap("01","01107","Liceo Altiplano"),
       origin: { actor:"DR Eventual", channel:"Teléfono", detectedAt:tsISO(200) },
       summary: "CRÍTICO: Corte de luz total en local de votación",
       detail: "8 mesas afectadas.",
@@ -112,10 +112,10 @@ export function makeSeedAudit(): AuditLogEntry[] {
   return buildSeedLog([
     { type:"LOGIN",        at:tsISO(210), actor:"u7", role:"DIRECTOR_REGIONAL", caseId:null,                summary:"Inicio de sesión" },
     { type:"LOGIN",        at:tsISO(209), actor:"u4", role:"REGISTRO_SCCE",     caseId:null,                summary:"Inicio de sesión" },
-    { type:"CASE_CREATED", at:tsISO(200), actor:"u3", role:"DR_EVENTUAL",       caseId:genId("TRP","ALH",3),summary:"Caso: corte de luz" },
-    { type:"BYPASS_USED",  at:tsISO(198), actor:"u7", role:"DIRECTOR_REGIONAL", caseId:genId("TRP","ALH",3),summary:"Bypass: continuidad=3" },
-    { type:"ESCALATED",    at:tsISO(195), actor:"u7", role:"DIRECTOR_REGIONAL", caseId:genId("TRP","ALH",3),summary:"Escalado a Nivel Central" },
-    { type:"CASE_CREATED", at:tsISO(130), actor:"u2", role:"DELEGADO_JE",       caseId:genId("TRP","IQQ",2),summary:"Caso: vocal ausente" },
-    { type:"CASE_CREATED", at:tsISO(95),  actor:"u1", role:"PESE",              caseId:genId("TRP","IQQ",1),summary:"Caso: urna precinto" },
+    { type:"CASE_CREATED", at:tsISO(200), actor:"u3", role:"DR_EVENTUAL",       caseId:genId("01","01107",3),summary:"Caso: corte de luz" },
+    { type:"BYPASS_USED",  at:tsISO(198), actor:"u7", role:"DIRECTOR_REGIONAL", caseId:genId("01","01107",3),summary:"Bypass: continuidad=3" },
+    { type:"ESCALATED",    at:tsISO(195), actor:"u7", role:"DIRECTOR_REGIONAL", caseId:genId("01","01107",3),summary:"Escalado a Nivel Central" },
+    { type:"CASE_CREATED", at:tsISO(130), actor:"u2", role:"DELEGADO_JE",       caseId:genId("01","01101",2),summary:"Caso: vocal ausente" },
+    { type:"CASE_CREATED", at:tsISO(95),  actor:"u1", role:"PESE",              caseId:genId("01","01101",1),summary:"Caso: urna precinto" },
   ]);
 }

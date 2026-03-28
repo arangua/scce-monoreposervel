@@ -9,7 +9,7 @@ import {
   type PolicyUser,
 } from "./domain/policyEngine";
 import { genId, calcCriticality, normalizeStatus, SIM_SCENARIOS } from "./domain/caseUtils";
-import { CONFIG_REGIONS, buildCatalogSeed, getActiveLocals, catalogSelfCheck } from "./domain/catalog";
+import { CONFIG_REGIONS, buildCatalogSeed, buildCatalogDemo, getActiveLocals, catalogSelfCheck } from "./domain/catalog";
 import { makeSeedCases, makeSeedAudit } from "./domain/seed";
 import { fmtDate, nowISO, tsISO, nowLocalDatetimeInput } from "./domain/date";
 import { checkLocalDivergence } from "./domain/localDivergence";
@@ -67,7 +67,7 @@ type User = PolicyUser;
 
 // CONFIG delegado a domain/catalog.ts (CONFIG_REGIONS)
 const CONFIG = { regions: CONFIG_REGIONS };
-const DEFAULT_REGION = "TRP";
+const DEFAULT_REGION = "01"; // Tarapacá — código CUT oficial
 
 /** Misma lógica que DashboardView — filtro TerrainShell / terreno. */
 function getCaseLocalIdSafe(
@@ -414,7 +414,7 @@ export default function App(){
   }, [isCentral, activeRegion]);
 
   function doReset(){
-    const cat=buildCatalogSeed();
+    const cat=buildCatalogDemo();
     const y=Math.max(new Date().getFullYear(),MIN_ELECTION_YEAR);
     clearSession();
     setAuthToken(null);

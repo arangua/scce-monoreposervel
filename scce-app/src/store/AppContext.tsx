@@ -41,7 +41,7 @@ import {
 import { type OperationMode } from "../domain/caseSla";
 import { type PolicyUser } from "../domain/policyEngine";
 import { type ViewKey } from "../helpContent";
-import { buildCatalogSeed } from "../domain/catalog";
+import { buildCatalogSeed, buildCatalogDemo } from "../domain/catalog";
 import { makeSeedCases, makeSeedAudit } from "../domain/seed";
 
 // ─── Tipos auxiliares ────────────────────────────────────────────────────────
@@ -253,20 +253,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // El seed solo aplica en modo demo (sin token), para que la demo funcione offline.
   const [cases, setCases] = useState<CaseItem[]>(() => {
     if (getToken()) return [];
-    const cat = buildCatalogSeed();
+    const cat = buildCatalogDemo();
     return makeSeedCases(cat);
   });
   const [auditLog, setAuditLog] = useState<AuditLogEntry[]>(() => makeSeedAudit());
   const [selectedCase, setSelectedCase] = useState<CaseItem | null>(null);
 
   // Catálogo
-  const [localCatalog, setLocalCatalog] = useState<LocalCatalog>(() => buildCatalogSeed());
+  const [localCatalog, setLocalCatalog] = useState<LocalCatalog>(() => buildCatalogDemo());
 
   // Configuración electoral
   const [electionConfig, setElectionConfig] = useState<ElectionConfig>(defaultElectionConfig);
 
-  // Región activa
-  const [activeRegion, setActiveRegion] = useState("TRP");
+  // Región activa — código CUT oficial Tarapacá
+  const [activeRegion, setActiveRegion] = useState("01");
 
   // Navegación
   const [view, setView] = useState<ViewKey>("dashboard");

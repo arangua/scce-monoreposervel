@@ -180,9 +180,11 @@ export function ClosedOverlay() {
 
 // ── Helpers de nombre ─────────────────────────────────────────────────────
 function regionNombre(regionCode: string): string {
+  if (!regionCode) return "—";
   return (CONFIG.regions as Record<string, { name?: string }>)[regionCode]?.name || regionCode;
 }
 function comunaNombre(regionCode: string, communeCode: string): string {
+  if (!communeCode) return "—";
   return (
     (CONFIG.regions as Record<string, { communes?: Record<string, { name?: string }> }>)[regionCode]
       ?.communes?.[communeCode]?.name || communeCode
@@ -195,9 +197,12 @@ export function CaseCard({ c, onClick }: { c: CaseItem; onClick: () => void }) {
   const { recepcionar } = useCases({ assignedCommuneEffective: "", assignedLocalIdEffective: null });
   const div = checkLocalDivergence(c, localCatalog);
 
-  const regNombre  = regionNombre(c.region);
-  const comNombre  = comunaNombre(c.region, c.commune);
-  const critLabel  = CRIT_LABEL[c.criticality] ?? c.criticality;
+  // Soporte para casos que usan regionCode en lugar de region
+  const regionCode = (c as { regionCode?: string }).regionCode || c.region || "";
+  const regNombre  = regionNombre(regionCode);
+  const comNombre  = comunaNombre(regionCode, c.commune);
+  // CRIT_LABEL normaliza valores conocidos; valores desconocidos se muestran tal cual
+  const critLabel  = CRIT_LABEL[c.criticality] ?? c.criticality ?? "Sin clasificar";
   const statusLabel =
     normalizeStatus(c.status) === "Otros / Desconocido"
       ? String(c.status)

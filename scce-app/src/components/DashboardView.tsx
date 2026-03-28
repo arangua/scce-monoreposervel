@@ -7,7 +7,7 @@
  */
 import React, { useMemo } from "react";
 import type { CaseItem, CaseStatus } from "../domain/types";
-import { critColor, statusColor, normalizeStatus } from "../domain/caseUtils";
+import { critColor, statusColor, normalizeStatus, sortByUrgency, urgencyScore } from "../domain/caseUtils";
 import { canDo } from "../domain/policyEngine";
 import { checkLocalDivergence } from "../domain/localDivergence";
 import { isCentralFromContext, getActiveMembership } from "../domain/authSession";
@@ -480,7 +480,7 @@ export function DashboardView() {
         </div>
       )}
 
-      {/* Lista de casos */}
+      {/* Lista de casos — ordenada por urgencia operacional */}
       {crisisMode ? (
         <div>
           <div style={{ color: themeColor("danger"), fontWeight: 700, marginBottom: 8 }}>
@@ -530,67 +530,48 @@ export function DashboardView() {
               </div>
             ))}
         </div>
-      ) : (
-        <div>
-          {KNOWN_STATUSES.map((st) => {
-            const bucket = visibleCases.filter((c) => normalizeStatus(c.status) === st);
-            if (!bucket.length) return null;
-            return (
-              <div key={st} style={{ marginBottom: 10 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
-                  <div
-                    style={{
-                      width: 8,
-                      height: 8,
-                      borderRadius: "50%",
-                      background: statusColor(st as CaseStatus),
-                    }}
-                  />
-                  <span
-                    style={{
-                      fontWeight: 600,
-                      fontSize: "12px",
-                      color: themeColor("mutedAlt"),
-                    }}
-                  >
-                    {st} ({bucket.length})
-                  </span>
-                </div>
-                {bucket.map((c) => (
-                  <CaseCard key={c.id} c={c} onClick={() => openCase(c)} />
-                ))}
-              </div>
-            );
-          })}
-          {(() => {
-            const unknownCases = visibleCases.filter(
-              (c) => normalizeStatus(c.status) === "Otros / Desconocido"
-            );
-            if (!unknownCases.length) return null;
-            return (
-              <div style={{ marginBottom: 10 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
-                  <div
-                    style={{ width: 8, height: 8, borderRadius: "50%", background: themeColor("muted") }}
-                  />
-                  <span style={{ fontWeight: 600, fontSize: "12px", color: themeColor("mutedAlt") }}>
-                    Otros / Desconocido ({unknownCases.length})
-                  </span>
-                </div>
-                {unknownCases.map((c) => (
-                  <CaseCard key={c.id} c={c} onClick={() => openCase(c)} />
-                ))}
-              </div>
-            );
-          })()}
-          {visibleCases.length === 0 && (
-            <div style={{ ...S.card, padding: 10, opacity: 0.85 }}>
-              No hay casos para los filtros actuales
-              {filterState.region ? ` (Region: ${filterState.region})` : ""}.
+      ) : (() => {
+          if (visibleCases.length === 0) return (
+            <div style={{ ...S.card, padding: 16, color: "var(--text-muted)", textAlign: "center" as const }}>
+              Sin incidentes para los filtros actuales.
             </div>
-          )}
-        </div>
-      )}
+          );
+          const now = Date.now();
+          const sorted = sortByUrgency(visibleCases);
+          const grupos = [
+            { id: "critico-vencido", label: "CRÍTICO — tiempo vencido",  dot: "var(--danger)",   labelColor: "var(--danger)",   test: (s: number) => s >= 100 },
+            { id: "alto-vencido",    label: "ALTO — tiempo vencido",    dot: "var(--warning)",  labelColor: "var(--warning)", test: (s: number) => s >= 80 && s < 100 },
+            { id: "critico",         label: "CRÍTICO",                  dot: "var(--danger)",   labelColor: "var(--danger)",   test: (s: number) => s >= 60 && s < 80 },
+            { id: "alto",            label: "ALTA PRIORIDAD",           dot: "var(--warning)",  labelColor: "var(--warning)", test: (s: number) => s >= 40 && s < 60 },
+            { id: "medio",           label: "PRIORIDAD MEDIA",          dot: "var(--primary)",  labelColor: "var(--text-secondary)", test: (s: number) => s >= 20 && s < 40 },
+            { id: "bajo",            label: "PRIORIDAD BAJA",           dot: "var(--success)",  labelColor: "var(--text-muted)", test: (s: number) => s > 0 && s < 20 },
+            { id: "cerrado",         label: "CERRADOS Y RESUELTOS",     dot: "var(--text-muted)", labelColor: "var(--text-muted)", test: (s: number) => s === 0 },
+          ];
+          return (
+            <div>
+              {grupos.map(grupo => {
+                const bucket = sorted.filter(c => grupo.test(urgencyScore(c, now)));
+                if (!bucket.length) return null;
+                return (
+                  <div key={grupo.id} style={{ marginBottom: 14 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, paddingBottom: 4, borderBottom: "1px solid var(--border)" }}>
+                      <div style={{ width: 8, height: 8, borderRadius: "50%", background: grupo.dot, flexShrink: 0 }} />
+                      <span style={{ fontSize: "11px", fontWeight: 700, color: grupo.labelColor, textTransform: "uppercase" as const, letterSpacing: "0.05em" }}>
+                        {grupo.label}
+                      </span>
+                      <span style={{ fontSize: "10px", color: "var(--text-muted)", background: "var(--bg-surface-2)", borderRadius: 10, padding: "1px 8px" }}>
+                        {bucket.length}
+                      </span>
+                    </div>
+                    {bucket.map(c => <CaseCard key={c.id} c={c} onClick={() => openCase(c)} />)}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()
+      }
+
     </div>
   );
 }

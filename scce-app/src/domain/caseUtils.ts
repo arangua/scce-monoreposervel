@@ -141,3 +141,80 @@ export const SIM_SCENARIOS = [
   { summary: "Periodista sin credencial",      ev: { continuidad: 0, integridad: 1, seguridad: 0, exposicion: 2, capacidadLocal: 2 } },
   { summary: "Amenaza de bomba",               ev: { continuidad: 3, integridad: 2, seguridad: 3, exposicion: 3, capacidadLocal: 0 } },
 ] as const;
+
+// ─── Ordenamiento operacional de casos ─────────────────────────────────
+
+/**
+ * Puntaje de urgencia operacional.
+ * Mayor puntaje = aparece primero en el panel.
+ *
+ * Grupos (de mayor a menor):
+ * 100+ : SLA vencido + CRÍTICA
+ *  80+ : SLA vencido + ALTA
+ *  60+ : CRÍTICA sin vencer
+ *  40+ : ALTA sin vencer
+ *  20+ : MEDIA
+ *  10+ : BAJA
+ *   0  : Resuelto / Cerrado (siempre al final)
+ *
+ * Bonus por antigüedad (+0 a +9): más tiempo sin resolver = sube en su grupo.
+ * Bonus por alcance de impacto (+1 a +5): REGIONAL/NACIONAL suben más.
+ */
+export function urgencyScore(
+  c: {
+    criticality: string;
+    status: string;
+    slaMinutes?: number | null;
+    createdAt?: string | null;
+    reportedAt?: string | null;
+    impactScope?: string | null;
+  },
+  nowMs = Date.now()
+): number {
+  const st = normalizeStatus(c.status);
+  if (st === "Resuelto" || st === "Cerrado") return 0;
+
+  const slaMs    = (c.slaMinutes ?? 60) * 60_000;
+  const since    = new Date(c.createdAt ?? c.reportedAt ?? nowMs).getTime();
+  const elapsed  = nowMs - since;
+  const vencido  = elapsed > slaMs;
+
+  const base =
+    c.criticality === "CRITICA" && vencido ? 100 :
+    c.criticality === "ALTA"    && vencido ?  80 :
+    c.criticality === "CRITICA"            ?  60 :
+    c.criticality === "ALTA"               ?  40 :
+    c.criticality === "MEDIA"              ?  20 : 10;
+
+  // Bonus por antigüedad dentro del grupo (0–9): primeras 48 h
+  const ageBonus = Math.min(elapsed / 3_600_000, 48) / 48 * 9;
+
+  // Bonus por alcance del impacto
+  const scopeBonus =
+    c.impactScope === "NACIONAL" ? 5 :
+    c.impactScope === "REGIONAL" ? 3 :
+    c.impactScope === "COMUNAL"  ? 1 : 0;
+
+  return base + ageBonus + scopeBonus;
+}
+
+/** Ordena casos por urgencia descendente. Casos cerrados van al final. */
+export function sortByUrgency<T extends {
+  criticality: string;
+  status: string;
+  slaMinutes?: number | null;
+  createdAt?: string | null;
+  reportedAt?: string | null;
+  impactScope?: string | null;
+}>(cases: T[]): T[] {
+  const now = Date.now();
+  return [...cases].sort((a, b) => {
+    const sa = urgencyScore(a, now);
+    const sb = urgencyScore(b, now);
+    if (sa !== sb) return sb - sa;
+    // Empate: más antiguo primero (lleva más tiempo sin resolver)
+    const ta = new Date(a.createdAt ?? "").getTime() || 0;
+    const tb = new Date(b.createdAt ?? "").getTime() || 0;
+    return ta - tb;
+  });
+}
