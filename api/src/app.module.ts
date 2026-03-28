@@ -8,9 +8,10 @@ import { ContextsController } from "./contexts.controller";
 import { SystemController } from "./system.controller";
 import { CasesModule } from "./cases/cases.module";
 import { AdminModule } from "./admin/admin.module";
+import { CatalogModule } from "./catalog/catalog.module";
 
 @Module({
-  imports: [PrismaModule, AuthModule, CasesModule, AdminModule],
+  imports: [PrismaModule, AuthModule, CasesModule, AdminModule, CatalogModule],
   controllers: [AppController, HealthController, ContextsController, SystemController],
   providers: [AppService],
 })

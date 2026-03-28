@@ -242,3 +242,28 @@ model Province {
 
   @@index([regionId])
 }
+
+// Catálogo de locales de votación — Opción B (persistencia backend)
+// Cada DR carga su Excel y queda persistido por contexto y región.
+// Reemplaza la solución provisional de localStorage.
+model VotingLocal {
+  id                     String      @id @default(cuid())
+  contextType            ContextType
+  contextId              String
+  regionCode             String
+  communeCode            String
+  nombre                 String
+  direccion              String?
+  mesas                  Int?
+  activoGlobal           Boolean     @default(true)
+  activoEnEleccionActual Boolean     @default(true)
+  origenSeed             Boolean     @default(false)
+  fechaCreacion          DateTime    @default(now())
+  fechaDesactivacion     DateTime?
+  createdBy              String      @default("")
+  updatedAt              DateTime    @updatedAt
+
+  @@index([contextType, contextId])
+  @@index([regionCode, communeCode])
+  @@index([activoGlobal, activoEnEleccionActual])
+}
